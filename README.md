@@ -37,8 +37,9 @@ On Windows, install Visual Studio 2017. Community edition is OK.
 
 ## Checkout source
 
-Public version is not available yet.
-
+```
+$ git clone https://chromium.googlesource.com/infra/goma/client
+```
 
 We assume goma is checked out to `$GOMA_SRC`.
 
