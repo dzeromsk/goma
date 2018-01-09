@@ -1,0 +1,71 @@
+#!/usr/bin/env python
+
+# Dummy clang program for testing compiler_info behavior.
+# This is implemented to check misuse of real compiler.
+# (b/63874437)
+
+import os
+import re
+import sys
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FEATURE_CHECK_PATTERN = re.compile(r'#(\d+)')
+
+def DumpVersion():
+  print '5.0.0'
+
+def Version():
+  print """Goma clang version 5.0.0 (based on LLVM 5.0.0)
+Target: x86_64-pc-linux-gnu
+Thread model: posix
+"""
+
+def IncludeFiles():
+  print """Goma fake clang version 5.0.0
+Target: x86_64-linux-gnu
+Thread model: posix
+InstalledDir: %(installed)s
+ "%(installed)s/clang.dontexec" -cc1 "-triple x86_64-linux-gnu" -o - -x c
+#include "..." search starts here:
+#include <...> search starts here:
+%(installed)s
+End of search list.
+""" % {'installed': BASE_DIR}
+
+def DumpMachine():
+  print 'x86_64-pc-linux-gnu'
+
+def PredefinedMacros():
+  print '#define dummy'
+
+def HandleFeatures(argv):
+  with open(argv[len(argv) - 1]) as f:
+    prev_num = ''
+    for line in f.readlines():
+      matched = FEATURE_CHECK_PATTERN.match(line)
+      if matched:
+        if prev_num == matched.group(1):
+          continue
+        print '# %s' % matched.group(1)
+        print '0'
+        prev_num = matched.group(1)
+
+def GetSubprograms():
+  IncludeFiles()
+
+if '-E' in sys.argv and '-v' in sys.argv:
+  IncludeFiles()
+if '-E' in sys.argv and '-dM' in sys.argv:
+  PredefinedMacros()
+elif '-E' in sys.argv:
+  HandleFeatures(sys.argv)
+elif '-dumpmachine' in sys.argv:
+  DumpMachine()
+elif '-dumpversion' in sys.argv:
+  DumpVersion()
+elif '--version' in sys.argv:
+  Version()
+elif '-c' in sys.argv and '-v' in sys.argv:
+  GetSubprograms()
+else:
+  raise Exception('Unknown option %s' % sys.argv)

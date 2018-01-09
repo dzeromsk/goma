@@ -1,0 +1,1769 @@
+# Copyright 2014 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+proto_out_dir = "prototmp"
+generate_compiler_proxy_info = "generate_compiler_proxy_info.py"
+generate_static_darray = "generate_static_darray.py"
+
+import("//testing/libfuzzer/fuzzer_test.gni")
+import("//third_party/protobuf/proto_library.gni")
+
+group("client") {
+  deps = [
+    ":calc_sha256_checksum",
+    ":compiler_proxy",
+    ":goma_fetch",
+    ":gomacc",
+  ]
+}
+
+static_library("common") {
+  sources = [
+    "atomic_stats_counter.cc",
+    "atomic_stats_counter.h",
+    "autolock_timer.cc",
+    "autolock_timer.h",
+    "callback.h",
+    "counterz.cc",
+    "counterz.h",
+    "env_flags.cc",
+    "env_flags.h",
+    "file_id.cc",
+    "file_id.h",
+    "goma_flags.cc",
+    "goma_ipc_addr.cc",
+    "goma_ipc_addr.h",
+    "goma_ipc_peer.cc",
+    "goma_ipc_peer.h",
+    "json_util.cc",
+    "json_util.h",
+    "machine_info.cc",
+    "machine_info.h",
+    "mypath.cc",
+    "mypath.h",
+    "oauth2.cc",
+    "oauth2.h",
+    "simple_timer.cc",
+    "simple_timer.h",
+    "spawner.h",
+    "subprocess.cc",
+    "subprocess.h",
+    "timestamp.cc",
+    "timestamp.h",
+    "util.cc",
+    "util.h",
+  ]
+  include_dirs = [ "." ]
+  deps = [
+    "//base",
+    "//lib",
+    "//third_party:glog",
+    "//third_party/chromium_base:cpu",
+    "//third_party/chromium_base:string",
+    "//third_party/jsoncpp",
+  ]
+  if (os == "win") {
+    sources += [
+      "filetime_win.cc",
+      "filetime_win.h",
+      "gettimeofday_helper_win.cc",
+      "gettimeofday_helper_win.h",
+      "named_pipe_client_win.cc",
+      "named_pipe_client_win.h",
+      "named_pipe_win.cc",
+      "named_pipe_win.h",
+      "posix_helper_win.cc",
+      "posix_helper_win.h",
+      "simple_timer_win.cc",
+      "spawner_win.cc",
+      "spawner_win.h",
+    ]
+  } else {
+    sources += [
+      "spawner_posix.cc",
+      "spawner_posix.h",
+    ]
+  }
+
+  if (os == "linux") {
+    sources += [ "simple_timer_linux.cc" ]
+    libs = [ "rt" ]
+  }
+  if (os == "mac") {
+    sources += [ "simple_timer_mac.cc" ]
+  }
+}
+
+proto_library("compiler_info_data_proto") {
+  sources = [
+    "compiler_info_data.proto",
+  ]
+}
+
+proto_library("deps_cache_proto") {
+  sources = [
+    "deps_cache_data.proto",
+  ]
+}
+
+proto_library("error_notice") {
+  sources = [
+    "error_notice.proto",
+  ]
+}
+
+proto_library("local_output_cache_proto") {
+  sources = [
+    "local_output_cache_data.proto",
+  ]
+}
+
+proto_library("subprocess_proto") {
+  sources = [
+    "subprocess.protodevel",
+  ]
+}
+
+proto_library("settings_proto") {
+  sources = [
+    "settings.proto",
+  ]
+}
+
+config("include_target_gen_dir") {
+  include_dirs = [ "$target_gen_dir" ]
+}
+
+action("gen_compiler_proxy_info") {
+  script = generate_compiler_proxy_info
+  outputs = [
+    "$target_gen_dir/compiler_proxy_info.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+  ]
+  public_configs = [ ":include_target_gen_dir" ]
+}
+
+action("gen_cpp_parser_darray") {
+  script = generate_static_darray
+  outputs = [
+    "$target_gen_dir/cpp_parser_darray.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+  ]
+  public_configs = [ ":include_target_gen_dir" ]
+}
+
+static_library("gomacc_lib") {
+  sources = [
+    "goma_ipc.cc",
+    "goma_ipc.h",
+    "gomacc_argv.cc",
+    "gomacc_argv.h",
+    "gomacc_common.cc",
+    "gomacc_common.h",
+
+    # generated files.
+    "$target_gen_dir/compiler_proxy_info.h",
+  ]
+  deps = [
+    ":common",
+    ":gen_compiler_proxy_info",
+    ":ioutil_lib",
+    "//lib",
+    "//third_party:glog",
+    "//third_party/protobuf:protobuf_lite",
+  ]
+  include_dirs = [ "." ]
+  if (os == "linux") {
+    sources += [
+      "cros_util.cc",
+      "cros_util.h",
+    ]
+  }
+}
+
+config("compiler_proxy_config") {
+  if (os == "linux") {
+    defines = [ "USE_EPOLL" ]
+  } else if (os == "mac" || os == "freebsd") {
+    defines = [ "USE_KQUEUE" ]
+  }
+}
+
+static_library("compiler_proxy_lib") {
+  libs = []
+  sources = [
+    "arfile.cc",
+    "arfile.h",
+    "arfile_reader.cc",
+    "arfile_reader.h",
+    "auto_updater.cc",
+    "auto_updater.h",
+    "cache_file.cc",
+    "cache_file.h",
+    "compilation_database_reader.cc",
+    "compilation_database_reader.h",
+    "compile_service.cc",
+    "compile_service.h",
+    "compile_stats.cc",
+    "compile_stats.h",
+    "compile_task.cc",
+    "compile_task.h",
+    "compiler_flags_util.cc",
+    "compiler_flags_util.h",
+    "compiler_info.cc",
+    "compiler_info.h",
+    "compiler_info_cache.cc",
+    "compiler_info_cache.h",
+    "compiler_proxy_histogram.cc",
+    "compiler_proxy_histogram.h",
+    "content.cc",
+    "content.h",
+    "content_cursor.cc",
+    "content_cursor.h",
+    "deps_cache.cc",
+    "deps_cache.h",
+    "descriptor_poller.cc",
+    "descriptor_poller.h",
+    "descriptor_poller_epoll.cc",
+    "descriptor_poller_kqueue.cc",
+    "descriptor_poller_select.cc",
+    "file_hash_cache.cc",
+    "file_hash_cache.h",
+    "file_id_cache.cc",
+    "file_id_cache.h",
+    "filename_id_table.cc",
+    "filename_id_table.h",
+    "framework_path_resolver.cc",
+    "framework_path_resolver.h",
+    "goma_file_dump.cc",
+    "goma_file_dump.h",
+    "goma_file_http.cc",
+    "goma_file_http.h",
+    "goma_init.cc",
+    "goma_init.h",
+    "hash_rewrite_parser.cc",
+    "hash_rewrite_parser.h",
+    "histogram.cc",
+    "histogram.h",
+    "http.cc",
+    "http.h",
+    "http_init.cc",
+    "http_init.h",
+    "http_rpc.cc",
+    "http_rpc.h",
+    "http_rpc_init.cc",
+    "http_rpc_init.h",
+    "include_cache.cc",
+    "include_cache.h",
+    "jar_parser.cc",
+    "jar_parser.h",
+    "jarfile_reader.cc",
+    "jarfile_reader.h",
+    "library_path_resolver.cc",
+    "library_path_resolver.h",
+    "linked_unordered_map.h",
+    "linker_input_processor.cc",
+    "linker_input_processor.h",
+    "linker_script_parser.cc",
+    "linker_script_parser.h",
+    "log_cleaner.cc",
+    "log_cleaner.h",
+    "log_service_client.cc",
+    "log_service_client.h",
+    "luci_context.cc",
+    "luci_context.h",
+    "multi_http_rpc.cc",
+    "multi_http_rpc.h",
+    "oauth2_token.cc",
+    "oauth2_token.h",
+    "openssl_engine.cc",
+    "openssl_engine.h",
+    "rand_util.cc",
+    "rand_util.h",
+    "scoped_tmp_file.cc",
+    "scoped_tmp_file.h",
+    "settings.cc",
+    "settings.h",
+    "sha256hash_hasher.h",
+    "socket_descriptor.cc",
+    "socket_descriptor.h",
+    "socket_pool.cc",
+    "socket_pool.h",
+    "subprocess_controller.cc",
+    "subprocess_controller.h",
+    "subprocess_controller_client.cc",
+    "subprocess_controller_client.h",
+    "subprocess_controller_server.cc",
+    "subprocess_controller_server.h",
+    "subprocess_impl.cc",
+    "subprocess_impl.h",
+    "subprocess_option_setter.cc",
+    "subprocess_option_setter.h",
+    "subprocess_task.cc",
+    "subprocess_task.h",
+    "threadpool_http_server.cc",
+    "threadpool_http_server.h",
+    "tls_descriptor.cc",
+    "tls_descriptor.h",
+    "trustedipsmanager.cc",
+    "trustedipsmanager.h",
+    "watchdog.cc",
+    "watchdog.h",
+    "worker_thread.cc",
+    "worker_thread.h",
+    "worker_thread_manager.cc",
+    "worker_thread_manager.h",
+
+    # generated files.
+    "$target_gen_dir/compiler_proxy_info.h",
+    "$target_gen_dir/resources/compiler_proxy_contentionz_script.c",
+    "$target_gen_dir/resources/compiler_proxy_contentionz_script.h",
+    "$target_gen_dir/resources/compiler_proxy_status_html5.c",
+    "$target_gen_dir/resources/compiler_proxy_status_html5.h",
+    "$target_gen_dir/resources/compiler_proxy_status_script.c",
+    "$target_gen_dir/resources/compiler_proxy_status_script.h",
+    "$target_gen_dir/resources/compiler_proxy_status_style.c",
+    "$target_gen_dir/resources/compiler_proxy_status_style.h",
+    "$target_gen_dir/resources/compilerz_html.c",
+    "$target_gen_dir/resources/compilerz_html.h",
+    "$target_gen_dir/resources/compilerz_script.c",
+    "$target_gen_dir/resources/compilerz_script.h",
+    "$target_gen_dir/resources/compilerz_style.c",
+    "$target_gen_dir/resources/compilerz_style.h",
+
+  ]
+  include_dirs = [ "." ]
+  deps = [
+    ":compiler_info_data_proto",
+    ":deps_cache_proto",
+    ":error_notice",
+    ":jwt_lib",
+    ":local_output_cache_proto",  # for compile_task
+    ":settings_proto",
+    ":subprocess_proto",
+    "//third_party:minizip",
+    "//third_party/boringssl",
+    "//third_party/jsoncpp",
+    "//third_party/protobuf:protobuf_lite",
+  ]
+  public_deps = [
+    ":common",
+    ":gen_compiler_proxy_info",
+    ":subprocess_proto",
+    "//client/resources:gen_compiler_proxy_contentionz_script",
+    "//client/resources:gen_compiler_proxy_status_html5",
+    "//client/resources:gen_compiler_proxy_status_script",
+    "//client/resources:gen_compiler_proxy_status_style",
+    "//client/resources:gen_compilerz_html",
+    "//client/resources:gen_compilerz_script",
+    "//client/resources:gen_compilerz_style",
+    "//lib",
+    "//lib:goma_file",
+    "//lib:goma_hash",
+    "//lib:goma_stats_proto",
+    "//lib:goma_statz_stats_proto",
+    "//third_party:glog",
+    "//third_party/jquery:jquery",
+    "//third_party/jsoncpp",
+
+  ]
+  public_configs = [
+    ":compiler_proxy_config",
+    "//third_party:gtest_prod",
+  ]
+  if (os == "linux") {
+    sources += [
+      "elf_parser.cc",
+      "elf_parser.h",
+    ]
+  }
+  if (os == "mac") {
+    sources += [
+      "mach_o_parser.cc",
+      "mach_o_parser.h",
+      "openssl_engine_helper.h",
+      "openssl_engine_helper_mac.cc",
+    ]
+    libs += [
+      "Security.framework",
+      "Foundation.framework",
+    ]
+    deps += [ "//third_party/chromium_base:mac_version" ]
+  }
+  if (os == "win") {
+    sources += [
+      "named_pipe_server_win.cc",
+      "named_pipe_server_win.h",
+      "openssl_engine_helper.h",
+      "openssl_engine_helper_win.cc",
+    ]
+    deps += [ "//client/certs:certs_resource" ]
+  }
+  if (os != "mac" && os != "win") {
+    sources += [
+      "openssl_engine_helper.h",
+      "openssl_engine_helper_generic.cc",
+    ]
+    deps += [ "//client/certs" ]
+  }
+}
+
+static_library("base64_lib") {
+  sources = [
+    "base64.cc",
+    "base64.h",
+  ]
+  deps = [
+    "//base",
+  ]
+}
+
+static_library("jwt_lib") {
+  if (os == "win") {
+    cflags = [
+      # C4267: conversion from 'size_t' to 'int', possible loss of data
+      # Come from passing string::size() to
+      # BIO_new_mem_buf(const void*, int len).
+      "/wd4267",
+    ]
+  }
+
+  sources = [
+    "jwt.cc",
+    "jwt.h",
+  ]
+  deps = [
+    ":base64_lib",
+    ":ioutil_lib",
+    "//base",
+    "//third_party:glog",
+    "//third_party/boringssl",
+  ]
+}
+
+static_library("directive_filter_lib") {
+  sources = [
+    "directive_filter.cc",
+    "directive_filter.h",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+  ]
+}
+
+static_library("cpp_parser_lib") {
+  sources = [
+    "$target_gen_dir/cpp_parser_darray.h",
+    "cpp_input.h",
+    "cpp_input_stream.cc",
+    "cpp_input_stream.h",
+    "cpp_macro.cc",
+    "cpp_macro.h",
+    "cpp_parser.cc",
+    "cpp_parser.h",
+    "cpp_token.cc",
+    "cpp_token.h",
+    "cpp_tokenizer.cc",
+    "cpp_tokenizer.h",
+    "include_file_finder.cc",
+    "include_file_finder.h",
+    "include_file_utils.cc",
+    "include_file_utils.h",
+    "include_guard_detector.cc",
+    "include_guard_detector.h",
+    "predefined_macros.h",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":directive_filter_lib",
+    ":gen_cpp_parser_darray",
+    ":static_darray_lib",
+  ]
+}
+
+static_library("include_processor_lib") {
+  sources = [
+    "include_processor.cc",
+    "include_processor.h",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":cpp_parser_lib",
+  ]
+}
+
+static_library("ioutil_lib") {
+  sources = [
+    "ioutil.cc",
+    "ioutil.h",
+  ]
+  deps = [
+    "//base",
+    "//lib",
+    "//third_party:glog",
+  ]
+}
+
+static_library("static_darray_lib") {
+  sources = [
+    "static_darray.cc",
+    "static_darray.h",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+  ]
+}
+
+static_library("local_output_cache_lib") {
+  sources = [
+    "local_output_cache.cc",
+    "local_output_cache.h",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":local_output_cache_proto",
+  ]
+}
+
+static_library("breakpad_lib") {
+  sources = [
+    "breakpad.h",
+  ]
+  if (os == "linux") {
+    sources += [ "breakpad_linux.cc" ]
+    deps = [
+      "//base",
+      "//third_party:glog",
+      "//third_party/breakpad:client",
+    ]
+  }
+  if (os == "mac") {
+    sources += [ "breakpad_mac.cc" ]
+    deps = [
+      "//third_party:glog",
+      "//third_party/breakpad:breakpad",
+    ]
+    libs = [ "Foundation.framework" ]
+  }
+  if (os == "win") {
+    sources += [ "breakpad_win.cc" ]
+    deps = [
+      "//third_party:glog",
+      "//third_party/breakpad:breakpad_handler",
+    ]
+  }
+  include_dirs = [
+    "//third_party/breakpad/breakpad/src",
+
+    # For including third_party/lss/linux_syscall_support.h from
+    # third_party/breakpad/src/common/memory.h.
+    # linux_syscall_support.h do not have .c or .cc file.
+    "//",
+  ]
+}
+
+executable("gomacc") {
+  sources = [
+    "gomacc.cc",
+  ]
+  include_dirs = [ "." ]
+  deps = [
+    ":breakpad_lib",
+    ":gomacc_lib",
+    "//build/config/sanitizers:deps",
+    "//lib",
+    "//third_party:glog",
+    "//third_party/protobuf:protobuf_lite",
+  ]
+  if (is_posix && may_make_pie) {
+    ldflags = [ "-pie" ]
+  }
+}
+
+executable("compiler_proxy") {
+  sources = [
+    "compiler_proxy.cc",
+  ]
+  include_dirs = [ "." ]
+  deps = [
+    ":breakpad_lib",
+    ":compiler_proxy_lib",
+    ":include_processor_lib",
+    ":local_output_cache_lib",
+    "//build/config/sanitizers:deps",
+    "//third_party/boringssl",
+    "//third_party/protobuf:protobuf_lite",
+  ]
+
+  # TODO: check reading .rc file from two point is OK or not.
+  if (os == "win") {
+    sources += [ "//client/certs/certs.rc" ]
+  }
+
+  if (is_posix && may_make_pie) {
+    ldflags = [ "-pie" ]
+  }
+}
+
+executable("goma_fetch") {
+  sources = [
+    "goma_fetch.cc",
+  ]
+  include_dirs = [ "." ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":ioutil_lib",
+    "//build/config/sanitizers:deps",
+    "//third_party/protobuf:protobuf_lite",
+  ]
+
+  # TODO: check reading .rc file from two point is OK or not.
+  if (os == "win") {
+    sources += [ "//client/certs/certs.rc" ]
+  }
+}
+
+executable("cpp_parser") {
+  sources = [
+    "cpp_parser.cc",
+  ]
+  include_dirs = [ "." ]
+  defines = [ "TEST" ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":cpp_parser_lib",
+    ":ioutil_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("directive_filter") {
+  sources = [
+    "directive_filter.cc",
+  ]
+  include_dirs = [ "." ]
+  defines = [ "TEST" ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":directive_filter_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("include_processor") {
+  sources = [
+    "include_processor.cc",
+  ]
+  include_dirs = [ "." ]
+  defines = [ "TEST" ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":include_processor_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("jarfile_normalizer") {
+  sources = [
+    "jarfile_normalizer.cc",
+  ]
+  include_dirs = [ "." ]
+  deps = [
+    ":compiler_proxy_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+copy("copy_goma_auth_py") {
+  sources = [
+    "goma_auth.py",
+  ]
+  outputs = [
+    "$root_out_dir/{{source_file_part}}",
+  ]
+}
+
+copy("copy_goma_ctl_py") {
+  sources = [
+    "goma_ctl.py",
+  ]
+  outputs = [
+    "$root_out_dir/{{source_file_part}}",
+  ]
+}
+
+copy("copy_vpython") {
+  sources = [
+    ".vpython",
+  ]
+  outputs = [
+    "$root_out_dir/{{source_file_part}}",
+  ]
+}
+
+copy("copy_diagnose_goma_log_py") {
+  sources = [
+    "diagnose_goma_log.py",
+  ]
+  outputs = [
+    "$root_out_dir/{{source_file_part}}",
+  ]
+}
+
+if (os == "linux") {
+  executable("elf_parser") {
+    sources = [
+      "elf_parser.cc",
+    ]
+    include_dirs = [ "." ]
+    defines = [ "TEST" ]
+    deps = [
+      ":compiler_proxy_lib",
+      "//build/config/sanitizers:deps",
+    ]
+  }
+}
+
+if (os != "win") {
+  executable("linker_input_processor") {
+    sources = [
+      "linker_input_processor.cc",
+    ]
+    include_dirs = [ "." ]
+    defines = [ "TEST" ]
+    deps = [
+      ":compiler_proxy_lib",
+      "//build/config/sanitizers:deps",
+    ]
+  }
+  copy("goma_tool") {
+    sources = [
+      "goma_ctl.sh",
+      "report_env.sh",
+
+    ]
+    if (os == "linux") {
+      sources += [
+        # for chromeos
+        "goma-make",
+        "goma-make_unittest",
+        "goma-wrapper",
+      ]
+    }
+    outputs = [
+      "$root_out_dir/{{source_file_part}}",
+    ]
+  }
+
+  action("symlink_gomacc") {
+    script = "symlink.py"
+    deps = [
+      ":gomacc",
+    ]
+    outputs = [
+      "$root_out_dir/g++",
+      "$root_out_dir/gcc",
+      "$root_out_dir/javac",
+      "$root_out_dir/cc",
+      "$root_out_dir/c++",
+      "$root_out_dir/clang",
+      "$root_out_dir/clang++",
+    ]
+    args = [
+             "--force",
+             "--target",
+             "gomacc",
+           ] + rebase_path(outputs)
+  }
+
+  action("dump_compiler_proxy_symbols") {
+    script = "dump_syms.py"
+    deps = [
+      ":compiler_proxy",
+      "//third_party/breakpad:dump_syms",
+    ]
+    outputs = [
+      "$root_out_dir/compiler_proxy.sym",
+    ]
+    args = [
+      "--dump_syms",
+      rebase_path("$root_out_dir/dump_syms"),
+      "--input",
+      rebase_path("$root_out_dir/compiler_proxy"),
+      "--output",
+      rebase_path("$root_out_dir/compiler_proxy.sym"),
+    ]
+  }
+
+  action("dump_gomacc_symbols") {
+    script = "dump_syms.py"
+    deps = [
+      ":gomacc",
+      "//third_party/breakpad:dump_syms",
+    ]
+    outputs = [
+      "$root_out_dir/gomacc.sym",
+    ]
+    args = [
+      "--dump_syms",
+      rebase_path("$root_out_dir/dump_syms"),
+      "--input",
+      rebase_path("$root_out_dir/gomacc"),
+      "--output",
+      rebase_path("$root_out_dir/gomacc.sym"),
+    ]
+  }
+
+  action("calc_sha256_checksum") {
+    script = "calculate_sha256.py"
+    deps = [
+      ":compiler_proxy",
+      ":copy_diagnose_goma_log_py",
+      ":copy_goma_auth_py",
+      ":copy_goma_ctl_py",
+      ":copy_vpython",
+      ":dump_compiler_proxy_symbols",
+      ":dump_gomacc_symbols",
+      ":goma_fetch",
+      ":goma_tool",
+      ":gomacc",
+    ]
+    outputs = [
+      "$root_out_dir/sha256.json",
+    ]
+    args = [
+      "--output",
+      rebase_path("$root_out_dir/sha256.json"),
+      rebase_path("$root_out_dir/compiler_proxy"),
+      rebase_path("$root_out_dir/compiler_proxy.sym"),
+      rebase_path("$root_out_dir/diagnose_goma_log.py"),
+      rebase_path("$root_out_dir/goma_auth.py"),
+      rebase_path("$root_out_dir/gomacc"),
+      rebase_path("$root_out_dir/gomacc.sym"),
+      rebase_path("$root_out_dir/goma_ctl.py"),
+      rebase_path("$root_out_dir/.vpython"),
+      rebase_path("$root_out_dir/goma_fetch"),
+      rebase_path("$root_out_dir/report_env.sh"),
+    ]
+  }
+} else {  # win
+  executable("vcflags") {
+    sources = [
+      "vcflags.c",
+    ]
+    deps = [
+      "//build/config/sanitizers:deps",
+    ]
+  }
+  copy("goma_tool") {
+    sources = [
+      "goma_ctl.bat",
+    ]
+    outputs = [
+      "$root_out_dir/{{source_file_part}}",
+    ]
+  }
+
+  action("dump_gomacc_symbols") {
+    script = "dump_syms.py"
+    deps = [
+      ":gomacc",
+      "//third_party/breakpad:dump_syms",
+    ]
+    outputs = [
+      "$root_out_dir/gomacc.sym",
+    ]
+    args = [
+      "--dump_syms",
+      rebase_path("$root_out_dir/dump_syms.exe"),
+      "--input",
+      rebase_path("$root_out_dir/gomacc.exe"),
+      "--output",
+      rebase_path("$root_out_dir/gomacc.sym"),
+    ]
+  }
+
+  action("dump_compiler_proxy_symbols") {
+    script = "dump_syms.py"
+    deps = [
+      ":compiler_proxy",
+      "//third_party/breakpad:dump_syms",
+    ]
+    outputs = [
+      "$root_out_dir/compiler_proxy.sym",
+    ]
+    args = [
+      "--dump_syms",
+      rebase_path("$root_out_dir/dump_syms.exe"),
+      "--input",
+      rebase_path("$root_out_dir/compiler_proxy.exe"),
+      "--output",
+      rebase_path("$root_out_dir/compiler_proxy.sym"),
+    ]
+  }
+
+  action("calc_sha256_checksum") {
+    script = "calculate_sha256.py"
+    deps = [
+      ":compiler_proxy",
+      ":copy_diagnose_goma_log_py",
+      ":copy_goma_auth_py",
+      ":copy_goma_ctl_py",
+      ":copy_vpython",
+      ":dump_compiler_proxy_symbols",
+      ":dump_gomacc_symbols",
+      ":goma_fetch",
+      ":goma_tool",
+      ":gomacc",
+      ":vcflags",
+    ]
+    outputs = [
+      "$root_out_dir/sha256.json",
+    ]
+    args = [
+      "--output",
+      rebase_path("$root_out_dir/sha256.json"),
+      rebase_path("$root_out_dir/compiler_proxy.exe"),
+      rebase_path("$root_out_dir/compiler_proxy.exe.pdb"),
+      rebase_path("$root_out_dir/compiler_proxy.sym"),
+      rebase_path("$root_out_dir/diagnose_goma_log.py"),
+      rebase_path("$root_out_dir/goma_auth.py"),
+      rebase_path("$root_out_dir/gomacc.exe"),
+      rebase_path("$root_out_dir/gomacc.exe.pdb"),
+      rebase_path("$root_out_dir/gomacc.sym"),
+      rebase_path("$root_out_dir/goma_ctl.bat"),
+      rebase_path("$root_out_dir/goma_ctl.py"),
+      rebase_path("$root_out_dir/.vpython"),
+      rebase_path("$root_out_dir/goma_fetch.exe"),
+      rebase_path("$root_out_dir/goma_fetch.exe.pdb"),
+      rebase_path("$root_out_dir/vcflags.exe"),
+      rebase_path("$root_out_dir/vcflags.exe.pdb"),
+    ]
+  }
+}
+
+static_library("goma_test_lib") {
+  testonly = true
+  sources = [
+    "unittest_util.cc",
+    "unittest_util.h",
+  ]
+  if (os == "win") {
+    sources += [
+      "vsvars.cc",
+      "vsvars.h",
+    ]
+  }
+  deps = [
+    ":ioutil_lib",
+    "//base",
+    "//base:goma_unittest",
+    "//third_party:glog",
+  ]
+  public_deps = [
+    "//third_party:gtest",
+  ]
+}
+
+static_library("gomacc_test_lib") {
+  testonly = true
+  sources = [
+    "unittest_util.cc",
+    "unittest_util.h",
+  ]
+  deps = [
+    ":gomacc_lib",
+    "//base:goma_unittest",
+    "//lib",
+    "//third_party:glog",
+    "//third_party:gtest",
+  ]
+}
+
+executable("arfile_unittest") {
+  testonly = true
+  sources = [
+    "arfile_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("atomic_stats_counter_unittest") {
+  testonly = true
+  sources = [
+    "atomic_stats_counter_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("base64_unittest") {
+  testonly = true
+  sources = [
+    "base64_unittest.cc",
+  ]
+  deps = [
+    ":base64_lib",
+    ":goma_test_lib",
+    "//base",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("callback_unittest") {
+  testonly = true
+  sources = [
+    "callback_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("compilation_database_reader_unittest") {
+  testonly = true
+  sources = [
+    "compilation_database_reader_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("compiler_info_unittest") {
+  testonly = true
+  sources = [
+    "compiler_info_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("compiler_info_cache_unittest") {
+  testonly = true
+  sources = [
+    "compiler_info_cache_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("content_cursor_unittest") {
+  testonly = true
+  sources = [
+    "content_cursor_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("cpp_parser_unittest") {
+  testonly = true
+  sources = [
+    "cpp_parser_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":cpp_parser_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("cpp_tokenizer_unittest") {
+  testonly = true
+  sources = [
+    "cpp_tokenizer_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":cpp_parser_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("directive_filter_unittest") {
+  testonly = true
+  sources = [
+    "directive_filter_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":directive_filter_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("env_flags_unittest") {
+  testonly = true
+  sources = [
+    "env_flags_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("goma_ipc_unittest") {
+  testonly = true
+  sources = [
+    "goma_ipc_unittest.cc",
+    "mock_socket_factory.cc",
+    "mock_socket_factory.h",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    ":gomacc_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("gomacc_argv_unittest") {
+  testonly = true
+  sources = [
+    "gomacc_argv_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    ":gomacc_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("histogram_unittest") {
+  testonly = true
+  sources = [
+    "histogram_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("http_unittest") {
+  testonly = true
+  sources = [
+    "http_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("http_rpc_unittest") {
+  testonly = true
+  sources = [
+    "fake_tls_engine.cc",
+    "fake_tls_engine.h",
+    "http_rpc_unittest.cc",
+    "mock_socket_factory.cc",
+    "mock_socket_factory.h",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+    "//third_party:minizip",
+  ]
+}
+
+executable("hash_rewrite_parser_unittest") {
+  testonly = true
+  sources = [
+    "hash_rewrite_parser_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("include_file_utils_unittest") {
+  testonly = true
+  sources = [
+    "include_file_utils_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":cpp_parser_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("include_processor_unittest") {
+  testonly = true
+  sources = [
+    "include_processor_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    ":include_processor_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("ioutil_unittest") {
+  testonly = true
+  sources = [
+    "ioutil_unittest.cc",
+  ]
+  deps = [
+    ":common",
+    ":goma_test_lib",
+    ":ioutil_lib",
+    "//base",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("jar_parser_unittest") {
+  testonly = true
+  sources = [
+    "jar_parser_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("jwt_unittest") {
+  testonly = true
+  sources = [
+    "jwt_unittest.cc",
+  ]
+  deps = [
+    ":base64_lib",
+    ":common",
+    ":goma_test_lib",
+    ":jwt_lib",
+    "//base",
+    "//build/config/sanitizers:deps",
+    "//third_party:glog",
+    "//third_party/boringssl",
+  ]
+}
+
+executable("library_path_resolver_unittest") {
+  testonly = true
+  sources = [
+    "library_path_resolver_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("linked_unordered_map_unittest") {
+  testonly = true
+  sources = [
+    "linked_unordered_map_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("linker_input_processor_unittest") {
+  testonly = true
+  sources = [
+    "linker_input_processor_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("linker_script_parser_unittest") {
+  testonly = true
+  sources = [
+    "linker_script_parser_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("log_cleaner_unittest") {
+  testonly = true
+  sources = [
+    "log_cleaner_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("luci_context_unittest") {
+  testonly = true
+  sources = [
+    "luci_context_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("machine_info_unittest") {
+  testonly = true
+  sources = [
+    "machine_info_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("mypath_unittest") {
+  testonly = true
+  sources = [
+    "mypath_unittest.cc",
+  ]
+  deps = [
+    ":common",
+    ":goma_test_lib",
+    "//base",
+    "//build/config/sanitizers:deps",
+    "//third_party:glog",
+  ]
+}
+
+executable("oauth2_unittest") {
+  testonly = true
+  sources = [
+    "oauth2_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("simple_timer_unittest") {
+  testonly = true
+  sources = [
+    "simple_timer_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+config("gen_static_darray_test_config") {
+  include_dirs = [ "." ]
+}
+action("gen_static_darray_test") {
+  testonly = true
+  script = generate_static_darray
+  outputs = [
+    "$target_gen_dir/static_darray_test_array.h",
+  ]
+  args = [
+    "--test",
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+  ]
+  public_configs = [ ":gen_static_darray_test_config" ]
+}
+
+executable("static_darray_unittest") {
+  testonly = true
+  sources = [
+    "static_darray_unittest.cc",
+
+    # generated files.
+    "$target_gen_dir/static_darray_test_array.h",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":gen_static_darray_test",
+    ":goma_test_lib",
+    ":static_darray_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("subprocess_task_unittest") {
+  testonly = true
+  sources = [
+    "subprocess_task_unittest.cc",
+  ]
+  deps = [
+    ":breakpad_lib",
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("threadpool_http_server_unittest") {
+  testonly = true
+  sources = [
+    "threadpool_http_server_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("trustedipsmanager_unittest") {
+  testonly = true
+  sources = [
+    "trustedipsmanager_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("worker_thread_unittest") {
+  testonly = true
+  sources = [
+    "worker_thread_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("worker_thread_manager_unittest") {
+  testonly = true
+  sources = [
+    "mock_socket_factory.cc",
+    "mock_socket_factory.h",
+    "worker_thread_manager_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("arfile_reader_unittest") {
+  testonly = true
+  sources = [
+    "arfile_reader.cc",
+    "arfile_reader.h",
+    "arfile_reader_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("jarfile_reader_unittest") {
+  testonly = true
+  sources = [
+    "jarfile_reader_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("util_unittest") {
+  testonly = true
+  sources = [
+    "util.cc",
+    "util.h",
+    "util_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("openssl_engine_unittest") {
+  testonly = true
+  sources = [
+    "openssl_engine.cc",
+    "openssl_engine.h",
+    "openssl_engine_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+    "//third_party/boringssl",
+  ]
+  if (os == "win") {
+    sources += [ "//client/certs/certs.rc" ]
+  }
+}
+
+executable("rand_util_unittest") {
+  testonly = true
+  sources = [
+    "rand_util.cc",
+    "rand_util.h",
+    "rand_util_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+    "//third_party/boringssl",
+  ]
+}
+
+executable("include_cache_unittest") {
+  testonly = true
+  sources = [
+    "include_cache_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":directive_filter_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("deps_cache_unittest") {
+  testonly = true
+  sources = [
+    "deps_cache_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":directive_filter_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("filename_id_table_unittest") {
+  testonly = true
+  sources = [
+    "filename_id_table_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("compile_task_unittest") {
+  testonly = true
+  sources = [
+    "compile_task_unittest.cc",
+  ]
+  deps = [
+    ":breakpad_lib",
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    ":include_processor_lib",
+    ":local_output_cache_lib",
+    "//build/config/sanitizers:deps",
+  ]
+}
+
+executable("local_output_cache_unittest") {
+  testonly = true
+  sources = [
+    "local_output_cache_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    ":local_output_cache_lib",
+  ]
+}
+
+if (os == "linux") {
+  executable("elf_parser_unittest") {
+    testonly = true
+    sources = [
+      "elf_parser_unittest.cc",
+    ]
+    deps = [
+      ":compiler_proxy_lib",
+      ":goma_test_lib",
+      "//build/config/sanitizers:deps",
+    ]
+  }
+  executable("cros_util_unittest") {
+    testonly = true
+    sources = [
+      "cros_util_unittest.cc",
+    ]
+    deps = [
+      ":gomacc_lib",
+      ":gomacc_test_lib",
+      "//build/config/sanitizers:deps",
+      "//third_party:gtest",
+    ]
+  }
+}
+
+if (os == "win") {
+  executable("dump_env") {
+    testonly = true
+    sources = [
+      "dump_env.c",
+    ]
+    deps = [
+      "//build/config/sanitizers:deps",
+    ]
+  }
+  executable("named_pipe_client_win_unittest") {
+    testonly = true
+    sources = [
+      "named_pipe_client_win_unittest.cc",
+    ]
+    deps = [
+      ":compiler_proxy_lib",
+      ":goma_test_lib",
+      "//build/config/sanitizers:deps",
+    ]
+  }
+  executable("named_pipe_server_win_unittest") {
+    testonly = true
+    sources = [
+      "named_pipe_server_win_unittest.cc",
+    ]
+    deps = [
+      ":compiler_proxy_lib",
+      ":goma_test_lib",
+      "//build/config/sanitizers:deps",
+    ]
+  }
+  executable("posix_helper_win_unittest") {
+    testonly = true
+    sources = [
+      "posix_helper_win_unittest.cc",
+    ]
+    deps = [
+      ":compiler_proxy_lib",
+      ":goma_test_lib",
+      "//build/config/sanitizers:deps",
+    ]
+  }
+  executable("spawner_win_unittest") {
+    testonly = true
+    sources = [
+      "spawner_win_unittest.cc",
+    ]
+    deps = [
+      ":compiler_proxy_lib",
+      ":goma_test_lib",
+      "//build/config/sanitizers:deps",
+    ]
+  }
+  executable("vstestrun") {
+    testonly = true
+    sources = [
+      "vstestrun.cc",
+    ]
+    deps = [
+      ":compiler_proxy_lib",
+      ":goma_test_lib",
+      "//build/config/sanitizers:deps",
+    ]
+  }
+} else {
+  executable("compiler_flags_util_unittest") {
+    testonly = true
+    sources = [
+      "compiler_flags_util_unittest.cc",
+    ]
+    deps = [
+      ":compiler_proxy_lib",
+      ":goma_test_lib",
+      "//build/config/sanitizers:deps",
+    ]
+  }
+}
+
+fuzzer_test("base64_fuzzer") {
+  sources = [
+    "base64_fuzzer.cc",
+  ]
+  deps = [
+    ":common",
+    "//base",
+  ]
+}
+
+fuzzer_test("ioutil_parse_http_response_fuzzer") {
+  sources = [
+    "ioutil_parse_http_response_fuzzer.cc",
+  ]
+  deps = [
+    ":common",
+    "//base",
+  ]
+  dict = "data/fuzzer_dictionaries/net_url_request_fuzzer.dict"
+}

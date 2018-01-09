@@ -1,0 +1,10 @@
+Files in this directory are a subset of chromium's third_party/boringssl.
+However, to follow the latest BoringSSL, these are not just copy of the
+files.
+
+To update files in directory,
+1. please bump-up commit in ../DEPS,
+2. and run "python src/util/generate_build_files.py chromium"
+
+Since we do not need to build mac-x86 and linux-arm, we just ignores to add
+them even if such directories are made by the script.

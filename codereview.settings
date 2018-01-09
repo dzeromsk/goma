@@ -1,0 +1,7 @@
+# This file is used by git-cl to get repository specific information.
+CC_LIST: goma+review@google.com
+GERRIT_HOST: True
+GERRIT_SQUASH_UPLOADS: True
+# Without this, git cl won't work with corpsso.
+# cf. http://crbug.com/603378
+GERRIT_SKIP_ENSURE_AUTHENTICATED: true

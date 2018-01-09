@@ -1,0 +1,96 @@
+# Copied from chromium third_party/boringssl/.
+#
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("BUILD.generated.gni")
+
+# Config for us and everybody else depending on BoringSSL.
+config("external_config") {
+  include_dirs = [ "src/include" ]
+}
+
+# Config internal to this build file, shared by boringssl and boringssl_fuzzer.
+config("internal_config") {
+  visibility = [ ":*" ]  # Only targets in this file can depend on this.
+  defines = [
+    "BORINGSSL_IMPLEMENTATION",
+    "BORINGSSL_NO_STATIC_INITIALIZER",
+    "OPENSSL_SMALL",
+  ]
+  configs = [
+    # TODO: Fix size_t truncations in BoringSSL.
+    # https://crbug.com/429039
+    "//build/config/compiler:no_size_t_to_int_warning",
+  ]
+  if (is_posix) {
+    cflags_c = [ "-std=c99" ]
+    defines += [ "_XOPEN_SOURCE=700" ]
+  }
+}
+
+config("no_asm_config") {
+  visibility = [ ":*" ]  # Only targets in this file can depend on this.
+  defines = [ "OPENSSL_NO_ASM" ]
+}
+
+all_sources = crypto_sources + ssl_sources
+
+# Windows' assembly is built with Yasm. The other platforms use the platform
+# assembler.
+if (os == "win") {
+  import("//third_party/yasm/yasm_assemble.gni")
+  yasm_assemble("boringssl_asm") {
+    if (cpu_arch == "x64") {
+      sources = crypto_sources_win_x86_64
+    } else if (cpu_arch == "x86") {
+      sources = crypto_sources_win_x86
+    }
+  }
+} else {
+  source_set("boringssl_asm") {
+    visibility = [ ":*" ]  # Only targets in this file can depend on this.
+
+    defines = []
+    sources = []
+    asmflags = []
+    include_dirs = [ "src/include" ]
+
+    if (cpu_arch == "x64") {
+      if (os == "mac") {
+        sources += crypto_sources_mac_x86_64
+      } else if (os == "linux") {
+        sources += crypto_sources_linux_x86_64
+      } else {
+        public_configs = [ ":no_asm_config" ]
+      }
+    } else if (cpu_arch == "x86") {
+      if (os == "mac") {
+        sources += crypto_sources_mac_x86
+      } else if (os == "linux") {
+        sources += crypto_sources_linux_x86
+      } else {
+        public_configs = [ ":no_asm_config" ]
+      }
+      if (is_posix) {
+        asmflags += [ "-m32" ]
+      }
+    } else {
+      public_configs = [ ":no_asm_config" ]
+    }
+  }
+}
+
+static_library("boringssl") {
+  sources = all_sources
+  deps = [
+    ":boringssl_asm",
+  ]
+
+  public_configs = [ ":external_config" ]
+  configs += [ ":internal_config" ]
+
+  configs -= [ "//build/config/compiler:goma_code" ]
+  configs += [ "//build/config/compiler:no_goma_code" ]
+}

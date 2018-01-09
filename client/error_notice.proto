@@ -1,0 +1,67 @@
+// Copyright 2014 The Goma Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+syntax = "proto2";
+
+package devtools_goma;
+
+
+message ErrorNotices {
+  // if we need to change message format, repeated field allows us to return
+  // multiple versions.
+  repeated ErrorNotice notice = 1;
+}
+
+message ErrorNotice {
+  // if gomacc returned non-zero exit status, CompileError is used for
+  // distinguish it is caused by goma error or not.
+  enum CompileError {
+    // set this if gomacc cannot find compiler_proxy
+    COMPILER_PROXY_UNREACHABLE = 1;
+    // set this if compiler_proxy_failures > 0 or
+    // failed to find exact match executable under GOMA_HERMETIC=error.
+    COMPILER_PROXY_FAILURE = 2;
+  }
+  required int32 version = 1;
+  // The value is set only on compile error caused by goma.
+  optional CompileError compile_error = 2;
+
+  // Infrastructure status let the caller know the status of compiler_proxy
+  // and backend.  The caller should judge it safe to continue or not.
+  optional InfraStatus infra_status = 3;
+}
+
+// Message to store goma infrastructure status.
+// It includes status inside compiler_proxy, that of network to goma server,
+// and that in goma server.
+// NEXT ID TO USE: 16
+message InfraStatus {
+  // CompilerInfo
+  optional int32 num_compiler_info_miss = 1;
+  optional int32 num_compiler_info_fail = 2;
+
+  // HttpClient
+  optional int32 ping_status_code = 3;
+  repeated HttpStatusCode http_status_code = 4;
+  optional int32 num_http_sent = 5;
+  optional int32 num_http_active = 6;
+  optional int32 num_http_retry = 7;
+  optional int32 num_http_timeout = 8;
+  optional int32 num_http_error = 9;
+  optional int32 num_network_error = 12;
+  optional int32 num_network_recovered = 13;
+
+  // CompileService
+  optional int32 num_exec_fail_fallback = 10;
+  optional int32 num_exec_compiler_proxy_failure = 11;
+
+  // error.
+  optional int32 num_user_error = 14;
+  optional int32 num_user_warning = 15 [deprecated=true];
+}
+
+// Protobuf message for showing HTTP status code and its count.
+message HttpStatusCode {
+  required int32 status_code = 1;
+  required int32 count = 2;
+}

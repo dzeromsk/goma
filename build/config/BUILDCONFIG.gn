@@ -1,0 +1,177 @@
+# Copyright 2014 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+declare_args() {
+  os = host_os
+  is_debug = true
+  is_asan = false
+  is_tsan = false
+
+  # Enables incremental link. Currently effective only on Win.
+  use_incremental_link = false
+
+  # Enables link time optimization. is_debug=false is required.
+  # Currently effective only on Win.
+  use_link_time_optimization = true
+
+  use_custom_libcxx = false
+  use_libfuzzer = false
+  use_sanitizer_coverage = false
+  with_cpu_profiling = false
+  with_heap_profiling = false
+  dcheck_always_on = false
+  with_counterz = false
+
+  # Enable revision check. If true, gomacc revision and compiler_proxy
+  # revision differ, a user will see warnings.
+  enable_revision_check = false
+
+  enable_lzma = false
+  cpu_arch = host_cpu
+}
+
+declare_args() {
+  is_clang = os == "mac" || os == "linux"
+}
+
+if (target_os == "") {
+  target_os = host_os
+}
+if (target_cpu == "") {
+  target_cpu = host_cpu
+}
+if (current_cpu == "") {
+  current_cpu = target_cpu
+}
+if (current_os == "") {
+  current_os = target_os
+}
+
+is_posix = os == "mac" || os == "linux"
+using_sanitizer = is_asan || is_tsan
+
+# Since we cannot read result of perftools if we create position independent
+# executable (PIE), let me disable hardening if profiling options are set.
+may_make_pie = !with_cpu_profiling && !with_heap_profiling
+
+default_compiler_configs = [
+  "//build/config/compiler:compiler",
+  "//build/config/compiler:no_rtti",
+  "//build/config/compiler:goma_code",
+  "//build/config:default_libs",
+  "//build/config/sanitizers:default_sanitizer_flags",
+]
+if (is_debug) {
+  default_compiler_configs += [
+    "//build/config:debug",
+    "//build/config/compiler:no_optimize",
+  ]
+
+  if (os == "win" && use_incremental_link) {
+    # Note: we don't make "incremental_linking" on when is_debug=false, because
+    # the existence of /LTCG causes /INCREMENTAL ignorance.
+    # When use_incremental_link is on, we use /LTCG:INCREMENTAL instead.
+    default_compiler_configs += [ "//build/config/win:incremental_linking" ]
+  }
+} else {
+  default_compiler_configs += [
+    "//build/config:release",
+    "//build/config/compiler:optimize",
+  ]
+
+  if (os == "win" && !use_link_time_optimization) {
+    # When !is_debug && !use_link_time_optimization, /INCREMENTAL works.
+    # Note: When use_link_time_optimization is true, we enable
+    # /LTCG:INCREMENTAL, but it might cause b/35825478.
+    default_compiler_configs += [ "//build/config/win:incremental_linking" ]
+  }
+}
+
+if (is_posix) {
+  default_compiler_configs += [ "//build/config/gcc:no_exceptions" ]
+}
+if (is_asan) {
+  default_compiler_configs += [ "//build/config/compiler:asan" ]
+  is_clang = true
+}
+if (is_tsan) {
+  default_compiler_configs += [ "//build/config/compiler:tsan" ]
+  is_clang = true
+}
+if (enable_lzma) {
+  default_compiler_configs += [ "//build/config/compiler:enable_lzma" ]
+}
+
+if (with_cpu_profiling) {
+  default_compiler_configs += [ "//build/config/compiler:cpu_profiling" ]
+}
+
+if (with_heap_profiling) {
+  default_compiler_configs += [ "//build/config/compiler:heap_profiling" ]
+}
+
+if (with_counterz) {
+  default_compiler_configs += [ "//build/config/compiler:counterz" ]
+}
+
+if (enable_revision_check) {
+  default_compiler_configs +=
+      [ "//build/config/compiler:enable_revision_check" ]
+}
+
+if (os == "linux") {
+  if (is_clang) {
+    set_default_toolchain("//build/toolchain/linux:clang_$cpu_arch")
+    host_toolchain = "//build/toolchain/linux:clang_$cpu_arch"
+  } else {
+    set_default_toolchain("//build/toolchain/linux:$cpu_arch")
+    host_toolchain = "//build/toolchain/linux:$cpu_arch"
+  }
+}
+if (os == "mac" && is_clang) {
+  set_default_toolchain("//build/toolchain/mac:clang_x64")
+  host_toolchain = "//build/toolchain/mac:clang_x64"
+  default_compiler_configs += [ "//build/config/mac:sdk" ]
+  default_compiler_configs += [ "//build/config/compiler:mac" ]
+  cpu_arch = "x64"
+}
+
+if (os == "win") {
+  current_cpu = cpu_arch
+  if (is_clang) {
+    host_toolchain = "//build/toolchain/win:clang_$cpu_arch"
+  } else {
+    host_toolchain = "//build/toolchain/win:$cpu_arch"
+  }
+  set_default_toolchain(host_toolchain)
+  win_configs = [
+    "//build/config/win:lean_and_mean",
+    "//build/config/win:nominmax",
+    "//build/config/win:sdk",
+    "//build/config/win:unicode",
+    "//build/config/win:winver",
+    "//build/config/win:zlib",
+    "//build/config/win:glog",
+    "//build/config/win:rand_s",
+    "//build/config/win:sdk_link",
+    "//build/config/win:console",
+  ]
+  default_compiler_configs += win_configs
+}
+
+set_defaults("executable") {
+  configs = default_compiler_configs
+}
+
+set_defaults("static_library") {
+  configs = default_compiler_configs
+}
+
+set_defaults("shared_library") {
+  configs = default_compiler_configs
+}
+
+set_defaults("source_set") {
+  configs = default_compiler_configs
+}

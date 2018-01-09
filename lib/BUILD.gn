@@ -1,0 +1,287 @@
+# Copyright 2014 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+proto_out_dir = "prototmp"
+
+import("//third_party/protobuf/proto_library.gni")
+
+proto_library("goma_proto") {
+  sources = [
+    "goma_data.proto",
+    "goma_log.proto",
+  ]
+}
+
+config("lib_config") {
+  include_dirs = [ "." ]
+}
+static_library("lib") {
+  sources = [
+    "cmdline_parser.cc",
+    "cmdline_parser.h",
+    "compiler_flags.cc",
+    "compiler_flags.h",
+    "compress_util.cc",
+    "compress_util.h",
+    "execreq_normalizer.cc",
+    "execreq_normalizer.h",
+    "execreq_verifier.cc",
+    "execreq_verifier.h",
+    "file_helper.cc",
+    "file_helper.h",
+    "file_reader.cc",
+    "file_reader.h",
+    "fileflag.cc",
+    "fileflag.h",
+    "flag_parser.cc",
+    "flag_parser.h",
+    "goma_data_util.cc",
+    "goma_data_util.h",
+    "known_warning_options.h",
+    "path_resolver.cc",
+    "path_resolver.h",
+    "path_util.cc",
+    "path_util.h",
+    "scoped_fd.cc",
+    "scoped_fd.h",
+    "unordered.h",
+  ]
+
+  public_configs = [ ":lib_config" ]
+
+  public_deps = [
+    ":goma_proto",
+    "//base",
+    "//third_party:glog",
+    "//third_party/protobuf:protobuf_full",
+  ]
+  if (enable_lzma) {
+    public_deps += [ "//third_party:liblzma" ]
+  }
+}
+
+static_library("goma_hash") {
+  sources = [
+    "goma_hash.cc",
+    "goma_hash.h",
+  ]
+  public_deps = [
+    ":lib",
+  ]
+  deps = [
+    "//base",
+  ]
+  if (os == "linux") {
+    deps += [ "//third_party/boringssl:boringssl" ]
+  }
+  if (os == "win") {
+    deps += [ "//third_party:glog" ]
+  }
+}
+
+static_library("goma_file") {
+  sources = [
+    "goma_file.cc",
+    "goma_file.h",
+  ]
+  public_deps = [
+    ":lib",
+    "//base",
+  ]
+  deps = [
+    ":goma_hash",
+    "//third_party:glog",
+  ]
+}
+
+executable("cmdline_parser_unittest") {
+  testonly = true
+  sources = [
+    "cmdline_parser_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:glog",
+    "//third_party:gtest",
+  ]
+}
+
+executable("compiler_flags_test") {
+  testonly = true
+  sources = [
+    "compiler_flags_test.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:glog",
+    "//third_party:gtest",
+  ]
+}
+
+executable("compress_util_unittest") {
+  testonly = true
+  sources = [
+    "compress_util_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:glog",
+    "//third_party:gtest",
+  ]
+}
+
+executable("execreq_normalizer_unittest") {
+  testonly = true
+  sources = [
+    "execreq_normalizer_test.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:glog",
+    "//third_party:gtest",
+  ]
+}
+
+executable("execreq_verifier_unittest") {
+  testonly = true
+  sources = [
+    "execreq_verifier_test.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:glog",
+    "//third_party:gtest",
+  ]
+}
+
+executable("file_reader_unittest") {
+  testonly = true
+  sources = [
+    "file_reader_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:glog",
+    "//third_party:gtest",
+  ]
+}
+
+executable("flag_parser_unittest") {
+  testonly = true
+  sources = [
+    "flag_parser_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:gtest",
+  ]
+}
+
+executable("goma_data_util_unittest") {
+  testonly = true
+  sources = [
+    "goma_data_util_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:gtest",
+  ]
+}
+
+executable("goma_hash_unittest") {
+  testonly = true
+  sources = [
+    "goma_hash_unittest.cc",
+  ]
+  deps = [
+    ":goma_hash",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:gtest",
+  ]
+}
+
+executable("goma_file_unittest") {
+  testonly = true
+  sources = [
+    "goma_file_unittest.cc",
+  ]
+  deps = [
+    ":goma_file",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:gtest",
+  ]
+}
+
+executable("path_resolver_unittest") {
+  testonly = true
+  sources = [
+    "path_resolver_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:gtest",
+  ]
+}
+
+executable("path_unittest") {
+  testonly = true
+  sources = [
+    "path_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:gtest",
+  ]
+}
+
+executable("path_util_unittest") {
+  testonly = true
+  sources = [
+    "path_util_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config/sanitizers:deps",
+    "//third_party:gtest",
+  ]
+}
+
+proto_library("goma_stats_proto") {
+  sources = [
+    "goma_stats.proto",
+  ]
+}
+
+proto_library("goma_statz_stats_proto") {
+  sources = [
+    "goma_statz_stats.proto",
+  ]
+
+  deps = [
+    ":goma_stats_proto",
+  ]
+}

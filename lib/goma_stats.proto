@@ -1,0 +1,430 @@
+// Copyright 2015 The Goma Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+syntax = "proto2";
+
+package devtools_goma;
+
+
+// Statistics of all compile requests (including compiled locally).
+// NEXT ID TO USE: 9
+message RequestStats {
+  // Total number of compile requests came from gomacc.
+  optional int64 total = 1;
+  // Number of succeeded compile requests.
+  optional int64 success = 2;
+  // Number of failed compile requests.
+  // The number includes not only compile failure, but also
+  // backend errors that were recovered by local fallback.
+  optional int64 failure = 3;
+
+  // Below this line: different kind of stats. A single one should be provided.
+  // See the definition of each message type for a details description of
+  // thier use.
+  optional CompilerProxyStats compiler_proxy = 4;
+  optional CompilerInfoStats compiler_info = 5;
+  optional GomaCompileStats goma = 6;
+  optional LocalCompileStats local = 7;
+  optional FallbackInSetupStats fallback_in_setup = 8;
+}
+
+// Statistics of compiler_proxy itself.
+message CompilerProxyStats {
+  // Number of compile requests failed by compiler_proxy error.
+  optional int64 fail = 1;
+}
+
+// Statistics of compiler info store.
+//
+// Compiler info store contains caches of compiler info to be used for
+// listing up necessary files for compiles or dispatching compilers in
+// backend.
+// NEXT ID TO USE: 6
+message CompilerInfoStats {
+  // Number of times new compiler info were stored to the cache.
+  optional int64 stores = 1;
+  // Number of times compiler info were reused.
+  optional int64 store_dups = 2;
+  // Number of times compiler were not found.
+  optional int64 miss = 3;
+  // Number of failures to get compiler info.
+  // i.e. compiler can be found but failed to get compiler info.
+  // e.g. not executable binary, unknown options are passed, etc.
+  optional int64 fail = 4;
+  // The size of CompilerInfoCache loaded from disk.
+  optional int64 loaded_size_bytes = 5;
+}
+
+// Statistics of compiles done in goma backend.
+message GomaCompileStats {
+  // Number of compiles requested to goma backend.
+  optional int64 finished = 1;
+  // The number of compiles returned from the cache in backend.
+  optional int64 cache_hit = 2;
+  // The number of compiles returned from the cache in local output.
+  optional int64 local_cache_hit = 6;
+  // Number of compiles aborted.
+  // compiler_proxy does competition between local and remote, and if local
+  // wins, remote compile is aborted.
+  optional int64 aborted = 3;
+  // Number of retries.
+  // In case of retriable error, compiler proxy retries remote compile.
+  // e.g. if files required for compile is missing, compiler_proxy send
+  // missing files, and retries compile.
+  optional int64 retry = 4;
+  // Number of remote failures. This contains remote compile failure, backend
+  // failure, etc. Note that local compile result does not matter.
+  optional int64 fail = 5;
+}
+
+// Statistics of compiles done locally.
+message LocalCompileStats {
+  // Number of local compiles.
+  optional int64 run = 1;
+  // Number of local compiles killed.
+  // compiler_proxy does competition between local and remote, and if remote
+  // wins, local compile is killed.
+  optional int64 killed = 2;
+  // Number of local compiles finished.
+  optional int64 finished = 3;
+}
+
+// Statistics on forced local fallbacks in setup step.
+// NEXT ID TO USE: 7
+message FallbackInSetupStats {
+  // Number of fallbacks caused by failures to parse command line flags.
+  optional int64 failed_to_parse_flags = 1;
+  // Number of fallbacks because remote compile is not supported.
+  optional int64 no_remote_compile_supported = 2;
+  // Number of fallbacks caused by HTTP disabled.
+  optional int64 http_disabled = 3;
+  // Number of fallbacks caused by failures to get compiler info.
+  optional int64 fail_to_get_compiler_info = 4;
+  // Number of fallbacks caused by compiler disabled.
+  optional int64 compiler_disabled = 5;
+  // Number of fallbacks requested by the user.
+  optional int64 requested_by_user = 6;
+}
+
+// Statistics of files used for remote compile.
+message FileStats {
+  // Number of files used for compile.
+  optional int64 requested = 1;
+  // Number of files uploaded to goma backend.
+  optional int64 uploaded = 2;
+  // Number of file hashes not found in goma backend.
+  // A compile request to goma backend has a list of hashes of files
+  // instead of contents.  If one of them are missing in goma backend,
+  // the backend returns the list of missing hashes.  This field represents
+  // number of hashes missed.
+  optional int64 missed = 3;
+}
+
+// Statistics of output files.
+//
+// If remote compile succeeds, compiler_proxy outputs a result e.g. object
+// file.  If output file size is small, compiler_proxy keeps a result in memory.
+// If the size is large, the result is output to file, and renamed.
+// Since compiler_proxy does competition between local and remote, and
+// local compile output a file directly, we cannot directly write a result to
+// a file.
+message OutputStats {
+  // Total number of files output.
+  optional int64 files = 1;
+  // Number of outputs renamed.
+  optional int64 rename = 2;
+  // Number of outputs kept in memory instead of written to files.
+  optional int64 buf = 3;
+  // Peak size of memory to keep outputs.
+  optional int64 peak_req = 4;
+}
+
+// Statistics about compiler_proxy memory.
+message MemoryStats {
+  // Memory consumed by compiler_proxy when stats was taken.
+  optional int64 consuming = 1;
+}
+
+// Statistics about compiler_proxy time.
+message TimeStats {
+  // Uptime of compiler_proxy in seconds.
+  optional int64 uptime = 1;
+}
+
+// Statistics of include processor.
+//
+// Include processor gets defined macros, search dirs, and a source file,
+// and list up files required for compile.
+message IncludeProcessorStats {
+  // Number of files to be searched.
+  optional int64 total = 1;
+  // Number of files that was skipped to search.
+  // If include guard exists, and the same file is read twice, we do not need
+  // to go into the guard.
+  optional int64 skipped = 2;
+
+  // Total waiting time [ms] to start IncludeProcessor.
+  // This doesn't include the running time of IncludeProcessor.
+  optional int64 total_wait_time = 3;
+
+  // Total running time [ms] of IncludeProcessor.
+  optional int64 total_run_time = 4;
+}
+
+// Statistics for include cache.
+//
+// IncludeCache contains a file that include only preprocessor directives.
+message IncludeCacheStats {
+  // The number of entries in the include cache.
+  optional int64 total_entries = 1;
+  // The total bytes of the contents in the include cache.
+  optional int64 total_cache_size = 2;
+
+  // Cache hit count.
+  optional int64 hit = 3;
+  // Cache miss count.
+  optional int64 missed = 4;
+  // Cache update count.
+  optional int64 updated = 5;
+  // Cache evicted count.
+  optional int64 evicted = 6;
+
+  // The total size of original (unfiltered) header files in byte.
+  optional int64 original_total_size = 7;
+  // The max size ef the original header files in byte.
+  optional int64 original_max_size = 8;
+  // The total size of filtered header files in byte.
+  optional int64 filtered_total_size = 9;
+  // The max size of filtered header files in byte.
+  optional int64 filtered_max_size = 10;
+}
+
+// Statistics of DepsCache.
+//
+// The result of the include processor is cached in DepsCache.
+// It has two kinds of tables: deps_cache_table and id_table.
+// deps_cache_table is a mapping from an identifier of a compile to list of
+// files required for it.
+// Since the same filename shows up to various number of entries in
+// deps_cache_table, we give an unique id to each filename and deps_cache
+// actually contains ids as value. id_table maintains mapping between the id
+// and the filename.
+message DepsCacheStats {
+  // Size of deps_cache_table.
+  optional int64 deps_table_size = 1;
+  // Maximum number of ids of an entry in deps_cache_table.
+  optional int64 max_entries = 2;
+  // Total number of ids of all entries in deps_cache_table.
+  optional int64 total_entries = 3;
+
+  // Size of id_table.
+  optional int64 idtable_size = 4;
+  // Number of hit of the table.
+  optional int64 hit = 5;
+  // Number of update of the table.
+  optional int64 updated = 6;
+  // Number of miss. i.e. newly added to the table.
+  optional int64 missed = 7;
+}
+
+// Statistics for inlucde dir cache.
+//
+// Include dir cache is a cache for a directory to be used as an
+// include directory.
+message IncludeDirCacheStats {
+  // Number of instances of include dir cache.
+  optional int64 instances = 1;
+  // Estimated size of memory consumed for include dir cache.
+  optional int64 memory = 2;
+  // Number of times new instance is created.
+  optional int64 created = 3;
+  // Number of times instance is reused.
+  optional int64 reused = 4;
+}
+
+// Statistics for LocalOutputCache.
+//
+// LocalOutputCache is a cache for build output files.
+// NEXT ID TO USE: 13
+message LocalOutputCacheStats {
+  // Number of new compile results successfully cached.
+  optional int64 save_success = 1;
+  // Total time to save all the files.
+  optional int64 save_success_time_ms = 2;
+  // Number of compile results failed to get cached.
+  optional int64 save_failure = 3;
+
+  // The number of cache hits
+  optional int64 lookup_success = 4;
+  // The total time (in milliseconds) to find a cache (success case only).
+  optional int64 lookup_success_time_ms = 5;
+  // The number of cache misses
+  optional int64 lookup_miss = 6;
+  // The number of failed lookups due to an error (other than misses)
+  optional int64 lookup_failure = 7;
+
+  // The number of times a cache is correctly copied.
+  optional int64 commit_success = 8;
+  // The total time to copy a cache (copy from cache dir to output dir).
+  optional int64 commit_success_time_ms = 9;
+  // The number of times a cache copy failed.
+  optional int64 commit_failure = 10;
+
+  // The number of times LocalOutputCache garbage collection was invoked.
+  optional int64 gc_count = 11;
+  // The total time of garbage collection.
+  optional int64 gc_total_time_ms = 12;
+}
+
+// Statistics of HttpRPC.
+//
+// compiler_proxy calls goma backend via HttpRPC.
+// NEXT ID TO USE: 14
+message HttpRPCStats {
+  // Status code for initial /pingz.
+  // compiler_proxy accessis /pingz to confirm backend live.
+  optional int32 ping_status_code = 1;
+  // round trip time of initial /pingz in milliseconds.
+  // negative value would be set if /pingz failed by network error.
+  optional int32 ping_round_trip_time_ms = 10;
+  // Number of HttpRPC called.
+  optional int64 query = 2;
+  // Number of active HttpRPC now.
+  optional int64 active = 3;
+  // Number of HttpRPC retries.
+  optional int64 retry = 4;
+  // Number of HttpRPC timeouts.
+  optional int64 timeout = 5;
+  // Number of HttpRPC errors.
+  optional int64 error = 6;
+  // Number of times detected network error and become network error mode.
+  optional int64 network_error = 7;
+  // Number of times recovered from network error mode.
+  optional int64 network_recovered = 8;
+  // Number of pending HttpRPC now.
+  optional int64 current_pending = 11;
+  // Max (peak) number of pending HttpRPC.
+  optional int64 peak_pending = 13;
+  // Total number of HttpRPC that was in pending state.
+  // Note that one HttpRPC will be counted only once even if it goes to pending
+  // state several times.
+  optional int64 total_pending = 12;
+
+  message HttpStatus {
+    // HTTP status code e.g. 200, 302, 401, 503, etc.
+    optional int32 status_code = 1;
+    // Number of times the status code were returned from backend.
+    optional int64 count = 2;
+  }
+  // Statistics of HTTP status code.
+  //
+  // Since we may get several kinds of status code from backend,
+  // this is repeated field.
+  repeated HttpStatus status_code = 9;
+}
+
+// Statistics for errors in compile_task.
+message GomaErrorStats {
+  // The number of errors that were reported to the user.
+  optional int64 user_error = 1;
+  // NOTE: Deprecated 7/2016.
+  optional int64 DEPRECATED_user_warning = 2 [deprecated=true];
+  // The number of errors that were written to the log file.
+  optional int64 log_error = 3;
+  // The number of warnings that were written to the log file.
+  optional int64 log_warning = 4;
+}
+
+// Statistics for compilers/subprograms mismatches.
+message GomaMismatchStats {
+  // The number of compiler version mismatches.
+  optional int64 command_version_mismatch = 1;
+  // The number of compiler binary hash mismatches.
+  optional int64 binary_hash_mismatch = 2;
+  // The number of subprogram mismatches.
+  optional int64 subprogram_mismatch = 3;
+}
+
+// General purpose protocol buffer type to represents distribution.
+//
+// logs made from histogram usually use this protocol buffer type.
+message DistributionProto {
+  // Number of elements.
+  required int64 count = 1;
+  // Sum of all elements.
+  required int64 sum = 2;
+  // Square sum of all elements.
+  // This can be used to calculate variance.
+  required double sum_of_squares = 3;
+  // minimum value of all elements.
+  optional int64 min = 4;
+  // maximum value of all elements.
+  optional int64 max = 5;
+
+  // histogram logbase.
+  optional double logbase = 6;
+  // Values of each bucket.
+  // The bucket range is like [0,1), [1, logbase), [logbase, logbase^2), ...
+  repeated int64 bucket_value = 7;
+}
+
+// Histograpms of compiler_proxy.
+message GomaHistograms {
+  // Histogram for HttpRPC call time in milliseconds.
+  optional DistributionProto rpc_call_time = 1;
+}
+
+message MachineInfo {
+  enum OSType {
+    UNKNOWN = 0;
+    LINUX = 1;
+    MAC = 2;
+    WIN = 3;
+  };
+  // goma compiler_proxy's revision number.
+  // value: <git commit>@<timestamp in Unix time>. (51 chars)
+  optional string goma_revision = 1;
+  // type of operating system.
+  optional OSType os = 2;
+  // Number of CPUs (cores) of the machine.
+  optional int32 ncpus = 3;
+  // Memory size of the machine in bytes.
+  optional int64 memory_size = 4;
+  // NOTE: Deprecated 7/2016.
+  repeated uint32 DEPRECATED_cpu_capability = 5 [deprecated=true];
+}
+
+// Stats for subprocess (local compiles).
+message SubProcessStats {
+  // Count entering into burst mode because of network error.
+  optional int32 count_burst_by_network_error = 1;
+  // Count entering into burst mode because compiler is disabled.
+  optional int32 count_burst_by_compiler_disabled = 2;
+}
+
+// NEXT ID TO USE: 17
+message GomaStats {
+  // different kind of stats. A single one should be provided.
+  // See the definition of each message type for a details description of
+  // thier use.
+  optional RequestStats request_stats = 1;
+  optional FileStats file_stats = 2;
+  optional OutputStats output_stats = 3;
+  optional MemoryStats memory_stats = 4;
+  optional TimeStats time_stats = 5;
+  optional IncludeProcessorStats include_processor_stats = 6;
+  optional DepsCacheStats depscache_stats = 7;
+  // Deprecated 04/2017. IncludeDirCache has been removed from goma.
+  optional IncludeDirCacheStats incdircache_stats = 8 [deprecated=true];
+  optional HttpRPCStats http_rpc_stats = 9;
+  optional GomaErrorStats error_stats = 12;
+  optional GomaMismatchStats mismatch_stats = 13;
+  optional IncludeCacheStats includecache_stats = 14;
+  optional LocalOutputCacheStats local_output_cache_stats = 15;
+  optional SubProcessStats subprocess_stats = 16;
+
+  optional GomaHistograms histogram = 10;
+
+  optional MachineInfo machine_info = 11;
+}

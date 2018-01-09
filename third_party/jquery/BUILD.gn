@@ -1,0 +1,35 @@
+# Copyright 2015 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+genc = "//client/genc.py"
+
+action("gen_jquery") {
+  script = genc
+  sources = [
+    "jquery.min.js",
+  ]
+  outputs = [
+    "$target_gen_dir/jquery.min.c",
+    "$target_gen_dir/jquery.min.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+    rebase_path("jquery.min.js"),
+  ]
+}
+
+config("jquery_config") {
+  include_dirs = [ "$target_gen_dir" ]
+}
+static_library("jquery") {
+  sources = [
+    "$target_gen_dir/jquery.min.c",
+    "$target_gen_dir/jquery.min.h",
+  ]
+  deps = [
+    ":gen_jquery",
+  ]
+  public_configs = [ ":jquery_config" ]
+}

@@ -1,0 +1,23 @@
+// Copyright 2016 The Goma Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+syntax = "proto3";
+
+package devtools_goma;
+
+message Settings {
+  string name = 3;
+
+  string endpoint_url = 1;
+  string certificate = 2;
+}
+
+message SettingsReq {
+  string hostname = 1;
+  string use_case = 2;
+}
+
+message SettingsResp {
+  Settings settings = 1;
+}

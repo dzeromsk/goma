@@ -1,0 +1,156 @@
+#!/usr/bin/env python
+
+# Copyright 2014 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+"""Tests for goma-make."""
+
+import imp
+import os
+import sys
+import tempfile
+import unittest
+
+
+_TEST_DIR = os.path.abspath(os.path.dirname(__file__))
+_GOMA_MAKE_PATH = os.path.abspath(os.path.join(_TEST_DIR, 'goma-make'))
+
+class GomaMakeTest(unittest.TestCase):
+
+  def setUp(self):
+    mod_name, _ = os.path.splitext(os.path.basename(_GOMA_MAKE_PATH))
+    print _GOMA_MAKE_PATH
+    self._module = imp.load_source(mod_name, _GOMA_MAKE_PATH)
+    if 'GOMACC_BLACKLIST' in os.environ:
+      del os.environ['GOMACC_BLACKLIST']
+    self._tmpfile = ''
+
+  def tearDown(self):
+    if self._tmpfile:
+      os.unlink(self._tmpfile)
+
+  def SetBlacklistFile(self, contents):
+    """Create blacklist file with contents, and set it to $GOMACC_BLACKLIST.
+
+    Args:
+      contents: a string to be stored to the blacklist file.
+    """
+    handle, self._tmpfile = tempfile.mkstemp()
+    os.write(handle, contents)
+    os.close(handle)
+    os.environ['GOMACC_BLACKLIST'] = self._tmpfile
+
+  def testParseBlacklistContents(self):
+    self.assertEqual(self._module.ParseBlacklistContents(''), [])
+    self.assertEqual(self._module.ParseBlacklistContents('\n\r '), [])
+    self.assertEqual(self._module.ParseBlacklistContents('/tmp'), ['/tmp'])
+    self.assertEqual(
+        self._module.ParseBlacklistContents('\r\n /tmp\r\n '), ['/tmp'])
+    self.assertEqual(
+        self._module.ParseBlacklistContents('\n/example\n/example2\n'),
+        ['/example', '/example2'])
+    self.assertEqual(
+        self._module.ParseBlacklistContents(
+            '\r\n /example \r\n \r\n \r\n /example2\r\n '),
+        ['/example', '/example2'])
+    self.assertEqual(
+        self._module.ParseBlacklistContents(
+            '\r\n /dirname with space\r\n '),
+        ['/dirname with space'])
+    self.assertEqual(
+        self._module.ParseBlacklistContents(
+            '\r\n /dirname with  space\r\n /with space/part 2 \r\n '),
+        ['/dirname with  space', '/with space/part 2'])
+
+  def testIsBlacklistedShouldReturnTrueIfPathIsInBlacklist(self):
+    self.assertTrue(self._module.IsBlacklisted('/tmp', ['/tmp']))
+    self.assertTrue(self._module.IsBlacklisted('/tmp', ['non-related', '/tmp']))
+    self.assertTrue(self._module.IsBlacklisted('/usr/local/etc',
+                                               ['/usr', '/tmp']))
+    self.assertTrue(self._module.IsBlacklisted('/use/local/etc',
+                                               ['non-related', '/local']))
+    self.assertTrue(self._module.IsBlacklisted('/use/local/etc',
+                                               ['non-related', '/etc']))
+
+  def testIsBlacklistedShouldReturnFalseIfPathIsNotInBlacklist(self):
+    self.assertFalse(self._module.IsBlacklisted('/tmp', []))
+    self.assertFalse(self._module.IsBlacklisted('/tmp', ['non-related']))
+    self.assertFalse(self._module.IsBlacklisted('/usr/local/etc',
+                                                ['/opt', '/tmp']))
+
+  def testRemoveParallelBuildArgumentsShouldWork(self):
+    args = [
+        'make',
+        'KEY=VALUE',
+        '-j', '65536',
+        '-d',
+        '-f', 'makefile',
+        '-i',
+        '-l', '1',
+        '-k',
+        'KEY2=VALUE2',
+        'all']
+    expected = [
+        'make',
+        'KEY=VALUE',
+        '-d',
+        '-f', 'makefile',
+        '-i',
+        '-l', '1',
+        '-k',
+        'KEY2=VALUE2',
+        'all']
+    actual = self._module.RemoveParallelBuildArguments(args)
+    self.assertEqual(actual, expected)
+
+  def testGetBlacklistShouldReturnDefaultIfEnvIsNotSet(self):
+    self.assertIsNone(os.getenv('GOMACC_BLACKLIST'))
+    blacklist = self._module.GetBlacklist()
+    self.assertEqual(blacklist, self._module._DEFAULT_BLACKLIST)
+
+  def testGetBlacklistShouldUseBlacklistInEnv(self):
+    # also edit testParseBlacklistContents when you modify parsing rule.
+    self.assertIsNone(os.getenv('GOMACC_BLACKLIST'))
+    self.SetBlacklistFile('/tmp')
+    self.assertIsNotNone(os.getenv('GOMACC_BLACKLIST'))
+    blacklist = self._module.GetBlacklist()
+    self.assertNotEqual(blacklist, self._module._DEFAULT_BLACKLIST)
+    self.assertEqual(blacklist, ['/tmp'])
+
+  def testGetBlacklistShouldUseParseBlacklistContentsForParsing(self):
+    class Spy:
+      def __init__(self):
+        self.contents = None
+
+      def ParseBlacklistContents(self, contents):
+        self.contents = contents
+        return ['dummy']
+
+    spy = Spy()
+    self._module.ParseBlacklistContents = spy.ParseBlacklistContents
+    self.assertIsNone(os.getenv('GOMACC_BLACKLIST'))
+    self.SetBlacklistFile('/tmp')
+    self.assertIsNotNone(os.getenv('GOMACC_BLACKLIST'))
+    blacklist = self._module.GetBlacklist()
+    self.assertEqual(spy.contents, '/tmp')
+    self.assertEqual(blacklist, ['dummy'])
+
+# TODO: add more test using environment variables.
+
+
+def main():
+  suite = unittest.TestLoader().loadTestsFromTestCase(GomaMakeTest)
+  result = unittest.TextTestRunner().run(suite)
+
+  exit_code = 0
+  if result.errors:
+    exit_code |= 0x01
+  if result.failures:
+    exit_code |= 0x01
+  if exit_code:
+    sys.exit(exit_code)
+
+
+if __name__ == '__main__':
+  main()

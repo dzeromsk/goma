@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+
+<!-- Copyright 2016 The Goma Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+-->
+
+<html>
+<head>
+
+<title>GOMA: CompilerProxy status page</title>
+<link rel="stylesheet" href="/static/compiler_proxy_status_style.css">
+<script src="/static/jquery.min.js"></script>
+<script src="/static/compiler_proxy_status_script.js"></script>
+</head>
+
+<body onload="init()">
+
+<header class="clearfix">
+  <h1><span>Goma</span></h1>
+  <div id="account">status:<span id="http_status"></span>&nbsp;
+                    <span id="email"></span>&nbsp;
+                    <a id="login" href=""></a></div>
+  <div id="error" class="warning"></div>
+  <div id="mismatch" class="warning"></div>
+</header>
+
+<div class="main">
+  <div class="side-menu">
+    <p><a href="#active">Active Tasks (<span id="count-active-tasks">0</span>)</a></p>
+    <p><a href="#finished">Finished Tasks (<span id="count-finished-tasks">0</span>)</a></p>
+    <p><a href="#failed">Failed Tasks (<span id="count-failed-tasks">0</span>)</a></p>
+    <p><a href="#long">Long Tasks (<span id="count-long-tasks">0</span>)</a></p>
+
+    <p><a href="#task-stats">Task stats</a></p>
+    <p><a href="#network-stats">Network stats</a></p>
+    <p><a href="#settings">Settings</a></p>
+  </div>
+
+  <div class="content">
+    <div id="task-summary-page" class="page">
+      <p id="task-summary-page-menu">
+        <span id="task-summary-first" class="menu-icon icon icon-first"></span>
+        <span id="task-summary-prev" class="menu-icon icon icon-prev"></span>
+        <span id="task-summary-figures"><span id="task-summary-offset-begin"></span>-<span id="task-summary-offset-end"></span> of <span id="task-summary-total"></span></span>
+        <span id="task-summary-next" class="menu-icon icon icon-next"></span>
+        <span id="task-summary-last" class="menu-icon icon icon-last"></span>
+      </p>
+      <table id="task-summary-table">
+        <thead><tr>
+          <th id="task-summary-head-id" class="task-summary-head task-summary-id">id</th>
+          <th id="task-summary-head-time" class="task-summary-head task-summary-time">time</th>
+          <th id="task-summary-head-pid" class="task-summary-head task-summary-pid">pid</th>
+          <th id="task-summary-head-state" class="task-summary-head task-summary-state">task state</th>
+          <th id="task-summary-head-status" class="task-summary-head task-summary-status">status</th>
+          <th id="task-summary-head-subproc-pid" class="task-summary-head task-summary-subproc-pid">subproc pid</th>
+          <th id="task-summary-head-subproc-state" class="task-summary-head task-summary-subproc-state">subproc state</th>
+          <th id="task-summary-head-flag" class="task-summary-head task-summary-flag">flag</th>
+          <th id="task-summary-head-major-factor" class="task-summary-head task-summary-major-factor">major factor</th>
+        </tr></thead>
+        <tbody id="task-summary-list"></tbody>
+      </table>
+
+      <h3>Legend</h3>
+      <p><form id="task-filter">
+        <input type="checkbox" name="task-status-running" checked> <span class="task-status-running">Running</span>
+        <input type="checkbox" name="task-status-success" checked> <span class="task-status-success">Succeeded</span>
+        <input type="checkbox" name="task-status-cachehit" checked> <span class="task-status-cachehit">Cache hit</span>
+        <input type="checkbox" name="task-status-local-cachehit" checked> <span class="task-status-local-cachehit">Local Cache hit</span>
+        <input type="checkbox" name="task-status-local-fallback" checked> <span class="task-status-local-fallback">Local fallback</span>
+        <input type="checkbox" name="task-status-retry" checked> <span class="task-status-retry">Retry</span>
+        <input type="checkbox" name="task-status-mismatch" checked> <span class="task-status-mismatch">Mismatch</span>
+        <input type="checkbox" name="task-status-gomaerror" checked> <span class="task-status-gomaerror">Goma Error</span>
+        <input type="checkbox" name="task-status-failure" checked> <span class="task-status-failure">Failed</span>
+        <input type="checkbox" name="task-status-conftestfailure" checked> <span class="task-status-conftestfailure">Failed but maybe during ./configure</span>
+        <input type="checkbox" name="task-status-cancel" checked> <span class="task-status-cancel">Canceled</span>
+        <button id="btn-task-check-all">Check all</button>
+        <button id="btn-task-uncheck-all">Uncheck all</button>
+      </form></p>
+    </div>
+
+    <div id="task-detail-page" class="page">
+      <p><a href="#" id="task-show-prev">&lt;&lt; Prev Task</a> <a href="#" id="task-show-next">Next Task &gt;&gt;</a></p>
+      <table id="task-detail-table"></table>
+    </div>
+
+    <div id="task-stats-page" class="page">
+      <h2>Task stats</h2>
+      <table id="task-stats-info" class="stats-info-table">
+        <colgroup>
+          <col style="width: 15em;">
+          <col style="width: 5em;">
+          <col>
+        </colgroup>
+
+        <tr class="stats-info-table-heading"><td></td><th colspan="2">Task Counts (limit: <span id="task-stats-num-limit"></span>)</th></tr>
+        <tr id="task-stats-num-max"><td>max</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-num-actives"><td>actives</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-num-pendings"><td>pendings</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+
+        <tr class="stats-info-table-heading"><td></td><th colspan="2">Request</th></tr>
+        <tr id="task-stats-request-total"><td>total</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-request-success"><td>success</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-request-failure"><td>failure</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-request-success-finished"><td>finished</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-request-success-aborted"><td>aborted</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-request-success-cache-hit"><td>cache hit</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-request-success-retry"><td>retry</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-request-local-run"><td>local run</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-request-local-finished"><td>local finished</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-request-local-killed"><td>local killed</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-request-fail-fallback"><td>fail fallback</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-request-compiler-proxy-fail"><td>compiler proxy fail</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+
+        <tr class="stats-info-table-heading"><td></td><th colspan="2">Remote VS Local</th></tr>
+        <tr id="task-stats-compiler-race-total"><td>both run</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-compiler-race-goma-win"><td>goma win</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-compiler-race-local-win"><td>local win</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+
+        <tr class="stats-info-table-heading"><td></td><th colspan="2">Compiler Info</th></tr>
+        <tr id="task-stats-compiler-info-stores"><td>compiler info stores</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-compiler-info-store-dups"><td>compiler info stores dups</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-compiler-info-miss"><td>compiler info miss</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-compiler-info-fail"><td>compiler info fail</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+
+        <tr class="stats-info-table-heading"><td></td><th colspan="2">File</th></tr>
+        <tr id="task-stats-file-total"><td>total</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-file-uploaded"><td>upload</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+        <tr id="task-stats-file-missed"><td>missed</td><td><meter value="0"></meter></td><td class="text"></td></tr>
+      </table>
+    </div>
+
+    <div id="network-stats-page" class="page">
+      <h2>Network stats</h2>
+      <h3>Network</h3>
+      <table>
+        <tr><th>QPS</th><th>Traffic</th></tr>
+        <tr><td><img id="http-rpc-qps"></td><td><img id="http-rpc-traffic"></td></tr>
+      </table>
+      <h3>Http RPC Info</h3>
+      <table id="http-rpc-info" class="stats-info-table">
+        <colgroup>
+          <col style="width: 15em;">
+          <col>
+        </colgroup>
+
+        <tr class="stats-info-table-heading"><td></td><th>Health</th></tr>
+        <tr><td>status</td><td id="rpc-health-status"></td></tr>
+        <tr class="stats-info-table-heading"><td></td><th>RPC</th></tr>
+        <tr><td>num_active</td><td id="rpc-num-active"></td></tr>
+        <tr><td>num_query</td><td id="rpc-num-query"></td></tr>
+        <tr><td>num_retry</td><td id="rpc-num-retry"></td></tr>
+        <tr><td>num_timeout</td><td id="rpc-num-timeout"></td></tr>
+        <tr><td>num_error</td><td id="rpc-num-error"></td></tr>
+        <tr class="stats-info-table-heading"><td></td><th>Socket</th></tr>
+        <tr><td>socket_pool</td><td id="rpc-socket-pool"></td></tr>
+        <tr><td>read bps</td><td id="rpc-read-bps">/s</td></tr>
+        <tr><td>total read</td><td id="rpc-read-byte"></td></tr>
+        <tr><td>write bps</td><td id="rpc-write-bps">/s</td></tr>
+        <tr><td>total write</td><td id="rpc-write-byte"></td></tr>
+        <tr class="stats-info-table-heading"><td></td><th>Request header</th></tr>
+        <tr><td>compression</td><td id="rpc-compression"></td></tr>
+        <tr><td>accept_encoding</td><td id="rpc-accept-encoding"></td></tr>
+        <tr><td>content_type</td><td id="rpc-content-type"></td></tr>
+        <tr class="stats-info-table-heading"><td></td><th>Authorization</th></tr>
+        <tr><td>authorization</td><td id="rpc-authorization"></td></tr>
+        <tr><td>oauth2</td><td id="rpc-oauth2"></td></tr>
+        <tr class="stats-info-table-heading"><td></td><th>User Agent</th></tr>
+        <tr><td>user_agent</td><td id="rpc-user-agent"></td></tr>
+        <tr class="stats-info-table-heading"><td></td><th>Cookie</th></tr>
+        <tr><td>cookie</td><td id="rpc-cookie"></td></tr>
+        <tr class="stats-info-table-heading"><td></td><th>Extra params</th></tr>
+        <tr><td>url_path_prefix</td><td id="rpc-url-path-prefix"></td></tr>
+        <tr><td>extra_params</td><td id="rpc-extra-params"></td></tr>
+        <tr class="stats-info-table-heading"><td></td><th>SSL</th></tr>
+        <tr><td>ssl</td><td id="rpc-ssl"></td></tr>
+        <tr><td>ssl_extra_cert</td><td id="rpc-ssl-extra-cert"></td></tr>
+        <tr class="stats-info-table-heading"><td></td><th>Others</th></tr>
+        <tr><td>capture_response_header</td><td id="rpc-capture-response-header"></td></tr>
+        <tr><td>socket_read_timeout_sec</td><td id="rpc-socket-read-timeout-sec"></td></tr>
+      </table>
+    </div>
+
+    <div id="settings-page" class="page">
+      <h2>Task Update</h2>
+      <p><form>
+        Update:
+        <input type="radio" name="update-task" value="on" checked>On
+        frequency <input id="update-freq" value="1000" size="4">ms
+        <input type="radio" name="update-task" value="off">Off
+      </form></p>
+      <p>Current status: <span id="update-status"></span></p>
+      <h2>Task View</h2>
+      <p><form>Page Size:
+        <input type="radio" name="pagesize" value="25" checked>25
+        <input type="radio" name="pagesize" value="50">50
+        <input type="radio" name="pagesize" value="100">100
+      </form></p>
+    </div>
+
+  </div>
+</div>
+
+<hr style="clear: both">
+<p id="endpoints">{{ENDPOINTS}}</p>
+<p id="goma_version"></p>
+<p id="global_info">{{GLOBAL_INFO}}</p>
+</body>
+</html>

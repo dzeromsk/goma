@@ -1,0 +1,146 @@
+#!/usr/bin/python
+#
+# Copyright 2012 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+"""A thin wrapper of make command for Chromium OS build.
+
+Unfortunately, there are several packages with which we cannot specify
+-j option. For such packages, we modify PATH environment variable not
+to use goma.
+"""
+
+import os
+import sys
+
+
+_DEFAULT_BLACKLIST = [
+    '/dev-libs/nss',  # make -j fails
+    '/app-crypt/nss',  # make -j fails
+    '/dev-libs/m17n-lib',  # make -j fails
+    '/sys-fs/mtools',  # make -j fails
+    '/dev-java/icedtea',  # make -j fails
+    '/dev-libs/openssl',  # Makefile force -j1
+    ]
+
+
+def ParseBlacklistContents(contents):
+  """Parses blacklist file contents and returns a blacklised directories.
+
+  Args:
+    contents: contents in a blacklist file.
+
+  Returns:
+    a list of blacklisted directories.
+  """
+  blacklist = [x.strip() for x in contents.splitlines()]
+  return [x for x in blacklist if x]
+
+
+def GetBlacklist():
+  """Returns list of portage package names to blacklist.
+
+  If non-empty $GOMACC_BLACKLIST is set, we use its file contents in the file
+  specified by $GOMACC_BLACKLIST instead of the default one.
+  If $GOMACC_BLACKLIST is an empty string, we use _DEFAULT_BLACKLIST.
+  The blacklist contents should be list of directories like:
+  /dev-libs/nss
+  /sys-fs/mtools
+
+  Note that empty line is just ignored.
+
+  Returns:
+    a list of blacklisted directories.
+  """
+  blacklist_file = os.getenv('GOMACC_BLACKLIST')
+  if not blacklist_file:
+    return _DEFAULT_BLACKLIST
+  return ParseBlacklistContents(open(blacklist_file).read())
+
+
+def IsBlacklisted(path, blacklist):
+  """Determine whether a path belongs to some backlisted package.
+
+  Args:
+    path: path of a portage package
+
+  Returns:
+    True if the portage package has been blacklisted.
+  """
+  for exemption_path in blacklist:
+    if path.find(exemption_path) != -1:
+      return True
+  return False
+
+
+def RemoveGomaFromPath():
+  """Remove the goma directory from the search path.
+
+  This will force a non-goma build, as needed for blacklisted packages.
+  """
+  if not os.environ.get('GOMA_DIR'):
+    return
+  goma_dir = os.getenv('GOMA_DIR')
+  paths = os.getenv('PATH').split(os.pathsep)
+  paths = [path for path in paths if not path.startswith(goma_dir)]
+  os.putenv('PATH', os.pathsep.join(paths))
+
+
+def RemoveParallelBuildArguments(args):
+  """Remove parallel-build related arguments.
+  This avoids passing unreasonably-high values into non-goma builds.
+
+  Args:
+    args: the arguments list to modify.
+  """
+
+  # This processing assumes simple '-j ###' or '-j###' formatted arguments.
+  # More complex combinations (e.g. '-vj10') will be ignored entirely.
+  parallel_args = ['-j']
+
+  for idx, arg in enumerate(args):
+    if arg == None:
+      pass  # Already marked this element for removal
+    elif arg in parallel_args:  # '-j ###' format
+      args[idx + 0] = None
+      if idx + 1 < len(args):
+        args[idx + 1] = None
+    elif arg[0:2] in parallel_args:  # '-j###' format
+      args[idx + 0] = None
+
+  args[:] = filter(lambda x: x != None, args)
+  return args
+
+
+def main():
+  args = ['/usr/bin/make']
+  args.extend(sys.argv[1:])
+  blacklist = GetBlacklist()
+  # Regardless of with/without goma, make is limited to under certain
+  # load average.
+  args[1:1] = ['-l10']
+  if os.getenv('MAKELEVEL'):
+    # In a sub-make, do not modify the flags.
+    pass
+  elif IsBlacklisted(os.getcwd(), blacklist) or os.getuid() == 0:
+    # A root user cannot talk to goma.
+    RemoveGomaFromPath()
+    RemoveParallelBuildArguments(args)
+    if os.environ.get('GOMA_DIR'):
+      del os.environ['GOMA_DIR']
+    if os.environ.get('GOMACC_PATH'):
+      del os.environ['GOMACC_PATH']
+  else:
+    # Insert default flags at the beginning of the argument list.
+    # These will be overridden by any user-supplied options.
+    RemoveGomaFromPath()
+    if os.environ.get('GOMA_DIR'):
+      os.environ['GOMACC_PATH'] = os.path.join(os.environ['GOMA_DIR'], 'gomacc')
+      args[1:1] = ['-j100']
+
+  os.execv(args[0], args)
+
+
+if __name__ == '__main__':
+  main()

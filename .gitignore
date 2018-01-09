@@ -1,0 +1,17 @@
+out
+Makefile
+*.Makefile
+*.mk
+*.vcproj
+*.vcxproj
+*.user
+*.sln
+*.rules
+*.filters
+*.props
+*.targets
+*.xml
+*.ncb
+*.suo
+*.sdf
+gyp-mac-tool

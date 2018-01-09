@@ -1,0 +1,54 @@
+# Copyright 2014 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+roots = "roots"
+
+if (os == "linux") {
+  genc = "//client/genc.py"
+
+  action("gen_certs") {
+    script = genc
+    sources = [
+      "$roots.pem",
+    ]
+    outputs = [
+      "$target_gen_dir/$roots.c",
+      "$target_gen_dir/$roots.h",
+    ]
+    args = [
+      "--prefix=certs_",
+      "--out-dir",
+      rebase_path("$target_gen_dir"),
+      rebase_path("$roots.pem"),
+    ]
+  }
+
+  config("certs_config") {
+    include_dirs = [ "$target_gen_dir" ]
+  }
+  static_library("certs") {
+    sources = [
+      "$target_gen_dir/$roots.c",
+      "$target_gen_dir/$roots.h",
+    ]
+    deps = [
+      ":gen_certs",
+    ]
+    public_configs = [ ":certs_config" ]
+  }
+}
+
+if (os == "win") {
+  config("certs_resource_config") {
+    include_dirs = [ "." ]
+  }
+  static_library("certs_resource") {
+    sources = [
+      "$roots.pem",
+      "certs.rc",
+      "certs_resource.h",
+    ]
+    public_configs = [ ":certs_resource_config" ]
+  }
+}

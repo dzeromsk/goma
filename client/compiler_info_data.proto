@@ -1,0 +1,132 @@
+// Copyright 2015 The Goma Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+
+syntax = "proto2";
+
+package devtools_goma;
+
+// CompilerInfoData is a serializable format of CompilerInfo.
+//
+// NEXT ID TO USE: 34
+message CompilerInfoData {
+  // FileId of the compiler or subprogram.
+  // All fields must be synced with file_id.h
+  // NEXT ID TO USE: 9
+  message FileId {
+    optional uint32 volume_serial_number = 5;
+    optional uint32 file_index_high = 6;
+    optional uint32 file_index_low = 7;
+
+    optional uint64 dev = 1;
+    optional uint64 inode = 2;
+
+    optional int64 mtime = 3;
+    optional int64 size = 4;
+    optional bool is_directory = 8;
+  };
+
+  message SubprogramInfo {
+    optional string name = 1;
+    optional string hash = 2;
+    optional FileId file_id = 3;
+  };
+
+  message MacroValue {
+    optional string key = 1;
+    optional int64 value = 2;
+  }
+
+  // compiler name.
+  optional string name = 1;
+  // compiler version.
+  optional string version = 2;
+  // compiler target
+  optional string target = 3;
+
+  optional string lang = 4;
+
+  // some compiler command is just a wrapper for real compiler, and the command
+  // doesn't change when the real compiler is updated.
+  // TODO:
+  // Make only compiler info cache key has |cwd| and |local_compiler_path|
+  // so that duplicate compiler infos are merged.
+  optional FileId local_compiler_id = 5;
+  optional string local_compiler_path = 28;
+  optional string cwd = 32;
+  optional string local_compiler_hash = 29;
+
+  // Real compiler's FileId if real_compiler_path != local_compiler_path.
+  // Otherwise, real_compiler_id must be the same as local_compiler_id.
+  optional FileId real_compiler_id = 6;
+  optional string real_compiler_path = 8;
+  // hash is sha256 hash of real compiler.
+  // TODO: better to rename this to real_compiler_hash?
+  optional string hash = 7;
+
+  repeated string quote_include_paths = 31;
+  repeated string cxx_system_include_paths = 9;
+  repeated string system_include_paths = 10;
+  repeated string system_framework_paths = 11;
+
+  optional string predefined_macros = 12;
+
+  // unordered map.
+  repeated string supported_predefined_macros = 13;
+  repeated string hidden_predefined_macros = 27;
+  // unordered map.
+  // use map<string, int64>? b/21859856
+  repeated MacroValue has_feature = 14;
+  repeated MacroValue has_extension = 15;
+  repeated MacroValue has_attribute = 16;
+  repeated MacroValue has_cpp_attribute = 17;
+  repeated MacroValue has_declspec_attribute = 18;
+  repeated MacroValue has_builtin = 33;
+
+  // Automatically prepend this path before system include paths.
+  // This is required for Windows NaCl toolchain because all system include
+  // paths are relative paths from the toolchain root.
+  //
+  optional string toolchain_root = 19;
+
+  // Additional command line flags to be sent to backends.
+  // (for example, -fuse-init-arrary).
+  repeated string additional_flags = 20;
+
+  // A list of subprograms specified by -B flag.
+  repeated SubprogramInfo subprograms = 21;
+
+  // When taking compiler info is failed, |failed_at| is not 0.
+  // The error reason should be set in error_message.
+  optional int64 failed_at = 23;
+  optional string error_message = 24;
+  // if found is false, failed_at should be > 0, and error_message should not be
+  // empty.
+  optional bool found = 25;
+
+  // Path to compiler resource directory.
+  optional string resource_dir = 26;
+
+  // Timestamp this cache is used recently.
+  optional int64 last_used_at = 30;
+};
+
+// CompilerInfoDataTable is a table of CompilerInfoData indexed by
+// compiler_info_key.
+//
+// NEXT ID TO USE: 4
+message CompilerInfoDataTable {
+  message Entry {
+    repeated string keys = 1;
+    optional CompilerInfoData data = 2;
+  }
+
+  // CompilerInfoData per its hash.
+  repeated Entry compiler_info_data = 1;
+
+  optional int32 DEPRECATED_version = 2 [deprecated=true];
+
+  // When this revision is different, all cache will be disposed.
+  optional string built_revision = 3;
+};

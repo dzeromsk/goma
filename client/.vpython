@@ -1,0 +1,17 @@
+# This is a vpython "spec" file.
+#
+# This includes references for all non-stdlib python packages that the Goma
+# client depends on.
+#
+# Read more about `vpython` and how to modify this file here:
+#   https://chromium.googlesource.com/infra/infra/+/master/doc/users/vpython.md
+
+python_version: "2.7"
+
+wheel: <
+  name: "infra/python/wheels/pypiwin32/${vpython_platform}"
+  version: "version:219"
+
+  match_tag: < platform: "win32" >
+  match_tag: < platform: "win_amd64" >
+>

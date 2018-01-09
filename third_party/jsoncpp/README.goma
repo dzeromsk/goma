@@ -1,0 +1,13 @@
+Name: jsoncpp
+URL: https://github.com/open-source-parsers/jsoncpp
+Version: f572e8e42e22cfcf5ab0aea26574f408943edfa4
+License: MIT
+License File: LICENSE
+Security Critical: yes
+
+Description:
+oauth2 uses jsoncpp.
+
+Local modifications:
+Applied the overrides in chromium to build on libc++.
+See README.chromium (in chromium's third_party/jsoncpp) for more details.

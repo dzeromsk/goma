@@ -1,0 +1,76 @@
+#!/bin/sh
+#
+# Copyright 2012 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+#
+# A simple wrapper script to setup goma for chromeos build.
+#
+# Example usage:
+#
+# % /path/to/goma/goma-wrapper emerge-x86-generic chromeos-chrome
+# % /path/to/goma/goma-wrapper -j50 -l5 emerge-x86-generic chromeos-chrome
+
+FLAGS_jobs=
+FLAGS_load=
+while getopts 'j:l:' opt; do
+  case $opt in
+    'j') FLAGS_jobs=$OPTARG ;;
+    'l') FLAGS_load=$OPTARG ;;
+  esac
+done
+shift $(($OPTIND - 1))
+
+makeopts="-j${FLAGS_jobs:=100}"
+
+# scons also uses MAKEOPTS, but does not support the -l option.
+# We add it here only if explicitly set by the user, otherwise
+# let goma-make use its own default value.
+if [ -n "${FLAGS_load}" ]; then
+  makeopts="${makeopts} -l${FLAGS_load}"
+fi
+
+export GOMA_DIR=$(cd $(dirname $0); pwd)
+export GOMACC_PATH="$GOMA_DIR/gomacc"
+export MAKE="$GOMA_DIR/goma-make"
+export MAKEOPTS=${makeopts}
+# There file names will be used in ./configure . We cannot get benefit
+# of goma for ./configure because it is serial process and each code
+# is small.
+export GOMA_FALLBACK_INPUT_FILES=conftest.c,conftest.cc,conftest.cpp,_configtest.c
+
+# The logic should be the same as GetTempDirectory in mypath.cc.
+function get_temp_directory() {
+  # If GOMA_TMP_DIR exists, use it.
+  if [[ -n "${GOMA_TMP_DIR:-}" ]]; then
+    echo "${GOMA_TMP_DIR}"
+    return
+  fi
+
+  local user_candidates=(${SUDO_USER:-} ${USERNAME:-} ${USER:-} ${LOGNAME:-})
+  local user="unknown"
+  for uc in ${user_candidates[@]}; do
+    # user 'root' must be skipped. See GetUsernameEnv() in client/mypath.cc.
+    if [[ "${uc}" == "root" ]]; then
+      continue
+    fi
+    user="${uc}"
+    break
+  done
+
+  # When GOMA_TMP_DIR is not defined, check ${TMP}/goma_${user} etc.
+  local candidates=(${TEST_TMPDIR:-} ${TMPDIR:-} ${TMP:-})
+  for tmpdir in ${candidates[@]}; do
+    if [[ -d "${tmpdir}" ]]; then
+      echo "${tmpdir%/}/goma_${user}"
+      return
+    fi
+  done
+
+  echo "/tmp/goma_${user}"
+}
+
+export GOMA_TMP_DIR=$(get_temp_directory)
+
+exec "$@"

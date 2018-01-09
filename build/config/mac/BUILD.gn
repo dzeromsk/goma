@@ -1,0 +1,17 @@
+# Copyright 2014 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/mac/mac_sdk.gni")
+
+config("sdk") {
+  common_flags = [
+    "-isysroot",
+    mac_sdk_path,
+    "-mmacosx-version-min=10.7",
+  ]
+
+  cflags = common_flags
+  ldflags = common_flags
+  asmflags = common_flags
+}

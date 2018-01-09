@@ -1,0 +1,43 @@
+# Copied from chromium's testing/test.gni and modified for goma.
+#
+# Copyright 2015 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# ==============================================================================
+# TEST SETUP
+# ==============================================================================
+
+# Define a test as an executable (or apk on Android) with the "testonly" flag
+# set.
+# Variable:
+#   use_raw_android_executable: Use executable() rather than android_apk().
+#   use_native_activity: Test implements ANativeActivity_onCreate().
+template("test") {
+  executable(target_name) {
+    deps = []
+    forward_variables_from(invoker, "*")
+
+    testonly = true
+    deps += [
+      # All shared libraries must have the sanitizer deps to properly link in
+      # asan mode (this target will be empty in other cases).
+      "//build/config/sanitizers:deps",
+      # Give tests the default manifest on Windows (a no-op elsewhere).
+      #"//build/win:default_exe_manifest",
+    ]
+  }
+
+  if (defined(invoker.output_name) && target_name != invoker.output_name) {
+    group("${invoker.output_name}_run") {
+      testonly = true
+      deps = [
+        ":${invoker.target_name}",
+      ]
+    }
+  }
+}
+# Test defaults.
+#set_defaults("test") {
+#  configs = default_executable_configs
+#}

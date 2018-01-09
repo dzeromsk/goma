@@ -1,0 +1,17 @@
+// Copyright 2017 The Goma Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+syntax = "proto3";
+
+package devtools_goma;
+
+message LocalOutputCacheFile {
+  string filename = 1;
+  bytes content = 2;
+  bool is_executable = 3;
+}
+
+message LocalOutputCacheEntry {
+  repeated LocalOutputCacheFile files = 1;
+}

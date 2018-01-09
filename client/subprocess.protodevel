@@ -1,0 +1,130 @@
+// Copyright 2011 The Goma Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+//
+// Message used between compiler proxy and subprocess controller.
+
+syntax = "proto2";
+
+package devtools_goma;
+
+message SubProcessState {
+  // process state transitions.
+  // From           To             Event(s)
+  // SETUP          PENDING        register in subprocess controller
+  // PENDING        RUN            subprocess controller starts the proc
+  // PENDING        SIGNALED       Kill()
+  // RUN            SIGNALED       Kill(), kill proc
+  // *              FINISHED       subprocess is terminated.
+  //
+  // Invariants:
+  // SETUP          pid_ == -1
+  // PENDING        pid_ == -1
+  // RUN            pid_ > 0
+  // FINISHED       status_ is valid
+  enum State {
+    SETUP = 0;
+    PENDING = 1;
+    RUN = 2;
+    SIGNALED = 3;
+    FINISHED = 4;
+    NUM_STATE = 5;
+  };
+
+  enum Pid {
+    kInvalidPid = -1;
+  };
+}
+
+message SubProcessReq {
+  enum Priority {
+    HIGHEST_PRIORITY = 0;
+    HIGH_PRIORITY = 1;
+    LOW_PRIORITY = 2;
+  };
+  enum Weight {
+    HEAVY_WEIGHT = 0;
+    LIGHT_WEIGHT = 1;
+  };
+  enum OutputOption {
+    MERGE_STDOUT_STDERR = 0;
+    STDOUT_ONLY = 1;
+  }
+
+  // Unique id of subprocess. Assigned by SubProcessControllerClient.
+  optional int32 id = 1;
+  optional string trace_id = 2;
+
+  optional string prog = 10;
+  repeated string argv = 11;
+  repeated string env = 12;
+  optional string cwd = 13;
+  optional string stdin_filename = 14;
+  optional string stdout_filename = 15;
+  optional string stderr_filename = 16;
+  optional OutputOption output_option = 17 [default=MERGE_STDOUT_STDERR];
+  optional int32 umask = 18 [default = -1];
+
+  optional Priority priority = 20;
+  optional Weight weight = 21;
+
+  // If detach is true, no feedback comes from subprocess controller server.
+  optional bool detach = 30;
+};
+
+message SubProcessRun {
+  optional int32 id = 1;
+};
+
+message SubProcessKill {
+  optional int32 id = 1;
+};
+
+message SubProcessSetOption {
+  // The new limit of max subprocs.
+  optional int32 max_subprocs = 1;
+  // The new limit of max subprocs for low priority process.
+  optional int32 max_subprocs_low_priority = 2;
+  // The new limit of max subprocs for heavy weight process.
+  optional int32 max_subprocs_heavy_weight = 3;
+};
+
+message SubProcessStarted {
+  optional int32 id = 1;
+  optional int32 pid = 2 [default = -1];  // kInvalidPid
+  optional int32 pending_ms = 10;
+};
+
+message SubProcessTerminated {
+  // Since program exit status is usually positive value on Posix and Windows,
+  // we use negative value here.
+  enum TerminateStatus {
+    // This means task is not started yet.
+    // This is the default value of status.
+    kNotStarted = -256;
+    // This means task is not started because of subprocess_controller's error.
+    kInternalError = -257;
+  }
+
+  // If status == kInternalError, one of followings should be set to error.
+  enum ErrorTerminate {
+    // If kill of the process failed.
+    kFailedToKill = 1;
+    // If the given id is not registered in subprocess_controller_server.
+    kFailedToLookup = 2;
+    // If subprocess_controller_server failed to spawn a subprocess.
+    kFailedToSpawn = 3;
+  };
+
+  optional int32 id = 1;
+  // status should be either of process'es exit status or enum TerminateStatus.
+  optional int32 status = 2 [default = -256];  // kNotStarted.
+  // If signaled, this value should be set.
+  optional int32 term_signal = 3;
+  // status should be either of default or enum ErrorTerminate.
+  optional ErrorTerminate error = 4;
+
+  optional int32 run_ms = 10;
+  optional int64 mem_kb = 11;
+};

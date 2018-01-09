@@ -1,0 +1,72 @@
+// Copyright 2014 The Goma Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+
+syntax = "proto2";
+
+package devtools_goma;
+
+// GomaDeps contains all information for DepsCache.
+// We will make the following map from this information.
+// <identifier> -> <input file>s
+// <input file> -> <file id>, <directive hash>
+//
+// - <identifier> is hash created from command line.
+// - <input file> is a file that will be sent to goma server
+//   in the <identifier> command line.
+// - <file id> is a FileId of <input file>
+// - <directive hash> is a hash value of <input file>'s directive lines.
+//
+// This information is saved to deps cache file.
+
+message GomaDeps {
+  required GomaFilenameIdTable filename_id_table = 1;
+  // id 2, 3 are deleted.
+  required GomaDepsIdTable deps_id_table = 4;
+  required GomaDependencyTable dependency_table = 5;
+  optional int32 DEPRECATED_version = 6 [deprecated=true];
+  // When the built revision does not match with the real kBuiltRevision,
+  // we dispose cache.
+  optional string built_revision = 7;
+}
+
+// GomaFilenameIdTable is a bimap (filename <-> int (filename_id))
+// Since more than 64MB proto cannot be saved by default, we need to reduce the
+// proto size. There are lots of the same filenames, so we use integer id
+// instead of using filename as is.
+message GomaFilenameIdTable {
+  optional int32 DEPRECATED_next_available_id = 1 [deprecated=true];
+  repeated GomaFilenameIdTableRecord record = 2;
+}
+
+message GomaFilenameIdTableRecord {
+  required string filename = 1;
+  required uint32 filename_id = 2;
+}
+
+// GomaDepsIdTable is a map (<filename_id> -> <file id>, <directive_hash>)
+message GomaDepsIdTable {
+  repeated GomaDepsIdTableRecord record = 1;
+}
+
+message GomaDepsIdTableRecord {
+  required uint32 filename_id = 1;
+  optional uint64 dev = 2;
+  optional uint64 inode = 3;
+  required int64 mtime = 4;
+  required int64 size = 5;
+  required string directive_hash = 6;
+}
+
+// GomaDependencyTable is a map record
+// (<identifer> -> <input file's filename_id>s)
+message GomaDependencyTable {
+  repeated GomaDependencyTableRecord record = 1;
+}
+
+message GomaDependencyTableRecord {
+  required string identifier = 1;
+  repeated int32 filename_id = 2;
+  optional int64 last_used_time = 3;
+}

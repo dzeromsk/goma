@@ -1,0 +1,92 @@
+config("chromium_base_config") {
+  include_dirs = [ "." ]
+}
+
+static_library("string") {
+  sources = [
+    "string_piece.cc",
+    "string_piece.h",
+    "string_util.h",
+  ]
+
+  public_configs = [ ":chromium_base_config" ]
+}
+
+executable("string_piece_unittest") {
+  testonly = true
+  sources = [
+    "string_piece_unittest.cc",
+  ]
+  deps = [
+    ":string",
+    "//build/config/sanitizers:deps",
+    "//third_party:glog",
+    "//third_party:gtest",
+    "//third_party:gtest_main",
+  ]
+}
+
+static_library("cpu") {
+  sources = [
+    "cpu.cc",
+    "cpu.h",
+  ]
+
+  public_configs = [ ":chromium_base_config" ]
+}
+
+executable("cpu_unittest") {
+  testonly = true
+  sources = [
+    "cpu_unittest.cc",
+  ]
+  deps = [
+    ":cpu",
+    ":string",
+    "//third_party:glog",
+    "//third_party:gtest",
+    "//third_party:gtest_main",
+  ]
+}
+
+static_library("platform_thread") {
+  sources = [
+    "platform_thread.cc",
+    "platform_thread.h",
+  ]
+
+  deps = [
+    "//third_party:glog",
+  ]
+
+  public_configs = [ ":chromium_base_config" ]
+}
+
+if (os == "mac") {
+  static_library("mac_version") {
+    sources = [
+      "mac_version.cc",
+      "mac_version.h",
+    ]
+
+    deps = [
+      "//third_party:glog",
+    ]
+
+    public_configs = [ ":chromium_base_config" ]
+  }
+
+  executable("mac_version_unittest") {
+    testonly = true
+    sources = [
+      "mac_version_unittest.cc",
+    ]
+    deps = [
+      ":mac_version",
+      ":string",
+      "//third_party:glog",
+      "//third_party:gtest",
+      "//third_party:gtest_main",
+    ]
+  }
+}

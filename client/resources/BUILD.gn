@@ -1,0 +1,129 @@
+# Copyright 2017 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+genc = "../genc.py"
+
+config("include_target_gen_dir") {
+  include_dirs = [ "$target_gen_dir" ]
+}
+
+action("gen_compiler_proxy_status_html5") {
+  script = genc
+  sources = [
+    "compiler_proxy_status_html5.html",
+  ]
+  outputs = [
+    "$target_gen_dir/compiler_proxy_status_html5.c",
+    "$target_gen_dir/compiler_proxy_status_html5.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+    rebase_path("compiler_proxy_status_html5.html"),
+  ]
+  public_configs = [ ":include_target_gen_dir" ]
+}
+
+action("gen_compiler_proxy_status_script") {
+  script = genc
+  sources = [
+    "compiler_proxy_status_script.js",
+  ]
+  outputs = [
+    "$target_gen_dir/compiler_proxy_status_script.c",
+    "$target_gen_dir/compiler_proxy_status_script.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+    rebase_path("compiler_proxy_status_script.js"),
+  ]
+  public_configs = [ ":include_target_gen_dir" ]
+}
+
+action("gen_compiler_proxy_contentionz_script") {
+  script = genc
+  sources = [
+    "compiler_proxy_contentionz_script.js",
+  ]
+  outputs = [
+    "$target_gen_dir/compiler_proxy_contentionz_script.c",
+    "$target_gen_dir/compiler_proxy_contentionz_script.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+    rebase_path("compiler_proxy_contentionz_script.js"),
+  ]
+  public_configs = [ ":include_target_gen_dir" ]
+}
+
+action("gen_compiler_proxy_status_style") {
+  script = genc
+  sources = [
+    "compiler_proxy_status_style.css",
+  ]
+  outputs = [
+    "$target_gen_dir/compiler_proxy_status_style.c",
+    "$target_gen_dir/compiler_proxy_status_style.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+    rebase_path("compiler_proxy_status_style.css"),
+  ]
+  public_configs = [ ":include_target_gen_dir" ]
+}
+
+action("gen_compilerz_html") {
+  script = genc
+  sources = [
+    "compilerz_html.html",
+  ]
+  outputs = [
+    "$target_gen_dir/compilerz_html.c",
+    "$target_gen_dir/compilerz_html.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+    rebase_path("compilerz_html.html"),
+  ]
+  public_configs = [ ":include_target_gen_dir" ]
+}
+
+action("gen_compilerz_script") {
+  script = genc
+  sources = [
+    "compilerz_script.js",
+  ]
+  outputs = [
+    "$target_gen_dir/compilerz_script.c",
+    "$target_gen_dir/compilerz_script.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+    rebase_path("compilerz_script.js"),
+  ]
+  public_configs = [ ":include_target_gen_dir" ]
+}
+
+action("gen_compilerz_style") {
+  script = genc
+  sources = [
+    "compilerz_style.css",
+  ]
+  outputs = [
+    "$target_gen_dir/compilerz_style.c",
+    "$target_gen_dir/compilerz_style.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+    rebase_path("compilerz_style.css"),
+  ]
+  public_configs = [ ":include_target_gen_dir" ]
+}
+
