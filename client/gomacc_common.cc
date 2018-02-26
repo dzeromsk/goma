@@ -158,7 +158,11 @@ int GetCompilerProxyPort(GomaIPC::Status* status) {
 bool StartCompilerProxy() {
   if (!FLAGS_START_COMPILER_PROXY) {
     fprintf(stderr,
-            "compiler proxy isn't running. Exiting.");
+#if defined(_WIN32)
+            "Compiler proxy isn't running. Run 'goma_ctl.bat ensure_start'.");
+#else
+            "Compiler proxy isn't running. Run 'goma_ctl.py ensure_start'.");
+#endif
     exit(1);
   }
 
