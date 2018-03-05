@@ -312,6 +312,7 @@ def CopyDlls(target_dir, configuration, target_cpu):
     _CopyPGORuntime(target_dir, target_cpu)
 
   _CopyDebugger(target_dir, target_cpu)
+  _CopyMSDIA(target_dir, target_cpu)
 
 
 def _CopyDebugger(target_dir, target_cpu):
@@ -345,6 +346,27 @@ def _CopyDebugger(target_dir, target_cpu):
                         ' 10 SDK.' % (debug_file, full_path))
     target_path = os.path.join(target_dir, debug_file)
     _CopyRuntimeImpl(target_path, full_path)
+
+
+def _CopyMSDIA(target_dir, target_cpu):
+  """Copy msdia140.dll into the requested directory.
+
+  Arguments:
+    target_dir (string) target directory
+    target_cpu (string) one of 'x86' or 'x64'
+  """
+
+  SetEnvironmentAndGetRuntimeDllDirs()
+  vs_path = NormalizePath(os.environ['GYP_MSVS_OVERRIDE_PATH'])
+
+  if target_cpu == 'x86':
+    msdia_path = os.path.join(vs_path, 'DIA SDK', 'bin', 'msdia140.dll')
+  else:
+    msdia_path = os.path.join(vs_path, 'DIA SDK', 'bin',
+                              'amd64', 'msdia140.dll')
+
+  target_path = os.path.join(target_dir, 'msdia140.dll')
+  _CopyRuntimeImpl(target_path, msdia_path)
 
 
 def _GetDesiredVsToolchainHashes():
