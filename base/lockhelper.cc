@@ -23,18 +23,18 @@ Lock::~Lock() {
   ::DeleteCriticalSection(&os_lock_);
 }
 
-bool Lock::Try() const {
+bool Lock::Try() {
   if (::TryEnterCriticalSection(&os_lock_) != FALSE) {
     return true;
   }
   return false;
 }
 
-void Lock::Acquire() const {
+void Lock::Acquire() {
   ::EnterCriticalSection(&os_lock_);
 }
 
-void Lock::Release() const {
+void Lock::Release() {
   ::LeaveCriticalSection(&os_lock_);
 }
 
@@ -45,33 +45,31 @@ ReadWriteLock::ReadWriteLock() {
 ReadWriteLock::~ReadWriteLock() {
 }
 
-void ReadWriteLock::AcquireShared() const {
+void ReadWriteLock::AcquireShared() {
   ::AcquireSRWLockShared(&srw_lock_);
 }
 
-void ReadWriteLock::ReleaseShared() const {
+void ReadWriteLock::ReleaseShared() {
   ::ReleaseSRWLockShared(&srw_lock_);
 }
 
-void ReadWriteLock::AcquireExclusive() const {
+void ReadWriteLock::AcquireExclusive() {
   ::AcquireSRWLockExclusive(&srw_lock_);
 }
 
-void ReadWriteLock::ReleaseExclusive() const {
+void ReadWriteLock::ReleaseExclusive() {
   ::ReleaseSRWLockExclusive(&srw_lock_);
 }
 
-ConditionVariable::ConditionVariable(Lock* user_lock)
-    : user_lock_(user_lock) {
+ConditionVariable::ConditionVariable() {
   ::InitializeConditionVariable(&cv_);
-  DCHECK(user_lock);
 }
 
 ConditionVariable::~ConditionVariable() {
 }
 
-void ConditionVariable::Wait() {
-  CRITICAL_SECTION* cs = &user_lock_->os_lock_;
+void ConditionVariable::Wait(Lock* lock) {
+  CRITICAL_SECTION* cs = &lock->os_lock_;
 
   if (FALSE == SleepConditionVariableCS(&cv_, cs, INFINITE)) {
     DCHECK(GetLastError() != WAIT_TIMEOUT);
@@ -96,15 +94,15 @@ Lock::~Lock() {
   pthread_mutex_destroy(&os_lock_);
 }
 
-bool Lock::Try() const {
+bool Lock::Try() {
   return (pthread_mutex_trylock(&os_lock_) == 0);
 }
 
-void Lock::Acquire() const {
+void Lock::Acquire() {
   pthread_mutex_lock(&os_lock_);
 }
 
-void Lock::Release() const {
+void Lock::Release() {
   pthread_mutex_unlock(&os_lock_);
 }
 
@@ -116,24 +114,23 @@ ReadWriteLock::~ReadWriteLock() {
   pthread_rwlock_destroy(&os_rwlock_);
 }
 
-void ReadWriteLock::AcquireShared() const {
+void ReadWriteLock::AcquireShared() {
   pthread_rwlock_rdlock(&os_rwlock_);
 }
 
-void ReadWriteLock::ReleaseShared() const {
+void ReadWriteLock::ReleaseShared() {
   pthread_rwlock_unlock(&os_rwlock_);
 }
 
-void ReadWriteLock::AcquireExclusive() const {
+void ReadWriteLock::AcquireExclusive() {
   pthread_rwlock_wrlock(&os_rwlock_);
 }
 
-void ReadWriteLock::ReleaseExclusive() const {
+void ReadWriteLock::ReleaseExclusive() {
   pthread_rwlock_unlock(&os_rwlock_);
 }
 
-ConditionVariable::ConditionVariable(Lock* user_lock)
-    : user_mutex_(&user_lock->os_lock_) {
+ConditionVariable::ConditionVariable() {
   pthread_cond_init(&condition_, nullptr);
 }
 
@@ -141,8 +138,8 @@ ConditionVariable::~ConditionVariable() {
   pthread_cond_destroy(&condition_);
 }
 
-void ConditionVariable::Wait() {
-  pthread_cond_wait(&condition_, user_mutex_);
+void ConditionVariable::Wait(Lock* user_lock) {
+  pthread_cond_wait(&condition_, &user_lock->os_lock_);
 }
 
 void ConditionVariable::Signal() {

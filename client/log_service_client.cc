@@ -5,6 +5,7 @@
 
 #include "log_service_client.h"
 
+#include "absl/strings/match.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
@@ -13,7 +14,6 @@
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_log.pb.h"
 MSVC_POP_WARNING()
-#include "string_piece_utils.h"
 #include "http_rpc.h"
 #include "worker_thread_manager.h"
 
@@ -93,7 +93,7 @@ class LogServiceClient::SaveLogJob {
     } else if (options.luci_context_auth.enabled()) {
       log->set_auth_type(ExecLog_AuthenticationType_OAUTH2_LUCI_LOCAL_AUTH);
     } else if (!options.authorization.empty()) {
-      if (strings::StartsWith(options.authorization, "Bearer ")) {
+      if (absl::StartsWith(options.authorization, "Bearer ")) {
         log->set_auth_type(ExecLog_AuthenticationType_OAUTH2_UNSPEC);
       } else {
         log->set_auth_type(ExecLog_AuthenticationType_UNKNOWN);
@@ -177,7 +177,6 @@ LogServiceClient::LogServiceClient(
       max_log_in_req_(max_log_in_req),
       max_pending_ms_(max_pending_ms),
       periodic_callback_id_(kInvalidPeriodicClosureId),
-      cond_(&mu_),
       save_log_job_(nullptr),
       num_save_log_job_(0),
       last_timestamp_ms_(0) {
@@ -291,7 +290,7 @@ void LogServiceClient::Wait() {
   }
   while (save_log_job_ != nullptr || num_save_log_job_ > 0) {
     LOG(INFO) << "num_save_log_job=" << num_save_log_job_;
-    cond_.Wait();
+    cond_.Wait(&mu_);
   }
 }
 

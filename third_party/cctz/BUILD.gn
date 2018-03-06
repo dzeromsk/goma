@@ -1,0 +1,48 @@
+# ported from BUILD file.
+
+config("cctz_config") {
+  include_dirs = [ "src/include" ]
+}
+
+static_library("civil_time") {
+  sources = [
+    "src/include/cctz/civil_time.h",
+    "src/include/cctz/civil_time_detail.h",
+    "src/src/civil_time_detail.cc",
+  ]
+
+  configs -= [ "//build/config/compiler:goma_code" ]
+  configs += [ "//build/config/compiler:no_goma_code" ]
+  public_configs = [ ":cctz_config" ]
+}
+
+static_library("time_zone") {
+  sources = [
+    "src/include/cctz/time_zone.h",
+    "src/include/cctz/zone_info_source.h",
+    "src/src/time_zone_fixed.cc",
+    "src/src/time_zone_fixed.h",
+    "src/src/time_zone_format.cc",
+    "src/src/time_zone_if.cc",
+    "src/src/time_zone_if.h",
+    "src/src/time_zone_impl.cc",
+    "src/src/time_zone_impl.h",
+    "src/src/time_zone_info.cc",
+    "src/src/time_zone_info.h",
+    "src/src/time_zone_libc.cc",
+    "src/src/time_zone_libc.h",
+    "src/src/time_zone_lookup.cc",
+    "src/src/time_zone_posix.cc",
+    "src/src/time_zone_posix.h",
+    "src/src/tzfile.h",
+    "src/src/zone_info_source.cc",
+  ]
+
+  deps = [
+    ":civil_time",
+  ]
+
+  configs -= [ "//build/config/compiler:goma_code" ]
+  configs += [ "//build/config/compiler:no_goma_code" ]
+  public_configs = [ ":cctz_config" ]
+}

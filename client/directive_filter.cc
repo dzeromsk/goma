@@ -13,10 +13,10 @@
 #include <memory>
 #include <vector>
 
+#include "absl/strings/match.h"
+#include "absl/strings/string_view.h"
 #include "content.h"
 #include "glog/logging.h"
-#include "string_piece.h"
-#include "string_piece_utils.h"
 
 using std::string;
 
@@ -245,25 +245,25 @@ size_t DirectiveFilter::FilterOnlyDirectives(
 size_t DirectiveFilter::RemoveDeadDirectives(
     const char* src, const char* end, char* dst) {
   const char* const original_dst = dst;
-  std::vector<StringPiece> directive_stack;
+  std::vector<absl::string_view> directive_stack;
 
   while (src != end) {
     const char* next_line_head = DirectiveFilter::NextLineHead(src, end);
-    StringPiece current_directive_line(src, next_line_head - src);
+    absl::string_view current_directive_line(src, next_line_head - src);
 
     src = next_line_head;
 
     // Drop "#error" support for performance.
     // We assume "#error" almost never happens,
     // so let compiler detect #error failure instead of goma preprocessor.
-    if (strings::StartsWith(current_directive_line, "#error")) {
+    if (absl::StartsWith(current_directive_line, "#error")) {
       continue;
     }
 
     // Drop pragma support other than once.
     // "#pragma once" is only supported pragma in goma preprocessor.
-    if (strings::StartsWith(current_directive_line, "#pragma") &&
-        current_directive_line.find("once") == StringPiece::npos) {
+    if (absl::StartsWith(current_directive_line, "#pragma") &&
+        current_directive_line.find("once") == absl::string_view::npos) {
       continue;
     }
 
@@ -276,15 +276,15 @@ size_t DirectiveFilter::RemoveDeadDirectives(
     // #else
     //   std::cout << "some error" << std::endl;
     // #endif
-    if (strings::StartsWith(current_directive_line, "#endif")) {
+    if (absl::StartsWith(current_directive_line, "#endif")) {
       while (!directive_stack.empty() &&
-             (strings::StartsWith(directive_stack.back(), "#else") ||
-              strings::StartsWith(directive_stack.back(), "#elif"))) {
+             (absl::StartsWith(directive_stack.back(), "#else") ||
+              absl::StartsWith(directive_stack.back(), "#elif"))) {
         directive_stack.pop_back();
       }
 
       if (!directive_stack.empty() &&
-          strings::StartsWith(directive_stack.back(), "#if")) {
+          absl::StartsWith(directive_stack.back(), "#if")) {
         directive_stack.pop_back();
       } else {
         directive_stack.push_back(current_directive_line);

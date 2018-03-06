@@ -8,6 +8,8 @@
 #include <sstream>
 #include <vector>
 
+#include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
@@ -19,8 +21,6 @@
 #include "jwt.h"
 #include "scoped_fd.h"
 #include "socket_factory.h"
-#include "string_piece.h"
-#include "string_piece_utils.h"
 
 namespace devtools_goma {
 
@@ -49,7 +49,7 @@ class AuthRefreshConfig {
   virtual bool SetOAuth2Config(const OAuth2Config& config) = 0;
   virtual bool CanRefresh() const = 0;
   virtual bool InitRequest(HttpRequest* req) const = 0;
-  // TODO: use StringPiece for resp_body instead?
+  // TODO: use absl::string_view for resp_body instead?
   virtual bool ParseResponseBody(const string& resp_body,
                                  string* token_type,
                                  string* access_token,
@@ -68,8 +68,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
       : wm_(wm),
         config_(std::move(config)),
         client_(std::move(client)),
-        req_(std::move(req)),
-        cond_(&mu_) {
+        req_(std::move(req)) {
     LOG_IF(ERROR, !config_->enabled() || !config_->valid())
         << "config enabled=" << config_->enabled()
         << " valid=" << config_->valid();
@@ -280,7 +279,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
       LOG(INFO) << "Wait cancel_refresh_now=" << cancel_refresh_now_;
       LOG(INFO) << "Wait cancel_refresh_=" << cancel_refresh_;
       while (cancel_refresh_now_ != nullptr || cancel_refresh_ != nullptr) {
-        cond_.Wait();
+        cond_.Wait(&mu_);
       }
     }
     client_.reset();
@@ -511,7 +510,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
   HttpResponse resp_;
   std::unique_ptr<HttpClient::Status> status_;
 
-  Lock mu_;  // protecting following members.
+  mutable Lock mu_;  // protecting following members.
   // signaled when cancel_refresh_now_ or cancel_refresh_ become nullptr.
   ConditionVariable cond_;
   State state_ = NOT_STARTED;
@@ -741,7 +740,7 @@ class ServiceAccountRefreshConfig : public OAuth2RefreshConfig {
     cs.expires_in_sec = 3600;
     JsonWebToken jwt(cs);
     string assertion = jwt.Token(*key, time(nullptr));
-    const string req_body = strings::StrCat(
+    const string req_body = absl::StrCat(
         "grant_type=", JsonWebToken::kGrantTypeEncoded,
         "&assertion=", assertion);
     VLOG(1) << req_body;
@@ -802,7 +801,7 @@ class RefreshTokenRefreshConfig : public OAuth2RefreshConfig {
     LOG(INFO) << "init request:refresh token";
 
     // TODO: reconstruct client if config_.token_uri has been changed?
-    const string req_body = strings::StrCat(
+    const string req_body = absl::StrCat(
         "client_id=", config_.client_id,
         "&client_secret=", config_.client_secret,
         "&refresh_token=", config_.refresh_token,

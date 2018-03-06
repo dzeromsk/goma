@@ -15,16 +15,15 @@
 
 #include <glog/logging.h>
 
+#include "absl/strings/string_view.h"
+#include "absl/strings/match.h"
+#include "cmdline_parser.h"
 #include "compiler_specific.h"
 #include "file.h"
 #include "file_dir.h"
 #include "mypath.h"
 #include "path.h"
-#include "string_piece.h"
-#include "strutil.h"
 #include "util.h"
-
-#define MAX_ENV_BLOCK 32767
 
 namespace {
 
@@ -37,24 +36,40 @@ string GetSubprocTempDirectory() {
   return file::JoinPath(devtools_goma::GetGomaTmpDir(), oss.str());
 }
 
-bool IsEnvVar(const string& env_line, const string& env_prefix) {
-  return var_strcaseprefix(env_line.c_str(), env_prefix.c_str()) != nullptr;
+bool IsEnvVar(absl::string_view env_line, absl::string_view env_prefix) {
+  return absl::StartsWithIgnoreCase(env_line, env_prefix);
 }
 
 string EscapeCommandlineArg(const string& arg) {
   // TODO: More accurate escape.
+  // https://msdn.microsoft.com/en-us/library/17w5ykft(v=vs.85).aspx
+  if (!arg.empty() && arg.find_first_of(" \t\n\v\"") == string::npos) {
+    return arg;
+  }
 
   string escaped_arg;
-  for (char ch : arg) {
-    if (ch == '"') {
+
+  // escaped_arg will be double quoted.
+  bool quote_end = true;
+
+  // construct escaped arg from back to check double quotation is preceded
+  // by back slash.
+  for (int i = static_cast<int>(arg.size()) - 1; i >= 0; --i) {
+    if (arg[i] == '"') {
+      escaped_arg += "\"\\";
+      quote_end = true;
+      continue;
+    } else if (arg[i] == '\\' && quote_end) {
       escaped_arg += '\\';
+    } else {
+      quote_end = false;
     }
-    escaped_arg += ch;
+    escaped_arg += arg[i];
   }
 
-  if (escaped_arg.find(' ') == string::npos) {
-    return escaped_arg;
-  }
+  std::reverse(escaped_arg.begin(), escaped_arg.end());
+
+  VLOG(1) << "arg: `" << arg << "` -> `" << '"' + escaped_arg + '"' << "`";
 
   return '"' + escaped_arg + '"';
 }
@@ -125,17 +140,15 @@ void PrepareEnvBlock(Iter begin, Iter end, std::vector<char>* env) {
   env->at(index) = 0;
 }
 
-string CreateJobName(DWORD pid, StringPiece command) {
+string CreateJobName(DWORD pid, const string& command) {
   std::ostringstream ss;
-  // Get <prog> from "<prog>".
-  size_t pos = command.find_first_of('"', 1);
-  if (pos != StringPiece::npos) {
-    command = command.substr(1, pos - 1);
-  }
+  // Get <prog> from |command|.
+  std::vector<string> args;
+  devtools_goma::ParseWinCommandLineToArgv(command, &args);
 
   ss << "goma job:"
      << " pid=" << pid
-     << " exe=" << file::Basename(command);
+     << " exe=" << file::Basename(args[0]);
   string job_name(ss.str());
   if (job_name.length() > MAX_PATH)
     job_name.erase(MAX_PATH);

@@ -34,9 +34,11 @@ config("using_proto") {
     "$root_gen_dir",
   ]
 
+  cflags = []
+
   if (os == "win") {
     # Suppress warnings on Windows.
-    cflags = [
+    cflags += [
       "/wd4512",  # assignment operator could not be generated
       "/wd4244",  # '=': conversion from 'uint32' to 'uint8'.
       "/wd4127",  # conditional expression is constant
@@ -48,8 +50,8 @@ config("using_proto") {
       "/wd4456",  # declaration hides previous local declaration
     ]
   }
-  if (is_posix) {
-    cflags = [
+  if (is_posix || is_clang) {
+    cflags += [
       # Not to warn for headers.
       "-Wno-unused-parameter",
       "-Wno-sign-compare",

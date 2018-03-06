@@ -21,7 +21,7 @@ declare_args() {
   with_cpu_profiling = false
   with_heap_profiling = false
   dcheck_always_on = false
-  with_counterz = false
+  with_counterz = true
 
   # Enable revision check. If true, gomacc revision and compiler_proxy
   # revision differ, a user will see warnings.

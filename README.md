@@ -38,10 +38,11 @@ On Windows, install Visual Studio 2017. Community edition is OK.
 ## Checkout source
 
 ```
-$ mkdir goma
-$ cd goma
-$ fetch goma_client
+$ gclient config https://chromium.googlesource.com/infra/goma/client
+$ gclient sync
+$ cd client
 ```
+
 
 We assume goma is checked out to `$GOMA_SRC`.
 

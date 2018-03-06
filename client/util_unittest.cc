@@ -12,6 +12,7 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
+#include "absl/strings/str_split.h"
 #include "unittest_util.h"
 
 using std::string;
@@ -176,4 +177,9 @@ TEST(Util, ToShortNodename) {
   for (const auto& tc : testcases) {
     EXPECT_EQ(tc.second, devtools_goma::ToShortNodename(tc.first));
   }
+}
+
+TEST(Util, ToVector) {
+  std::vector<string> vs = ToVector(absl::StrSplit("x:y:z", ':'));
+  EXPECT_EQ((std::vector<string> { "x", "y", "z" }), vs);
 }

@@ -10,6 +10,7 @@
 #include <memory>
 #include <sstream>
 
+#include "absl/strings/string_view.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
@@ -21,7 +22,6 @@
 #include "oauth2.h"
 #include "platform_thread.h"
 #include "socket_factory.h"
-#include "string_piece.h"
 #include "worker_thread_manager.h"
 
 #include "goma_flags.cc"
@@ -155,7 +155,7 @@ int main(int argc, char* argv[], const char* envp[]) {
     return 1;
   }
   LOG(INFO) << status.DebugString();
-  StringPiece body = fetcher->resp().Body();
+  absl::string_view body = fetcher->resp().Body();
   if (status.http_return_code != 200) {
     LOG(ERROR) << "fetch " << argv[1]
                << " http code:" << status.http_return_code

@@ -6,13 +6,13 @@
 
 #include "execreq_normalizer.h"
 
+#include "absl/strings/match.h"
 #include "compiler_flags.h"
 #include "execreq_verifier.h"
 #include "google/protobuf/text_format.h"
 #include "google/protobuf/util/message_differencer.h"
 #include "gtest/gtest.h"
 #include "path.h"
-#include "string_piece_utils.h"
 using google::protobuf::TextFormat;
 using google::protobuf::util::MessageDifferencer;
 
@@ -2272,7 +2272,7 @@ TEST(ExecReqNormalizerTest, DropDeveloperDir) {
   req.add_env("DEVELOPER_DIR=/some/where/to/developer_dir");
   bool found_developer_env = false;
   for (const auto& env : req.env()) {
-    if (strings::StartsWith(env, "DEVELOPER_DIR=")) {
+    if (absl::StartsWith(env, "DEVELOPER_DIR=")) {
       found_developer_env = true;
       break;
     }
@@ -2284,7 +2284,7 @@ TEST(ExecReqNormalizerTest, DropDeveloperDir) {
 
   found_developer_env = false;
   for (const auto& env : req.env()) {
-    if (strings::StartsWith(env, "DEVELOPER_DIR=")) {
+    if (absl::StartsWith(env, "DEVELOPER_DIR=")) {
       found_developer_env = true;
       break;
     }

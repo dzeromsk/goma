@@ -8,8 +8,8 @@
 
 #include <string.h>
 
+#include "absl/strings/string_view.h"
 #include "glog/logging.h"
-#include "string_piece.h"
 
 namespace {
 

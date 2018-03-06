@@ -16,8 +16,8 @@
 #include <glog/logging.h>
 #include <glog/stl_logging.h>
 
+#include "absl/strings/match.h"
 #include "path.h"
-#include "string_piece_utils.h"
 
 #ifdef _WIN32
 #include "posix_helper_win.h"
@@ -47,12 +47,12 @@ string LibraryPathResolver::ExpandLibraryPath(const string& value) const {
   string so_name = lib_name + value + ".dylib";
   string ar_name = lib_name + value + ".a";
   // See: linker manual of Mac (-lx).
-  if (strings::EndsWith(value, ".o")) {
+  if (absl::EndsWith(value, ".o")) {
     so_name = value;
     ar_name = value;
   }
 #elif defined(_WIN32)
-  StringPiece ext = file::Extension(value);
+  absl::string_view ext = file::Extension(value);
   string so_name = value;
   if (ext != "tlb") {
     so_name = value + ".tlb";
@@ -66,7 +66,7 @@ string LibraryPathResolver::ExpandLibraryPath(const string& value) const {
   string so_name = lib_name + value + ".so";
   string ar_name = lib_name + value + ".a";
   // See: GNU linker manual (-l namespace).
-  if (strings::StartsWith(value, ":")) {
+  if (absl::StartsWith(value, ":")) {
     so_name = ar_name = value.substr(1);
   }
 #endif

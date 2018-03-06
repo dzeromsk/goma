@@ -42,4 +42,65 @@ TEST(CppTokenizerTest, IsAfterEndOfLine) {
   EXPECT_FALSE(CppTokenizer::IsAfterEndOfLine(strchr(src10, '#'), src10));
 }
 
+bool ReadCharLiteral(const string& s, CppToken* token, bool check_end) {
+  std::unique_ptr<Content> c(Content::CreateFromString(s));
+
+  CppInputStream stream(std::move(c), FileId(), "");
+  CHECK_EQ(stream.GetChar(), '\'');
+
+  return
+      CppTokenizer::ReadCharLiteral(&stream, token) &&
+      (!check_end || stream.cur() == stream.end());
+}
+
+TEST(CppTokenizerTest, ReadCharLiteral) {
+  // non-ASCII system is not supported.
+
+  const bool kCHECK_END = true;
+  CppToken token;
+  EXPECT_TRUE(ReadCharLiteral("' '", &token, kCHECK_END));
+  EXPECT_EQ(CppToken(CppToken::CHAR_LITERAL, ' '), token);
+
+  EXPECT_TRUE(ReadCharLiteral("'*'", &token, kCHECK_END));
+  EXPECT_EQ(CppToken(CppToken::CHAR_LITERAL, '*'), token);
+
+  EXPECT_TRUE(ReadCharLiteral("'\\\\'", &token, kCHECK_END));
+  EXPECT_EQ(CppToken(CppToken::CHAR_LITERAL, '\\'), token);
+
+  EXPECT_TRUE(ReadCharLiteral("'\\n'", &token, kCHECK_END));
+  EXPECT_EQ(CppToken(CppToken::CHAR_LITERAL, '\n'), token);
+
+  EXPECT_TRUE(ReadCharLiteral("'\\0'", &token, kCHECK_END));
+  EXPECT_EQ(CppToken(CppToken::CHAR_LITERAL, '\0'), token);
+
+  EXPECT_TRUE(ReadCharLiteral("'A'", &token, kCHECK_END));
+  EXPECT_EQ(CppToken(CppToken::CHAR_LITERAL, 'A'), token);
+
+  EXPECT_TRUE(ReadCharLiteral("'0'", &token, kCHECK_END));
+  EXPECT_EQ(CppToken(CppToken::CHAR_LITERAL, '0'), token);
+
+  EXPECT_TRUE(ReadCharLiteral("'\\x01'", &token, kCHECK_END));
+  EXPECT_EQ(CppToken(CppToken::CHAR_LITERAL, '\x01'), token);
+
+  EXPECT_TRUE(ReadCharLiteral("'\\x2A'", &token, kCHECK_END));
+  EXPECT_EQ(CppToken(CppToken::CHAR_LITERAL, '\x2A'), token);
+
+  EXPECT_TRUE(ReadCharLiteral("'\\01'", &token, kCHECK_END));
+  EXPECT_EQ(CppToken(CppToken::CHAR_LITERAL, '\01'), token);
+
+  EXPECT_TRUE(ReadCharLiteral("'\\33'", &token, kCHECK_END));
+  EXPECT_EQ(CppToken(CppToken::CHAR_LITERAL, '\33'), token);
+
+  EXPECT_TRUE(ReadCharLiteral("'\\377'", &token, kCHECK_END));
+  EXPECT_EQ(CppToken(CppToken::CHAR_LITERAL, '\377'), token);
+
+  EXPECT_FALSE(ReadCharLiteral("''", &token, !kCHECK_END));
+
+  EXPECT_FALSE(ReadCharLiteral("'", &token, !kCHECK_END));
+
+  EXPECT_FALSE(ReadCharLiteral("'\\", &token, !kCHECK_END));
+
+  EXPECT_FALSE(ReadCharLiteral("'0", &token, !kCHECK_END));
+}
+
 }  // namespace devtools_goma

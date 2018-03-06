@@ -26,6 +26,9 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
 #include "autolock_timer.h"
 #include "compiler_flags.h"
 #include "compiler_info.h"
@@ -50,8 +53,6 @@
 #include "path.h"
 #include "path_resolver.h"
 #include "scoped_fd.h"
-#include "string_piece.h"
-#include "string_piece_utils.h"
 #include "util.h"
 
 #ifdef _WIN32
@@ -76,6 +77,8 @@ namespace {
 std::pair<std::unique_ptr<Content>, FileId> TryInclude(
     const string& cwd, const string& filepath, string* next_current_directory,
     FileIdCache* file_id_cache) {
+  GOMA_COUNTERZ("TryInclude");
+
   const string abs_filepath = file::JoinPathRespectAbsolute(cwd, filepath);
   FileId file_id(file_id_cache->Get(abs_filepath));
   if (!file_id.IsValid()) {
@@ -218,8 +221,8 @@ class IncludePathsObserver : public CppParser::IncludeObserver {
 
     if (next_fp.get()) {
       if (IncludeFileFinder::gch_hack_enabled() &&
-          strings::EndsWith(filepath, GOMA_GCH_SUFFIX) &&
-          !strings::EndsWith(path, GOMA_GCH_SUFFIX)) {
+          absl::EndsWith(filepath, GOMA_GCH_SUFFIX) &&
+          !absl::EndsWith(path, GOMA_GCH_SUFFIX)) {
         VLOG(2) << "Found a precompiled header: " << filepath;
         shared_include_files_->insert(filepath);
         return true;
@@ -262,7 +265,8 @@ class IncludePathsObserver : public CppParser::IncludeObserver {
         cwd_, filepath);
     if (shared_include_files_->count(filepath) ||
         access(abs_filepath.c_str(), R_OK) == 0) {
-      DCHECK(!File::IsDirectory(abs_filepath.c_str())) << abs_filepath;
+      DCHECK(!file::IsDirectory(abs_filepath, file::Defaults()).ok())
+          << abs_filepath;
       return true;
     }
     return false;
@@ -330,7 +334,7 @@ class IncludePathsObserver : public CppParser::IncludeObserver {
     bool is_current = (abs_filepath == abs_current_filepath);
     if (is_current)
       return true;
-    if (!File::IsDirectory(abs_filepath.c_str()) &&
+    if (!file::IsDirectory(abs_filepath, file::Defaults()).ok() &&
         (shared_include_files_->count(filepath) ||
          access(abs_filepath.c_str(), R_OK) == 0 ||
          (IncludeFileFinder::gch_hack_enabled() &&
@@ -400,7 +404,7 @@ static void CopyOriginalFileFromHashCriteria(const string& filepath) {
   string line;
   getline(ifs, line);
   const char* expected_prefix = "Contents of ";
-  if (!strings::StartsWith(line, expected_prefix)) {
+  if (!absl::StartsWith(line, expected_prefix)) {
     return;
   }
 
@@ -532,7 +536,7 @@ bool IncludeProcessor::GetIncludeFiles(
   for (const auto& include_dir : non_system_include_dirs) {
     // TODO: Ideally, we should not add .hmap file if this
     //               file doesn't exist.
-    if (strings::EndsWith(include_dir, ".hmap")) {
+    if (absl::EndsWith(include_dir, ".hmap")) {
       include_files->insert(include_dir);
     }
   }
@@ -651,7 +655,7 @@ bool IncludeProcessor::GetIncludeFiles(
     }
 
     if (IncludeFileFinder::gch_hack_enabled() &&
-        strings::EndsWith(filepath, GOMA_GCH_SUFFIX)) {
+        absl::EndsWith(filepath, GOMA_GCH_SUFFIX)) {
       VLOG(1) << "precompiled header found: " << filepath;
       include_files->insert(filepath);
       root_includes.erase(root_includes.begin() + i);
@@ -766,7 +770,6 @@ int IncludeProcessor::skipped_files() const {
 #endif
 #include <time.h>
 #include "file_helper.h"
-#include "split.h"
 #include "scoped_tmp_file.h"
 #include "subprocess.h"
 
@@ -821,18 +824,16 @@ std::set<string> GetExpectedFiles(const std::vector<string>& args,
   }
   string output;
   CHECK(devtools_goma::ReadFileToString(tmpfile.filename(), &output));
-  std::vector<string> files;
-  SplitStringUsing(output, " \n\r\\", &files);
+  std::vector<string> files = ToVector(
+      absl::StrSplit(output, absl::ByAnyChar(" \n\r\\"), absl::SkipEmpty()));
   devtools_goma::PathResolver pr;
   // Skip the first element as it's the make target.
   for (size_t i = 1; i < files.size(); i++) {
     const string& file = files[i];
-    if (!file.empty()) {
-      // Need normalization as GCC may output a same file in different way.
-      // TODO: don't use ResolvePath.
-      expected_files.insert(pr.ResolvePath(
-          file::JoinPathRespectAbsolute(cwd, file)));
-    }
+    // Need normalization as GCC may output a same file in different way.
+    // TODO: don't use ResolvePath.
+    expected_files.insert(pr.ResolvePath(
+        file::JoinPathRespectAbsolute(cwd, file)));
   }
 #endif
   return expected_files;
@@ -912,7 +913,7 @@ int main(int argc, char *argv[], const char** envp) {
   }
 
   int loop_count = 1;
-  if (argc >= 2 && strings::StartsWith(argv[1], "--count=")) {
+  if (argc >= 2 && absl::StartsWith(argv[1], "--count=")) {
     loop_count = atoi(argv[1] + 8);
     argc--;
     argv++;

@@ -10,12 +10,13 @@
 
 #include <memory>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_split.h"
 #include "basictypes.h"
 #include "glog/logging.h"
 #include "minizip/unzip.h"
 #include "path.h"
-#include "split.h"
-#include "string_piece_utils.h"
+
 #ifdef _WIN32
 # include "config_win.h"
 #endif
@@ -54,11 +55,9 @@ static void ReadManifest(char* content, const string& cwd,
     *end = '\0';
   }
 
-  std::vector<string> class_pathes;
-  SplitStringUsing(p, " ", &class_pathes);
-  for (const auto& path : class_pathes) {
-    if (strings::EndsWith(path, ".jar")) {
-      AddJarFile(path, cwd, jar_files);
+  for (auto&& path : absl::StrSplit(p, ' ', absl::SkipEmpty())) {
+    if (absl::EndsWith(path, ".jar")) {
+      AddJarFile(string(path), cwd, jar_files);
     }
   }
 }
@@ -213,7 +212,7 @@ static void AddJarFile(const string& jar_file, const string& cwd,
     }
   }
 
-  if (!strings::EndsWith(jar_file, ".zip")) {
+  if (!absl::EndsWith(jar_file, ".zip")) {
     LOG(WARNING) << jar_file << " doesn't contain manifest";
   }
 }

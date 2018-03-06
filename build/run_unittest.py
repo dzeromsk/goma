@@ -32,14 +32,10 @@ TEST_CASES = [
     "flag_parser_unittest",
     "goma_file_unittest",
     "goma_hash_unittest",
-    "join_unittest",
     "lockhelper_unittest",
     "path_resolver_unittest",
     "path_unittest",
     "path_util_unittest",
-    "string_piece_unittest",
-    "string_piece_utils_unittest",
-    "strutil_unittest",
     ]
   ),
   ("client", [
@@ -83,7 +79,6 @@ TEST_CASES = [
     "openssl_engine_unittest",
     "rand_util_unittest",
     "simple_timer_unittest",
-    "split_unittest",
     "static_darray_unittest",
     "subprocess_task_unittest",
     "threadpool_http_server_unittest",

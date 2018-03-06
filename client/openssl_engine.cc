@@ -16,8 +16,10 @@
 #include <map>
 #include <memory>
 #include <sstream>
+#include <unordered_map>
 #include <vector>
 
+#include "absl/strings/match.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
@@ -34,7 +36,6 @@
 #include "platform_thread.h"
 #include "scoped_fd.h"
 #include "socket_pool.h"
-#include "string_piece_utils.h"
 
 #ifndef OPENSSL_IS_BORINGSSL
 #error "This code is written for BoringSSL"
@@ -53,7 +54,7 @@ static const unsigned int kWaitForThingsGetsBetterInMs = 1000;
 #ifndef _WIN32
 pthread_once_t g_openssl_init_once = PTHREAD_ONCE_INIT;
 #else
-INIT_ONCE g_openssl_init_once;
+INIT_ONCE g_openssl_init_once = INIT_ONCE_STATIC_INIT;
 #endif
 
 class ScopedBIOFree {
@@ -251,8 +252,7 @@ class OpenSSLSessionCache {
   // Returns true if the session is removed.
   bool RemoveSessionInternal(SSL_CTX* ctx) {
     AUTO_EXCLUSIVE_LOCK(lock, &mu_);
-    unordered_map<SSL_CTX*, SSL_SESSION*>::iterator found =
-        session_map_.find(ctx);
+    auto found = session_map_.find(ctx);
     if (found == session_map_.end()) {
       return false;
     }
@@ -265,19 +265,18 @@ class OpenSSLSessionCache {
   }
 
   SSL_SESSION* GetInternalUnlocked(SSL_CTX* ctx) {
-    unordered_map<SSL_CTX*, SSL_SESSION*>::iterator found =
-        session_map_.find(ctx);
+    auto found = session_map_.find(ctx);
     if (found != session_map_.end()) {
       return found->second;
     }
     return nullptr;
   }
 
-  ReadWriteLock mu_;
+  mutable ReadWriteLock mu_;
   // Won't take ownership of SSL_CTX*.
   // Ownership of SSL_SESSION* is kept by the OpenSSL library, but
   // we decrement a reference count to notify it an obsolete session.
-  unordered_map<SSL_CTX*, SSL_SESSION*> session_map_;
+  std::unordered_map<SSL_CTX*, SSL_SESSION*> session_map_;
 
   static OpenSSLSessionCache* cache_;
 
@@ -322,7 +321,7 @@ class OpenSSLSocketPoolCache {
 
     AUTOLOCK(lock, &socket_pool_mu_);
     SocketPool* socket_pool = nullptr;
-    std::pair<unordered_map<string, SocketPool*>::iterator, bool> p =
+    std::pair<std::unordered_map<string, SocketPool*>::iterator, bool> p =
         socket_pools_.insert(std::make_pair(key, socket_pool));
     if (p.second) {
       p.first->second = new SocketPool(host, port);
@@ -331,7 +330,7 @@ class OpenSSLSocketPoolCache {
   }
 
   Lock socket_pool_mu_;
-  unordered_map<string, SocketPool*> socket_pools_;
+  std::unordered_map<string, SocketPool*> socket_pools_;
 
   static OpenSSLSocketPoolCache* cache_;
   DISALLOW_COPY_AND_ASSIGN(OpenSSLSocketPoolCache);
@@ -471,7 +470,7 @@ class OpenSSLCertificateStore {
     return it.first->second->size() > 0;
   }
 
-  ReadWriteLock mu_;
+  mutable ReadWriteLock mu_;
   std::map<string,
            std::unique_ptr<
                std::vector<std::unique_ptr<X509, ScopedX509Free>>>> certs_;
@@ -553,7 +552,7 @@ class OpenSSLCRLCache {
         << " url=" << url;
   }
 
-  ReadWriteLock mu_;
+  mutable ReadWriteLock mu_;
   std::map<string, ScopedX509CRL> crls_;
 
   static OpenSSLCRLCache* cache_;
@@ -1162,26 +1161,26 @@ bool OpenSSLContext::IsRevoked(STACK_OF(X509)* x509s) {
 
 /* static */
 bool OpenSSLContext::IsHostnameMatched(
-    StringPiece hostname, StringPiece pattern) {
-  StringPiece::size_type pos = pattern.find("*");
-  if (pos == StringPiece::npos && pattern == hostname) {
+    absl::string_view hostname, absl::string_view pattern) {
+  absl::string_view::size_type pos = pattern.find("*");
+  if (pos == absl::string_view::npos && pattern == hostname) {
     return true;
   }
 
-  StringPiece prefix = pattern.substr(0, pos);
-  StringPiece suffix = pattern.substr(pos + 1);  // skip "*".
+  absl::string_view prefix = pattern.substr(0, pos);
+  absl::string_view suffix = pattern.substr(pos + 1);  // skip "*".
   VLOG(1) << "prefix=" << prefix;
   VLOG(1) << "suffix=" << suffix;
-  if (!prefix.empty() && !strings::StartsWith(hostname, prefix)) {
+  if (!prefix.empty() && !absl::StartsWith(hostname, prefix)) {
     return false;
   }
-  if (!suffix.empty() && !strings::EndsWith(hostname, suffix)) {
+  if (!suffix.empty() && !absl::EndsWith(hostname, suffix)) {
     return false;
   }
-  StringPiece wildcard_part = hostname.substr(
+  absl::string_view wildcard_part = hostname.substr(
       prefix.length(),
       hostname.length() - prefix.length() - suffix.length());
-  if (wildcard_part.find(".") != StringPiece::npos) {
+  if (wildcard_part.find(".") != absl::string_view::npos) {
     return false;
   }
   return true;
@@ -1379,7 +1378,7 @@ size_t OpenSSLEngine::GetBufSizeFromTransport() {
   return BIO_ctrl_get_write_guarantee(network_bio_);
 }
 
-int OpenSSLEngine::SetDataFromTransport(const StringPiece& data) {
+int OpenSSLEngine::SetDataFromTransport(const absl::string_view& data) {
   DCHECK_NE(state_, BEFORE_INIT);
   size_t max_write = BIO_ctrl_get_write_guarantee(network_bio_);
   CHECK_LE(data.size(), max_write);
@@ -1556,7 +1555,7 @@ void OpenSSLEngineCache::AddCertificateFromString(
 
 TLSEngine* OpenSSLEngineCache::NewTLSEngine(int sock) {
   AUTOLOCK(lock, &mu_);
-  unordered_map<int, OpenSSLEngine*>::iterator found = ssl_map_.find(sock);
+  auto found = ssl_map_.find(sock);
   if (found != ssl_map_.end()) {
     found->second->SetRecycled();
     return found->second;
@@ -1571,7 +1570,7 @@ TLSEngine* OpenSSLEngineCache::NewTLSEngine(int sock) {
 void OpenSSLEngineCache::WillCloseSocket(int sock) {
   AUTOLOCK(lock, &mu_);
   VLOG(1) << "SSL engine release. sock=" << sock;
-  unordered_map<int, OpenSSLEngine*>::iterator found = ssl_map_.find(sock);
+  auto found = ssl_map_.find(sock);
   if (found != ssl_map_.end()) {
     delete found->second;
     ssl_map_.erase(found);

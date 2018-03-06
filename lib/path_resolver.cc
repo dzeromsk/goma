@@ -15,10 +15,10 @@
 #include <locale>
 
 
+#include "absl/strings/match.h"
+#include "absl/strings/string_view.h"
 #include "glog/logging.h"
 #include "path_util.h"
-#include "string_piece.h"
-#include "string_piece_utils.h"
 using std::string;
 
 namespace {
@@ -340,7 +340,7 @@ bool PathResolver::IsSystemPath(const string& raw_path) const {
 #endif
 
   for (const auto& iter : system_paths_) {
-    if (strings::StartsWith(path, iter))
+    if (absl::StartsWith(path, iter))
       return true;
   }
   return false;

@@ -13,31 +13,37 @@
 #include <iterator>
 #include <sstream>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
 #include "cmdline_parser.h"
+#include "file.h"
 #include "file_helper.h"
 #include "flag_parser.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
-#include "join.h"
 #include "known_warning_options.h"
 #include "path.h"
 #include "path_resolver.h"
 #include "path_util.h"
-#include "split.h"
-#include "string_piece_utils.h"
-#include "strutil.h"
 using std::string;
 
 namespace devtools_goma {
 
 namespace {
 
+enum FlagType {
+  kNormal,  // A flag will be added with AddFlag
+  kPrefix,  // A flag will be added with AddPrefixFlag
+  kBool,    // A flag will be added with AddBoolFlag
+};
+
 // Normalize paths surrounded by '"' to paths without it.
 // e.g. "c:\Windows\Program Files" -> c:\Windows\Program Files.
 string NormalizeWin32Path(absl::string_view path) {
   // TODO: omit orphan '"' at the end of path?
-  if (strings::StartsWith(path, "\"")) {
-    if (strings::EndsWith(path, "\"")) {
+  if (absl::StartsWith(path, "\"")) {
+    if (absl::EndsWith(path, "\"")) {
       path = path.substr(1, path.length() - 2);
     } else {
       path = path.substr(1);
@@ -119,16 +125,16 @@ bool CompilerFlags::ExpandPosixArgs(
   for (size_t i = 0; i < args.size(); ++i) {
     const string& arg = args[i];
     bool need_expand = false;
-    if (strings::StartsWith(arg, "@")) {
+    if (absl::StartsWith(arg, "@")) {
       need_expand = true;
 
       // MacOSX uses @executable_path, @loader_path or @rpath as prefix
       // of install_name (b/6845420).
       // It could also be a linker rpath (b/31920050).
       bool is_linker_magic_token = false;
-      if (strings::StartsWith(arg, "@executable_path/") ||
-           strings::StartsWith(arg, "@loader_path/") ||
-           strings::StartsWith(arg, "@rpath/")) {
+      if (absl::StartsWith(arg, "@executable_path/") ||
+           absl::StartsWith(arg, "@loader_path/") ||
+           absl::StartsWith(arg, "@rpath/")) {
         is_linker_magic_token = true;
       }
       if (is_linker_magic_token &&
@@ -192,7 +198,7 @@ bool CompilerFlags::IsGCCCommand(absl::string_view arg) {
   // as "distcc", we check if the name is "cc" or "*-cc"
   // (e.g., "i586-mingw32msvc-cc").
   if (stem == "c++" ||
-      stem == "cc" || strings::EndsWith(arg, "-cc"))
+      stem == "cc" || absl::EndsWith(arg, "-cc"))
     return true;
   if (IsClangCommand(arg))
     return true;
@@ -205,8 +211,8 @@ bool CompilerFlags::IsClangCommand(absl::string_view arg) {
   // allow pnacl-clang etc.
   // However, don't allow clang-tidy.
   if (stem == "clang" || stem == "clang++" ||
-      strings::EndsWith(stem, "-clang") ||
-      strings::EndsWith(stem, "-clang++"))
+      absl::EndsWith(stem, "-clang") ||
+      absl::EndsWith(stem, "-clang++"))
     return true;
 
   // For b/25937763 but we should not consider the followings as clang:
@@ -214,9 +220,9 @@ bool CompilerFlags::IsClangCommand(absl::string_view arg) {
   static const char kClang[] = "clang-";
   static const char kClangxx[] = "clang++-";
   absl::string_view version = stem;
-  if (strings::StartsWith(stem, kClang))
+  if (absl::StartsWith(stem, kClang))
     version.remove_prefix(sizeof(kClang) - 1);
-  else if (strings::StartsWith(stem, kClangxx))
+  else if (absl::StartsWith(stem, kClangxx))
     version.remove_prefix(sizeof(kClangxx) - 1);
   if (stem == version)
     return false;
@@ -366,6 +372,7 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
       has_fno_sanitize_blacklist_(false),
       has_fsyntax_only_(false),
       has_wrapper_(false),
+      has_fplugin_(false),
       is_precompiling_header_(false),
       is_stdin_input_(false) {
   if (!CompilerFlags::ExpandPosixArgs(cwd, args,
@@ -416,8 +423,11 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
   FlagParser::Flag* flag_fprofile = parser.AddPrefixFlag("fprofile-");
   FlagParser::Flag* flag_fprofile_sample_use =
       parser.AddFlag("fprofile-sample-use");
+  FlagParser::Flag* flag_fthinlto_index =
+      parser.AddPrefixFlag("fthinlto-index=");
 
   parser.AddFlag("wrapper")->SetSeenOutput(&has_wrapper_);
+  parser.AddPrefixFlag("fplugin=")->SetSeenOutput(&has_fplugin_);
 
   // -mllvm takes extra arg.
   // ASAN uses -mllvm -asan-blacklist=$FILE
@@ -523,7 +533,7 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
   if (!assembler_flags.empty()) {
     std::vector<string> subflags;
     for (const auto& fs : assembler_flags) {
-      for (auto&& f : strings::Split(fs, ',')) {
+      for (auto&& f : absl::StrSplit(fs, ',')) {
         subflags.emplace_back(f);
       }
     }
@@ -560,7 +570,7 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
   if (!preprocessor_flags.empty()) {
     std::vector<string> subflags;
     for (const auto& fs : preprocessor_flags) {
-      for (auto&& f : strings::Split(fs, ',')) {
+      for (auto&& f : absl::StrSplit(fs, ',')) {
         subflags.emplace_back(f);
       }
     }
@@ -613,9 +623,8 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
     resource_dir_ = flag_resource_dir->GetLastValue();
   if (flag_fsanitize->seen()) {
     for (const auto& value : flag_fsanitize->values()) {
-      std::vector<string> vs = strings::Split(value, ',');
-      for (const auto& v : vs) {
-        fsanitize_.insert(v);
+      for (auto&& v : absl::StrSplit(value, ',')) {
+        fsanitize_.insert(string(v));
       }
     }
   }
@@ -758,7 +767,7 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
   }
   is_cplusplus_ = (lang_.find("c++") != string::npos);
   if (mode_ == COMPILE)
-    is_precompiling_header_ = strings::EndsWith(lang_, "-header");
+    is_precompiling_header_ = absl::EndsWith(lang_, "-header");
 
   // Create a default output flag. FIXME: is this necessary?
   if (output_files_.empty() && !input_filenames_.empty()) {
@@ -805,24 +814,42 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
   }
 
   bool use_profile_input = false;
-  string profile_input_dir;
+  string profile_input_dir = ".";
+
   for (const auto& flag : flag_fprofile->values()) {
-    use_profile_input |= strings::StartsWith(flag, "use");
+    compiler_info_flags_.emplace_back("-fprofile-" + flag);
 
     // Pick the last profile dir, this is how GCC works.
-    size_t profile_dir_start = string::npos;
-    if (strings::StartsWith(flag, "use=") || strings::StartsWith(flag, "dir="))
-      profile_dir_start = 4;
-    else if (strings::StartsWith(flag, "generate="))
-      profile_dir_start = 9;
-    if (profile_dir_start != string::npos) {
-      profile_input_dir = flag.substr(profile_dir_start);
+    if (absl::StartsWith(flag, "dir=")) {
+      profile_input_dir = flag.substr(strlen("dir="));
+    } else if (absl::StartsWith(flag, "generate=")) {
+      profile_input_dir = flag.substr(strlen("generate="));
     }
-    compiler_info_flags_.emplace_back("-fprofile-" + flag);
   }
-  if (use_profile_input && !is_precompiling_header_) {
-    if (profile_input_dir.empty())
-      profile_input_dir = cwd;
+
+  for (const auto& flag : flag_fprofile->values()) {
+    use_profile_input |= absl::StartsWith(flag, "use");
+
+    if (absl::StartsWith(flag, "use=")) {
+      const string& use_path = flag.substr(strlen("use="));
+
+      // https://clang.llvm.org/docs/ClangCommandLineReference.html#cmdoption-clang1-fprofile-use
+      if (IsClangCommand(compiler_name_) &&
+          file::IsDirectory(
+              file::JoinPathRespectAbsolute(cwd, profile_input_dir, use_path),
+              file::Defaults()).ok()) {
+        optional_input_filenames_.push_back(
+            file::JoinPathRespectAbsolute(
+                profile_input_dir, use_path, "default.profdata"));
+      } else {
+        optional_input_filenames_.push_back(
+            file::JoinPathRespectAbsolute(profile_input_dir, use_path));
+      }
+    }
+  }
+
+  if (!IsClangCommand(compiler_name_) && use_profile_input &&
+      !is_precompiling_header_) {
     for (const auto& filename : input_filenames_) {
       size_t ext_start = filename.rfind('.');
       if (ext_start == string::npos)
@@ -841,6 +868,9 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
     optional_input_filenames_.push_back(
         flag_fprofile_sample_use->GetLastValue());
   }
+  if (flag_fthinlto_index->seen()) {
+    optional_input_filenames_.push_back(flag_fthinlto_index->GetLastValue());
+  }
 }
 
 const std::vector<string> GCCFlags::include_dirs() const {
@@ -856,14 +886,14 @@ bool GCCFlags::IsClientImportantEnv(const char* env) const {
   }
 
   // Allow WINEDEBUG= only in client.
-  if (strings::StartsWith(env, "WINEDEBUG=")) {
+  if (absl::StartsWith(env, "WINEDEBUG=")) {
     return true;
   }
 
   // These are used for nacl on Win.
   // Don't send this to server.
-  if ((var_strcaseprefix(env, "PATHEXT=") != nullptr) ||
-      (var_strcaseprefix(env, "SystemRoot=") != nullptr)) {
+  if ((absl::StartsWithIgnoreCase(env, "PATHEXT=")) ||
+      (absl::StartsWithIgnoreCase(env, "SystemRoot="))) {
     return true;
   }
 
@@ -899,7 +929,7 @@ bool GCCFlags::IsServerImportantEnv(const char* env) const {
   };
 
   for (const char* check_env : kCheckEnvs) {
-    if (strings::StartsWith(env, check_env)) {
+    if (absl::StartsWith(env, check_env)) {
       return true;
     }
   }
@@ -919,9 +949,6 @@ void GCCFlags::DefineFlags(FlagParser* parser) {
   // gcc options
   // https://gcc.gnu.org/onlinedocs/gcc-6.4.0/gcc/Option-Summary.html#Option-Summary
 
-  enum FlagType {
-    kNormal, kPrefix, kBool,
-  };
   static const struct {
     const char* name;
     FlagType flag_type;
@@ -958,6 +985,7 @@ void GCCFlags::DefineFlags(FlagParser* parser) {
     { "dA", kBool } ,  // Annotate the assembler output with miscellaneous debugging information.
     { "dD", kBool },  // Like '-dM', without predefined macros etc.
     { "dM", kBool },  // Generate a list of ‘#define’ directiv.
+    { "fplugin=", kPrefix },  // -fplugin=<dsopath>; gcc plugin
     { "g", kPrefix },  // debug information. NOTE: Needs special treatment.
     { "gsplit-dwarf", kBool },  // to enable the generation of split DWARF.
     { "idirafter", kNormal },
@@ -1015,6 +1043,8 @@ void GCCFlags::DefineFlags(FlagParser* parser) {
 
     // for clang
     { "-coverage", kBool },  // take code coverage
+    { "-no-system-header-prefix=", kPrefix }, // Specify header is not a system header --no-system-header-prefix=<prefix>
+    { "-system-header-prefix", kNormal },  // Specify header is a system header (for diagnosis) --system-header-prefix=<prefix> or --sytem-header-prefix=<arg>
     { "Xanalyzer", kNormal },
     { "Xclang", kNormal },
     { "gcc-toolchain", kNormal },
@@ -1062,6 +1092,11 @@ bool GCCFlags::IsKnownWarningOption(absl::string_view option) {
   string::size_type p = option.find('=');
   if (p != string::npos) {
     option = option.substr(0, p + 1);  // Keep '='.
+  }
+
+  // Remove "no-"
+  if (absl::StartsWith(option, "no-")) {
+    option = option.substr(strlen("no-"));
   }
 
   return std::binary_search(std::begin(kKnownWarningOptions),
@@ -1172,12 +1207,11 @@ void ParseJavaClassPaths(
     const std::vector<string>& class_paths,
     std::vector<string>* jar_files) {
   for (const string& class_path : class_paths) {
-    const std::vector<string> paths = strings::Split(class_path, ':');
-    for (const string& path : paths) {
+    for (auto&& path : absl::StrSplit(class_path, ':')) {
       // TODO: We need to handle directories.
       absl::string_view ext = ::devtools_goma::GetFileNameExtension(path);
       if (ext == "jar" || ext == "zip") {
-        jar_files->push_back(path);
+        jar_files->push_back(string(path));
       }
     }
   }
@@ -1236,7 +1270,7 @@ JavacFlags::JavacFlags(const std::vector<string>& args, const string& cwd)
   }
 
   for (const auto& arg : remained_flags) {
-    if (strings::EndsWith(arg, ".java")) {
+    if (absl::EndsWith(arg, ".java")) {
       input_filenames_.push_back(arg);
       const string& output_filename = arg.substr(0, arg.size() - 5) + ".class";
       if (!flag_d->seen()) {
@@ -1250,9 +1284,8 @@ JavacFlags::JavacFlags(const std::vector<string>& args, const string& cwd)
 
   if (flag_processor->seen()) {
     for (const string& value : flag_processor->values()) {
-      const std::vector<string> classes = strings::Split(value, ',');
-      for (const string& c : classes) {
-        processors_.push_back(c);
+      for (auto&& c : absl::StrSplit(value, ',')) {
+        processors_.push_back(string(c));
       }
     }
   }
@@ -1263,11 +1296,54 @@ void JavacFlags::DefineFlags(FlagParser* parser) {
   FlagParser::Options* opts = parser->mutable_options();
   opts->flag_prefix = '-';
 
-  parser->AddFlag("d");
-  parser->AddFlag("s");
-  parser->AddFlag("cp");
-  parser->AddFlag("classpath");
-  parser->AddFlag("processor");
+  // https://docs.oracle.com/javase/8/docs/technotes/tools/windows/javac.html
+  // -XD<foo>, -XD<foo>=<bar> is not documented, so let allow them one by one.
+
+  static const struct {
+    const char* name;
+    FlagType flag_type;
+  } kFlags[] = {
+    { "J-Xmx", kPrefix },  // -J-Xmx2048M, -J-Xmx1024M; Specify max JVM memory
+    { "Werror", kBool },  // Treat warning as error
+    { "XDignore.symbol.file", kBool },  // to use JRE internal classes
+    { "XDskipDuplicateBridges=", kPrefix },  //  See https://android.googlesource.com/platform/build/soong.git/+/master/java/config/config.go#60
+    { "XDstringConcat=", kPrefix },  // Specifies how to concatenate strings
+    { "Xdoclint:", kPrefix },  // -Xdoclint: lint for document.
+    { "Xlint", kBool },  // -Xlint
+    { "Xlint:", kPrefix },  // -Xlint:all, -Xlint:none, ...
+    { "Xmaxerrs", kNormal },  // -Xmaxerrs <number>; Sets the maximum number of errors to print.
+    { "Xmaxwarns", kNormal },  // -Xmaxwarns <number>; Sets the maximum number of warnings to print.
+    { "bootclasspath", kNormal },  // Cross-compiles against the specified set of boot classes.
+    { "classpath", kNormal },  // set classpath
+    { "cp", kNormal },  // set classpath
+    { "d", kNormal },  // Sets the destination directory for class files.
+    { "encoding", kNormal },  // -encoding <encoding>; Specify encoding.
+    { "g", kBool },  // -g; generate debug information
+    { "g:", kPrefix },   // -g:foobar; generate debug information
+    { "nowarn", kBool },  // -nowarn; the same effect of -Xlint:none.
+    { "parameters", kBool },  // Stores formal parameter names of constructors and methods in the generated class file
+    { "proc:none", kBool },  // Desable annotation processor.
+    { "processor", kNormal },  // Names of the annotation processors to run.
+    { "processorpath", kBool },  // -processorpath <path>;  // Specifies where to find annotation processors. If this option is not used, then the class path is searched for processors
+    { "s", kNormal },  // Specifies the directory where to place the generated source files.
+    { "source", kNormal },  // -source <version> e.g. -source 8; Specify java source version
+    { "sourcepath", kNormal },  // -sourcepath <sourcepath>
+    { "target", kNormal },  // -target <version> e.g. -target 8; Generates class files that target a specified release of the virtual machine.
+  };
+
+  for (const auto& f : kFlags) {
+    switch (f.flag_type) {
+    case kNormal:
+      parser->AddFlag(f.name);
+      break;
+    case kPrefix:
+      parser->AddPrefixFlag(f.name);
+      break;
+    case kBool:
+      parser->AddBoolFlag(f.name);
+      break;
+    }
+  }
 }
 
 /* static */
@@ -1303,6 +1379,7 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
     : CompilerFlags(args, cwd),
       is_cplusplus_(true),
       ignore_stdinc_(false),
+      has_Brepro_(false),
       require_mspdbserv_(false) {
   bool result = ExpandArgs(cwd, args, &expanded_args_,
                            &optional_input_filenames_);
@@ -1381,7 +1458,9 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
 
   // Machine options used by clang-cl.
   FlagParser::Flag* flag_m = parser.AddFlag("m");
-  FlagParser::Flag* flag_fmsc_version = parser.AddFlag("fmsc-version");
+  FlagParser::Flag* flag_fmsc_version = parser.AddPrefixFlag("fmsc-version=");
+  FlagParser::Flag* flag_fms_compatibility_version =
+      parser.AddPrefixFlag("fms-compatibility-version=");
   FlagParser::Flag* flag_fsanitize = parser.AddFlag("fsanitize");
   FlagParser::Flag* flag_fno_sanitize_blacklist = nullptr;
   FlagParser::Flag* flag_fsanitize_blacklist = nullptr;
@@ -1390,9 +1469,14 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
   // TODO: check -iquote?
   // http://clang.llvm.org/docs/UsersManual.html#id8
   FlagParser::Flag* flag_imsvc = parser.AddFlag("imsvc");
+  FlagParser::Flag* flag_std = parser.AddFlag("std");  // e.g. -std=c11
+  std::vector<string> incremental_linker_flags;
+  parser.AddBoolFlag("Brepro")->SetOutput(&incremental_linker_flags);
+  parser.AddBoolFlag("Brepro-")->SetOutput(&incremental_linker_flags);
   if (compiler_name() == "clang-cl") {
     flag_m->SetOutput(&compiler_info_flags_);
     flag_fmsc_version->SetOutput(&compiler_info_flags_);
+    flag_fms_compatibility_version->SetOutput(&compiler_info_flags_);
     flag_fsanitize->SetOutput(&compiler_info_flags_);
     // TODO: do we need to support more sanitize options?
     flag_fno_sanitize_blacklist =
@@ -1401,8 +1485,19 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
     flag_mllvm->SetOutput(&compiler_info_flags_);
     flag_isystem->SetOutput(&compiler_info_flags_);
     flag_imsvc->SetOutput(&compiler_info_flags_);
+    flag_std->SetOutput(&compiler_info_flags_);
+
+    // Make these unserstood.
+    parser.AddBoolFlag("fansi-escape-codes");  // Use ANSI escape codes for diagnostics
+    parser.AddBoolFlag("fdiagnostics-absolute-paths");  // Print absolute paths in diagnostics
+
     // Make it understand Xclang.
     parser.AddFlag("Xclang")->SetOutput(&compiler_info_flags_);
+
+    parser.AddBoolFlag("mincremental-linker-compatible")->SetOutput(
+        &incremental_linker_flags);
+    parser.AddBoolFlag("mno-incremental-linker-compatible")->SetOutput(
+        &incremental_linker_flags);
   }
 
   parser.AddNonFlag()->SetOutput(&input_filenames_);
@@ -1480,6 +1575,14 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
     using_pch_filename_ = flag_Fp->GetLastValue();
   }
 
+  if (!incremental_linker_flags.empty()) {
+    const string& last = incremental_linker_flags.back();
+    if (last == "-mno-incremental-linker-compatible" ||
+        last == "/Brepro" || last == "-Brepro") {
+      has_Brepro_ = true;
+    }
+  }
+
   string new_extension = ".obj";
   string force_output;
   if (flag_Fo->seen())
@@ -1533,7 +1636,7 @@ bool VCFlags::IsClientImportantEnv(const char* env) const {
   };
 
   for (const char* check_env : kCheckEnvs) {
-    if (var_strcaseprefix(env, check_env) != nullptr) {
+    if (absl::StartsWithIgnoreCase(env, check_env)) {
       return true;
     }
   }
@@ -1552,7 +1655,7 @@ bool VCFlags::IsServerImportantEnv(const char* env) const {
   };
 
   for (const char* check_env : kCheckEnvs) {
-    if (var_strcaseprefix(env, check_env) != nullptr) {
+    if (absl::StartsWithIgnoreCase(env, check_env)) {
       return true;
     }
   }
@@ -1755,6 +1858,11 @@ void VCFlags::DefineFlags(FlagParser* parser) {
   // See b/27777598, b/68147091
   parser->AddPrefixFlag("d2");
 
+  // Brepro is undocument flag for reproducible build?
+  // https://github.com/llvm-project/llvm-project-20170507/blob/3e1fa78737e3b303558e6310c49d31c31827a2bf/clang/include/clang/Driver/CLCompatOptions.td#L55
+  parser->AddBoolFlag("Brepro");
+  parser->AddBoolFlag("Brepro-");
+
   // also see clang-cl
   // http://llvm.org/klaus/clang/blob/master/include/clang/Driver/CLCompatOptions.td
   parser->AddFlag("o");  // set output file or directory
@@ -1767,7 +1875,8 @@ void VCFlags::DefineFlags(FlagParser* parser) {
   opts->flag_prefix = '-';
   opts->alt_flag_prefix = '\0';
   parser->AddFlag("m");
-  parser->AddFlag("fmsc-version");
+  parser->AddPrefixFlag("fmsc-version=");  // -fmsc-version=<arg>
+  parser->AddPrefixFlag("fms-compatibility-version=");  // -fms-compatibility-version=<arg>
   parser->AddFlag("fsanitize");
   parser->AddBoolFlag("fcolor-diagnostics");  // Use color for diagnostics
   parser->AddBoolFlag("fno-standalone-debug");  // turn on the vtable-based optimization
@@ -1788,7 +1897,7 @@ bool VCFlags::ExpandArgs(const string& cwd, const std::vector<string>& args,
                          std::vector<string>* optional_input_filenames) {
   // Expand arguments which start with '@'.
   for (const auto& arg : args) {
-    if (strings::StartsWith(arg, "@")) {
+    if (absl::StartsWith(arg, "@")) {
       const string& source_list_filename =
           PathResolver::PlatformConvert(arg.substr(1));
       string source_list;

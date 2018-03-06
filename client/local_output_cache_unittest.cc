@@ -10,10 +10,10 @@
 
 #include <gtest/gtest.h>
 
+#include "absl/strings/string_view.h"
 #include "content.h"
 #include "file.h"
 #include "path.h"
-#include "string_piece.h"
 #include "unittest_util.h"
 
 #ifdef _WIN32
@@ -87,7 +87,7 @@ class LocalOutputCacheTest : public ::testing::Test {
     return resp;
   }
 
-  std::string CacheFilePath(StringPiece key) {
+  std::string CacheFilePath(absl::string_view key) {
     return LocalOutputCache::instance()->CacheFilePath(key);
   }
 

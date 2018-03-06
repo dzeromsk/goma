@@ -14,15 +14,15 @@
 
 #include <memory>
 
-#include "glog/logging.h"
-#include "glog/stl_logging.h"
-
+#include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
 #include "basictypes.h"
 #include "file_helper.h"
+#include "glog/logging.h"
+#include "glog/stl_logging.h"
 #include "ioutil.h"
 #include "scoped_fd.h"
-#include "split.h"
-#include "string_piece.h"
+#include "util.h"
 
 namespace {
 const char* const kDefaultBlacklist[] = {
@@ -39,14 +39,14 @@ const char* const kDefaultBlacklist[] = {
 namespace devtools_goma {
 
 std::vector<string> ParseBlacklistContents(const string& contents) {
-  std::vector<string> lines;
-  SplitStringUsing(contents, "\r\n", &lines);
-
   std::vector<string> parsed;
-  for (const auto& line : lines) {
-    StringPiece stripped_line = StringStrip(line);
-    if (!stripped_line.empty())
+  for (auto&& line : absl::StrSplit(contents,
+                                    absl::ByAnyChar("\r\n"),
+                                    absl::SkipEmpty())) {
+    absl::string_view stripped_line = StringStrip(line);
+    if (!stripped_line.empty()) {
       parsed.push_back(string(stripped_line));
+    }
   }
   return parsed;
 }
@@ -92,8 +92,8 @@ float GetLoadAverage() {
   }
   buf[r] = '\0';
 
-  std::vector<string> loadavgs;
-  SplitStringUsing(buf, " \t", &loadavgs);
+  std::vector<string> loadavgs = ToVector(
+      absl::StrSplit(buf, absl::ByAnyChar(" \t"), absl::SkipEmpty()));
   if (loadavgs.empty()) {
     LOG(ERROR) << "failed to get load average.";
     return -1;

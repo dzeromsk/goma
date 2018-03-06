@@ -10,8 +10,8 @@
 #include <glog/logging.h>
 
 #include "autolock_timer.h"
+#include "counterz.h"
 #include "path.h"
-#include "unordered.h"
 
 using std::string;
 
@@ -69,6 +69,8 @@ FileIdCache::~FileIdCache() {
 }
 
 FileId FileIdCache::Get(const string& filename) {
+  GOMA_COUNTERZ("Get");
+
   DCHECK(is_acquired_ && THREAD_ID_IS_SELF(owner_thread_id_));
   DCHECK(file::IsAbsolutePath(filename)) << filename;
 

@@ -20,6 +20,7 @@
 
 #include <map>
 #include <sstream>
+#include <unordered_map>
 
 #include "autolock_timer.h"
 #include "basictypes.h"
@@ -234,7 +235,7 @@ void SocketPool::ClearErrors() {
 }
 
 void SocketPool::SetErrorTimestampUnlocked(int sock, time_t t) {
-  const unordered_map<int, string>::const_iterator p = fd_addrs_.find(sock);
+  auto p = fd_addrs_.find(sock);
   if (p == fd_addrs_.end()) {
     LOG(ERROR) << "sock " << sock << " not found in fd_addrs";
     return;

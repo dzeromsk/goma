@@ -51,7 +51,6 @@
 #include "histogram.h"
 #include "path.h"
 #include "simple_timer.h"
-#include "strutil.h"
 
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_stats.pb.h"
@@ -94,10 +93,8 @@ LocalOutputCache::LocalOutputCache(string cache_dir,
       threshold_cache_amount_byte_(threshold_cache_amount_byte),
       max_cache_items_(max_cache_items),
       threshold_cache_items_(threshold_cache_items),
-      ready_cond_(&ready_mu_),
       ready_(false),
       entries_total_cache_amount_(0),
-      gc_cond_(&gc_mu_),
       gc_should_done_(false),
       gc_working_(false) {
 }
@@ -306,7 +303,7 @@ void LocalOutputCache::LoadCacheEntriesDone() {
 void LocalOutputCache::WaitUntilReady() {
   AUTOLOCK(lock, &ready_mu_);
   while (!ready_) {
-    ready_cond_.Wait();
+    ready_cond_.Wait(&ready_mu_);
   }
 }
 
@@ -388,7 +385,7 @@ void LocalOutputCache::GarbageCollectionThread() {
       }
 
       // Wait until gc-wakeup signal comes.
-      gc_cond_.Wait();
+      gc_cond_.Wait(&gc_mu_);
     }
 
     LOG(INFO) << "LocalOutputCache GC thread awaken";
@@ -473,7 +470,7 @@ void LocalOutputCache::WaitUntilGarbageCollectionThreadDone() {
   AUTOLOCK(lock, &gc_mu_);
   while (gc_working_) {
     LOG(INFO) << "LocalOutputCache: waiting GC finished";
-    gc_cond_.Wait();
+    gc_cond_.Wait(&gc_mu_);
   }
 }
 
@@ -627,11 +624,12 @@ bool LocalOutputCache::Lookup(const string& key, ExecResp* resp,
   return true;
 }
 
-std::string LocalOutputCache::CacheDirWithKeyPrefix(StringPiece key) const {
+std::string LocalOutputCache::CacheDirWithKeyPrefix(
+    absl::string_view key) const {
   return file::JoinPath(cache_dir_, key.substr(0, 2));
 }
 
-std::string LocalOutputCache::CacheFilePath(StringPiece key) const {
+std::string LocalOutputCache::CacheFilePath(absl::string_view key) const {
   return file::JoinPath(cache_dir_, key.substr(0, 2), key);
 }
 

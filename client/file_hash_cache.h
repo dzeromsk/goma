@@ -7,14 +7,15 @@
 #define DEVTOOLS_GOMA_CLIENT_FILE_HASH_CACHE_H_
 
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 
+#include "absl/base/thread_annotations.h"
 #include "atomic_stats_counter.h"
 #include "basictypes.h"
 #include "file_id.h"
 #include "lockhelper.h"
-#include "thread_annotations.h"
 #include "timestamp.h"
-#include "unordered.h"
 
 using std::string;
 
@@ -84,13 +85,14 @@ class FileHashCache {
 
   // A map from filename to file cache info.
   ReadWriteLock file_cache_mutex_;
-  unordered_map<string, struct FileInfo> file_cache_
-    GUARDED_BY(file_cache_mutex_);
+  std::unordered_map<string, struct FileInfo> file_cache_
+      GUARDED_BY(file_cache_mutex_);
 
   // A set of cache keys that have been stored, so we could believe a cache_key
   // in this set is in goma cache.
   ReadWriteLock known_cache_keys_mutex_;
-  unordered_set<string> known_cache_keys_ GUARDED_BY(known_cache_keys_mutex_);
+  std::unordered_set<string> known_cache_keys_
+      GUARDED_BY(known_cache_keys_mutex_);
 
   StatsCounter num_cache_hit_;
   StatsCounter num_cache_miss_;

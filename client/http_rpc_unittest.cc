@@ -52,7 +52,7 @@ class HttpRPCTest : public ::testing::Test {
     int state_;
   };
 
-  HttpRPCTest() : pool_(-1), cond_(&mu_) {}
+  HttpRPCTest() : pool_(-1) {}
 
   void SetUp() override {
     wm_.reset(new WorkerThreadManager);
@@ -127,7 +127,7 @@ class HttpRPCTest : public ::testing::Test {
   std::unique_ptr<WorkerThreadManager> wm_;
   int pool_;
   std::unique_ptr<MockSocketServer> mock_server_;
-  Lock mu_;
+  mutable Lock mu_;
   ConditionVariable cond_;
 };
 
@@ -295,7 +295,7 @@ TEST_F(HttpRPCTest, CallLookupFile) {
   {
     AutoLock lock(&mu_);
     while (tc.state_ != TestLookupFileContext::DONE) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
 
     EXPECT_EQ(req_expected, req_buf);
@@ -361,7 +361,7 @@ TEST_F(HttpRPCTest, CallAsyncLookupFile) {
   {
     AutoLock lock(&mu_);
     while (tc.state_ != TestLookupFileContext::CALL) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
 
     EXPECT_TRUE(tc.status_.connect_success);
@@ -374,10 +374,10 @@ TEST_F(HttpRPCTest, CallAsyncLookupFile) {
   {
     AutoLock lock(&mu_);
     while (!done) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
     while (tc.state_ != TestLookupFileContext::DONE) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
     EXPECT_EQ(req_expected, req_buf);
     EXPECT_EQ(0, tc.r_);
@@ -575,7 +575,7 @@ TEST_F(HttpRPCTest, TLSEngineCallLookupFile) {
   {
     AutoLock lock(&mu_);
     while (tc.state_ != TestLookupFileContext::DONE) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
 
     EXPECT_EQ(req_expected, req_buf);
@@ -645,7 +645,7 @@ TEST_F(HttpRPCTest, TLSEngineCallAsyncLookupFile) {
   {
     AutoLock lock(&mu_);
     while (tc.state_ != TestLookupFileContext::CALL) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
 
     EXPECT_TRUE(tc.status_.connect_success);
@@ -658,10 +658,10 @@ TEST_F(HttpRPCTest, TLSEngineCallAsyncLookupFile) {
   {
     AutoLock lock(&mu_);
     while (!done) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
     while (tc.state_ != TestLookupFileContext::DONE) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
     EXPECT_EQ(req_expected, req_buf);
     EXPECT_EQ(0, tc.r_);

@@ -31,7 +31,7 @@ TEST(FilenameIdTableTest, SaveLoad) {
 
   EXPECT_EQ(FilenameIdTable::kInvalidId, table.ToId("a"));
 
-  unordered_set<FilenameIdTable::Id> valid_ids;
+  std::unordered_set<FilenameIdTable::Id> valid_ids;
   table.LoadFrom(goma_table, &valid_ids);
 
   EXPECT_EQ(id_a, table.ToId("a"));
@@ -58,7 +58,7 @@ TEST(FilenameIdTableTest, LoadFailedDuplicateId) {
   record->set_filename("b");
   record->set_filename_id(0);
 
-  unordered_set<FilenameIdTable::Id> valid_ids;
+  std::unordered_set<FilenameIdTable::Id> valid_ids;
   EXPECT_FALSE(table.LoadFrom(goma_table, &valid_ids));
 
   EXPECT_TRUE(valid_ids.empty());
@@ -76,7 +76,7 @@ TEST(FilenameIdTableTest, LoadFailedDuplicateFilename) {
   record->set_filename("a");
   record->set_filename_id(1);
 
-  unordered_set<FilenameIdTable::Id> valid_ids;
+  std::unordered_set<FilenameIdTable::Id> valid_ids;
   EXPECT_FALSE(table.LoadFrom(goma_table, &valid_ids));
 
   EXPECT_TRUE(valid_ids.empty());

@@ -9,7 +9,7 @@
 #include <initializer_list>
 #include <string>
 
-#include "string_piece.h"
+#include "absl/strings/string_view.h"
 
 // BEGIN GOOGLE-INTERNAL
 // path.h emulation layer
@@ -17,12 +17,12 @@
 namespace file {
 
 namespace internal {
-std::string JoinPathImpl(std::initializer_list<StringPiece> paths);
+std::string JoinPathImpl(std::initializer_list<absl::string_view> paths);
 std::string JoinPathRespectAbsoluteImpl(
-    std::initializer_list<StringPiece> paths);
+    std::initializer_list<absl::string_view> paths);
 }  // namespace internal
 
-StringPiece Basename(StringPiece path);
+absl::string_view Basename(absl::string_view path);
 
 // Returns dirname.
 // For example:
@@ -32,11 +32,11 @@ StringPiece Basename(StringPiece path);
 //   Dirname("C:\\foo") --> "C:\\"
 //   Dirname("C:a") --> "C:"
 // See lib/path_unittest.cc for more examples.
-StringPiece Dirname(StringPiece fname);
+absl::string_view Dirname(absl::string_view fname);
 
-StringPiece Stem(StringPiece path);
+absl::string_view Stem(absl::string_view path);
 
-StringPiece Extension(StringPiece path);
+absl::string_view Extension(absl::string_view path);
 
 // New file path API.
 // It always returns path1/path2 even when path2 is absolute.
@@ -52,7 +52,7 @@ inline std::string JoinPathRespectAbsolute(const Strs&... paths) {
 }
 
 // Return true if path is absolute.
-bool IsAbsolutePath(StringPiece path);
+bool IsAbsolutePath(absl::string_view path);
 
 }  // namespace file
 

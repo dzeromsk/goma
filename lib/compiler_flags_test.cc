@@ -13,15 +13,16 @@
 #include <vector>
 
 
+#include "absl/strings/str_cat.h"
 #include "file.h"
 #include "file_dir.h"
 #include "file_helper.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "gtest/gtest.h"
+#include "known_warning_options.h"
 #include "path.h"
 #include "path_resolver.h"
-#include "string_piece_utils.h"
 #ifdef _WIN32
 # include "config_win.h"
 // we'll ignore the warnings:
@@ -31,7 +32,7 @@
 using File::CreateDir;
 using google::GetExistingTempDirectories;
 using std::string;
-using strings::StrCat;
+using absl::StrCat;
 
 namespace devtools_goma {
 
@@ -583,6 +584,24 @@ TEST_F(GCCFlagsTest, GccWrapper) {
   }
 }
 
+TEST_F(GCCFlagsTest, GccFplugin) {
+  std::vector<string> origs {
+    "gcc", "-o", "hello.o", "-c", "helloc",
+  };
+
+  {
+    GCCFlags flags(origs, "/");
+    EXPECT_FALSE(flags.has_fplugin());
+  }
+
+  {
+    std::vector<string> args(origs);
+    args.insert(args.end(), { "-fplugin=foo.so" });
+    GCCFlags flags(args, "/");
+    EXPECT_TRUE(flags.has_fplugin());
+  }
+}
+
 TEST_F(GCCFlagsTest, GccUndef) {
   std::vector<string> origs {
     "gcc", "-undef", "-c", "hello.c",
@@ -890,11 +909,123 @@ TEST_F(GCCFlagsTest, ProfileCwd) {
 #endif
     EXPECT_TRUE(flags.is_successful());
     ASSERT_EQ(1, static_cast<int>(flags.optional_input_filenames().size()));
+
+    EXPECT_EQ(file::JoinPath(".", "hello.gcda"),
+              flags.optional_input_filenames()[0]);
+  }
+}
+
+TEST_F(GCCFlagsTest, ProfileDir) {
+  std::vector<string> args;
+  args.push_back("gcc");
+  args.push_back("-c");
+  args.push_back("foo/hello.c");
+
+  args.push_back("-fprofile-dir=foo");
+  args.push_back("-fprofile-use=hello.prof");
+
 #ifndef _WIN32
-    EXPECT_EQ("/tmp/hello.gcda", flags.optional_input_filenames()[0]);
+  GCCFlags flags(args, "/tmp");
 #else
-    EXPECT_EQ("C:\\tmp\\hello.gcda", flags.optional_input_filenames()[0]);
+  GCCFlags flags(args, "C:\\tmp");
 #endif
+  EXPECT_TRUE(flags.is_successful());
+  ASSERT_EQ(2U, flags.optional_input_filenames().size());
+
+  EXPECT_EQ(file::JoinPath("foo", "hello.prof"),
+            flags.optional_input_filenames()[0]);
+  EXPECT_EQ(file::JoinPath("foo", "hello.gcda"),
+            flags.optional_input_filenames()[1]);
+}
+
+TEST_F(GCCFlagsTest, ProfileClang) {
+  {
+    // prof abs dir case
+    std::vector<string> args;
+    args.push_back("clang");
+    args.push_back("-c");
+    args.push_back("foo/hello.c");
+
+    const string& prof_dir = file::JoinPath(tmp_dir_, "hello.profdata");
+    ASSERT_TRUE(CreateDir(prof_dir, 0777));
+
+    args.push_back("-fprofile-use=" + prof_dir);
+
+#ifndef _WIN32
+    GCCFlags flags(args, "/tmp");
+#else
+    GCCFlags flags(args, "C:\\tmp");
+#endif
+    EXPECT_TRUE(flags.is_successful());
+    ASSERT_EQ(1U, flags.optional_input_filenames().size());
+
+    EXPECT_EQ(file::JoinPath(prof_dir, "default.profdata"),
+              flags.optional_input_filenames()[0]);
+    ASSERT_TRUE(RecursivelyDelete(prof_dir));
+  }
+
+  {
+    // prof rel dir case
+    std::vector<string> args;
+    args.push_back("clang");
+    args.push_back("-c");
+    args.push_back("foo/hello.c");
+
+    args.push_back("-fprofile-use=foo");
+
+    const string& prof_dir = file::JoinPath(tmp_dir_, "foo");
+    ASSERT_TRUE(CreateDir(prof_dir, 0777));
+    GCCFlags flags(args, tmp_dir_);
+
+    EXPECT_TRUE(flags.is_successful());
+    ASSERT_EQ(1U, flags.optional_input_filenames().size());
+
+    EXPECT_EQ(file::JoinPath(".", "foo" , "default.profdata"),
+              flags.optional_input_filenames()[0]);
+
+    ASSERT_TRUE(RecursivelyDelete(prof_dir));
+  }
+
+  {
+    // abs prof file case
+    std::vector<string> args;
+    args.push_back("clang");
+    args.push_back("-c");
+    args.push_back("foo/hello.c");
+
+    const string& prof_file = file::JoinPath(tmp_dir_, "hello.profdata");
+    args.push_back("-fprofile-use=" + prof_file);
+
+#ifndef _WIN32
+    GCCFlags flags(args, "/tmp");
+#else
+    GCCFlags flags(args, "C:\\tmp");
+#endif
+    EXPECT_TRUE(flags.is_successful());
+    ASSERT_EQ(1U, flags.optional_input_filenames().size());
+
+    EXPECT_EQ(prof_file, flags.optional_input_filenames()[0]);
+  }
+
+  {
+    // relative prof file case
+    std::vector<string> args;
+    args.push_back("clang");
+    args.push_back("-c");
+    args.push_back("foo/hello.c");
+
+    args.push_back("-fprofile-use=hello.profdata");
+
+#ifndef _WIN32
+    GCCFlags flags(args, "/tmp");
+#else
+    GCCFlags flags(args, "C:\\tmp");
+#endif
+    EXPECT_TRUE(flags.is_successful());
+    ASSERT_EQ(1U, flags.optional_input_filenames().size());
+
+    EXPECT_EQ(file::JoinPath(".", "hello.profdata"),
+              flags.optional_input_filenames()[0]);
   }
 }
 
@@ -1124,6 +1255,24 @@ TEST_F(GCCFlagsTest, MMD) {
   EXPECT_EQ("foo.o", output_files[1]);
 }
 
+TEST_F(GCCFlagsTest, SystemHeaderPrefix) {
+  const std::vector<string> args {
+    "clang++", "-c", "foo.cc",
+    "--system-header-prefix=a",
+    "--system-header-prefix", "b",
+    "--no-system-header-prefix=c",
+  };
+
+  const std::vector<string> expected_input_files {
+    "foo.cc",
+  };
+
+  GCCFlags flags(args, ".");
+  EXPECT_TRUE(flags.is_successful());
+  EXPECT_EQ(GCCFlags::COMPILE, flags.mode());
+  EXPECT_EQ(expected_input_files, flags.input_filenames());
+}
+
 TEST_F(GCCFlagsTest, DebugFlags) {
   const std::vector<string> args {
     "g++", "-c", "foo.cc",
@@ -1169,6 +1318,17 @@ TEST_F(GCCFlagsTest, KnownWarningOptions) {
   EXPECT_TRUE(GCCFlags::IsKnownWarningOption("alloc-size-larger-than=100"));
   // -Walloc-size-larger-than. This needs "=n"
   EXPECT_FALSE(GCCFlags::IsKnownWarningOption("alloc-size-larger-than"));
+
+  // Check with removing no-.
+  // no-bool-compare is not defined in kKnownWarningOptions, but
+  // bool-compare is.
+  ASSERT_TRUE(std::binary_search(std::begin(kKnownWarningOptions),
+                                 std::end(kKnownWarningOptions),
+                                 string("bool-compare")));
+  ASSERT_FALSE(std::binary_search(std::begin(kKnownWarningOptions),
+                                  std::end(kKnownWarningOptions),
+                                  string("no-bool-compare")));
+  EXPECT_TRUE(GCCFlags::IsKnownWarningOption("no-bool-compare"));
 }
 
 class JavacFlagsTest : public testing::Test {
@@ -1806,6 +1966,71 @@ TEST_F(VCFlagsTest, UnknownFlags) {
 
   EXPECT_TRUE(flags.is_successful());
   EXPECT_TRUE(flags.unknown_flags().empty());
+}
+
+TEST_F(VCFlagsTest, BreproWithClExe) {
+  const std::vector<string> args {
+    "cl", "/Brepro", "/c", "hello.c",
+  };
+  VCFlags flags(args, "C:\\");
+
+  EXPECT_TRUE(flags.is_successful());
+  EXPECT_TRUE(flags.has_Brepro());
+}
+
+TEST_F(VCFlagsTest, BreproWithClangCl) {
+  const std::vector<string> args {
+    "clang-cl.exe", "/Brepro", "/c", "hello.c",
+  };
+  VCFlags flags(args, "C:\\");
+
+  EXPECT_TRUE(flags.is_successful());
+  EXPECT_TRUE(flags.has_Brepro());
+}
+
+TEST_F(VCFlagsTest, LastBreproShouldBeUsed) {
+  const std::vector<string> args {
+    "clang-cl.exe", "/Brepro", "/Brepro-", "/c", "hello.c",
+  };
+  VCFlags flags(args, "C:\\");
+
+  EXPECT_TRUE(flags.is_successful());
+  EXPECT_FALSE(flags.has_Brepro());
+}
+
+TEST_F(VCFlagsTest, ClangClShouldSupportNoIncrementalLinkerCompatible) {
+  const std::vector<string> args {
+    "clang-cl.exe", "-mno-incremental-linker-compatible", "/c", "hello.c",
+  };
+  VCFlags flags(args, "C:\\");
+
+  EXPECT_TRUE(flags.is_successful());
+  EXPECT_TRUE(flags.has_Brepro());
+}
+
+TEST_F(VCFlagsTest, ClangClShouldUseNoIncrementalLinkerCompatible) {
+  const std::vector<string> args {
+    "clang-cl.exe",
+        "/Brepro-",
+        "/Brepro",
+        "-mno-incremental-linker-compatible",
+        "-mincremental-linker-compatible",
+        "/c", "hello.c",
+  };
+  VCFlags flags(args, "C:\\");
+
+  EXPECT_TRUE(flags.is_successful());
+  EXPECT_FALSE(flags.has_Brepro());
+}
+
+TEST_F(VCFlagsTest, ClShouldNotSupportNoIncrementalLinkerCompatible) {
+  const std::vector<string> args {
+    "cl", "-mno-incremental-linker-compatible", "/c", "hello.c",
+  };
+  VCFlags flags(args, "C:\\");
+
+  EXPECT_TRUE(flags.is_successful());
+  EXPECT_FALSE(flags.has_Brepro());
 }
 
 TEST_F(VCFlagsTest, ComposeOutputPath) {
@@ -3568,18 +3793,22 @@ TEST_F(CompilerFlagsTest, ClShouldNotRecognizeMflag) {
   EXPECT_EQ(expected_compiler_info_flags, flags->compiler_info_flags());
 }
 
-TEST_F(CompilerFlagsTest, ClangClWithMscVersionflag) {
-  std::vector<string> args;
-  args.push_back("clang-cl.exe");
-  args.push_back("-fmsc-version=1800");
-  args.push_back("/c");
-  args.push_back("hello.cc");
+TEST_F(CompilerFlagsTest, ClangClWithHyphenFlagsForCompilerInfo) {
+  const std::vector<string> args {
+    "clang-cl.exe",
+    "-fmsc-version=1800",
+    "-fms-compatibility-version=18",
+    "-std=c11",
+    "/c",
+    "hello.cc",
+  };
+
   std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
-  EXPECT_EQ(1U, flags->output_files().size());
-  EXPECT_EQ("hello.obj", flags->output_files()[0]);
-  EXPECT_EQ(1U, flags->input_filenames().size());
-  EXPECT_EQ("hello.cc", flags->input_filenames()[0]);
+  EXPECT_EQ(std::vector<string> { "hello.obj" },
+            flags->output_files());
+  EXPECT_EQ(std::vector<string> { "hello.cc" },
+            flags->input_filenames());
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
@@ -3590,9 +3819,10 @@ TEST_F(CompilerFlagsTest, ClangClWithMscVersionflag) {
   EXPECT_FALSE(flags->is_java());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
-  std::vector<string> expected_compiler_info_flags;
-  expected_compiler_info_flags.push_back("-fmsc-version=1800");
-  EXPECT_EQ(expected_compiler_info_flags, flags->compiler_info_flags());
+  EXPECT_EQ((std::vector<string> { "-fmsc-version=1800",
+                                   "-fms-compatibility-version=18",
+                                   "-std=c11" }),
+            flags->compiler_info_flags());
 }
 
 TEST_F(CompilerFlagsTest, ClangClWithZi) {
@@ -3617,7 +3847,7 @@ TEST_F(CompilerFlagsTest, ClangClWithZi) {
     EXPECT_FALSE(flags->is_javac());
     EXPECT_TRUE(flags->is_vc());
     EXPECT_FALSE(flags->is_clang_tidy());
-  EXPECT_FALSE(flags->is_java());
+    EXPECT_FALSE(flags->is_java());
     EXPECT_EQ("d:\\tmp", flags->cwd());
 
     const VCFlags& vc_flags = static_cast<const VCFlags&>(*flags);
@@ -3883,18 +4113,22 @@ TEST_F(CompilerFlagsTest, ClShouldNotRecognizeImsvcWithValueArg) {
   ASSERT_EQ(0U, flags->compiler_info_flags().size());
 }
 
-TEST_F(CompilerFlagsTest, ClShouldNotRecognizeMscVersionflag) {
-  std::vector<string> args;
-  args.push_back("cl.exe");
-  args.push_back("-fmsc-version=1800");
-  args.push_back("/c");
-  args.push_back("hello.cc");
+TEST_F(CompilerFlagsTest, ClShouldNotRecognizeClangClOnlyFlags) {
+  const std::vector<string> args {
+    "cl.exe",
+    "-fmsc-version=1800",
+    "-fms-compatibility-version=18",
+    "-std=c11",
+    "/c",
+    "hello.cc",
+  };
+
   std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
-  EXPECT_EQ(1U, flags->output_files().size());
-  EXPECT_EQ("hello.obj", flags->output_files()[0]);
-  EXPECT_EQ(1U, flags->input_filenames().size());
-  EXPECT_EQ("hello.cc", flags->input_filenames()[0]);
+  EXPECT_EQ(std::vector<string> { "hello.obj" },
+            flags->output_files());
+  EXPECT_EQ(std::vector<string> { "hello.cc" },
+            flags->input_filenames());
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
@@ -3905,8 +4139,7 @@ TEST_F(CompilerFlagsTest, ClShouldNotRecognizeMscVersionflag) {
   EXPECT_FALSE(flags->is_java());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
-  std::vector<string> expected_compiler_info_flags;
-  EXPECT_EQ(expected_compiler_info_flags, flags->compiler_info_flags());
+  EXPECT_TRUE(flags->compiler_info_flags().empty());
 }
 
 TEST_F(CompilerFlagsTest, ClangClWithFsanitize) {
@@ -4242,6 +4475,8 @@ TEST_F(CompilerFlagsTest, CrWinClangCompileFlag) {
   args.push_back("/d2Zi+");
   args.push_back("/d2FastFail");
   args.push_back("/d2cgsummary");
+  args.push_back("/Brepro");
+  args.push_back("/Brepro-");
   args.push_back("/Zc:inline");
   args.push_back("/Oy-");
   args.push_back("/FS");
@@ -4553,6 +4788,43 @@ TEST_F(CompilerFlagsTest, FProfileSampleUse) {
   devtools_goma::GCCFlags* gcc_flags = static_cast<devtools_goma::GCCFlags*>(
       flags.get());
   EXPECT_TRUE(gcc_flags->compiler_info_flags().empty());
+}
+
+TEST_F(CompilerFlagsTest, FThinltoIndex) {
+  const std::vector<string> args {
+    "clang", "-flto=thin", "-O2", "-o", "file.native.o",
+    "-x", "ir", "file.o", "-c",
+    "-fthinlto-index=./dir/file.o.chrome.thinlto.bc",
+  };
+
+  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "/tmp"));
+  EXPECT_EQ(args, flags->args());
+
+  EXPECT_TRUE(flags->is_gcc());
+  EXPECT_FALSE(flags->is_javac());
+  EXPECT_FALSE(flags->is_clang_tidy());
+  EXPECT_FALSE(flags->is_java());
+  EXPECT_TRUE(flags->is_successful());
+  EXPECT_EQ("", flags->fail_message());
+  EXPECT_EQ("clang", flags->compiler_base_name());
+  EXPECT_EQ("clang", flags->compiler_name());
+
+  EXPECT_EQ(1U, flags->input_filenames().size());
+  EXPECT_EQ("file.o", flags->input_filenames()[0]);
+
+  EXPECT_EQ(1U, flags->optional_input_filenames().size());
+  EXPECT_EQ("./dir/file.o.chrome.thinlto.bc",
+            flags->optional_input_filenames()[0]);
+
+  EXPECT_EQ(1U, flags->output_files().size());
+  ExpectHasElement(flags->output_files(), "file.native.o");
+
+  devtools_goma::GCCFlags* gcc_flags = static_cast<devtools_goma::GCCFlags*>(
+      flags.get());
+  const std::vector<string> expected_compiler_info_flags {
+    "-flto=thin", "-O2", "-x", "ir",
+  };
+  EXPECT_EQ(expected_compiler_info_flags, gcc_flags->compiler_info_flags());
 }
 
 }  // namespace devtools_goma

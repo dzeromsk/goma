@@ -10,10 +10,11 @@
 #include <sys/event.h>
 #include <sys/time.h>
 
+#include <unordered_set>
+
 #include "socket_descriptor.h"
 #include "glog/logging.h"
 #include "scoped_fd.h"
-#include "unordered.h"
 
 namespace devtools_goma {
 
@@ -149,8 +150,8 @@ class KqueueDescriptorPoller : public DescriptorPollerBase {
     const DescriptorMap& descriptors_;
     int idx_;
     struct kevent* current_ev_;
-    unordered_set<SocketDescriptor*>::const_iterator timedout_iter_;
-    unordered_set<SocketDescriptor*> event_received_;
+    std::unordered_set<SocketDescriptor*>::const_iterator timedout_iter_;
+    std::unordered_set<SocketDescriptor*> event_received_;
 
     DISALLOW_COPY_AND_ASSIGN(KqueueEventEnumerator);
   };
@@ -165,7 +166,7 @@ class KqueueDescriptorPoller : public DescriptorPollerBase {
   friend class KqueueEventEnumerator;
   ScopedFd kqueue_fd_;
   std::vector<struct kevent> eventlist_;
-  unordered_set<SocketDescriptor*> timeout_waiters_;
+  std::unordered_set<SocketDescriptor*> timeout_waiters_;
   int nevents_;
   DISALLOW_COPY_AND_ASSIGN(KqueueDescriptorPoller);
 };

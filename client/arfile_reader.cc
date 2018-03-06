@@ -7,13 +7,14 @@
 
 #include <memory>
 
+#include "absl/strings/match.h"
 #include "glog/logging.h"
+#include "path_util.h"
+#include "scoped_fd.h"
+
 #ifdef __MACH__
 #include "mach_o_parser.h"
 #endif
-#include "path_util.h"
-#include "scoped_fd.h"
-#include "string_piece_utils.h"
 
 namespace devtools_goma {
 
@@ -58,7 +59,7 @@ std::unique_ptr<FileReader> ArFileReader::Create(const string& filename) {
 
 /* static */
 bool ArFileReader::CanHandle(const string& filename) {
-  return strings::EndsWith(filename, ".a");
+  return absl::EndsWith(filename, ".a");
 }
 
 ssize_t ArFileReader::Read(void* ptr, size_t len) {

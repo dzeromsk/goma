@@ -9,6 +9,8 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
+#include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 #include "compiler_flags.h"
@@ -121,11 +123,12 @@ class CompilerInfoCacheTest : public testing::Test {
     compiler_info->data_->set_hash(hash);
   }
 
-  const unordered_map<string, CompilerInfoState*>& compiler_info() const {
+  const std::unordered_map<string, CompilerInfoState*>& compiler_info() const {
     return cache_->compiler_info_;
   }
 
-  const unordered_map<string, unordered_set<string>*>& keys_by_hash() const {
+  const std::unordered_map<string, std::unordered_set<string>*>& keys_by_hash()
+      const {
     return cache_->keys_by_hash_;
   }
 
@@ -233,7 +236,7 @@ TEST_F(CompilerInfoCacheTest, DupStore) {
 
   {
     EXPECT_EQ(1U, keys_by_hash().size());
-    const unordered_set<string>& keys = *keys_by_hash().begin()->second;
+    const std::unordered_set<string>& keys = *keys_by_hash().begin()->second;
     EXPECT_EQ(1U, keys.size());
   }
 
@@ -273,7 +276,7 @@ TEST_F(CompilerInfoCacheTest, DupStore) {
 
   {
     EXPECT_EQ(1U, keys_by_hash().size());
-    const unordered_set<string>& keys = *keys_by_hash().begin()->second;
+    const std::unordered_set<string>& keys = *keys_by_hash().begin()->second;
     EXPECT_EQ(2U, keys.size());
   }
 
@@ -499,7 +502,8 @@ TEST_F(CompilerInfoCacheTest, Marshal) {
     switch (entry.keys_size()) {
       case 2: // hash1: key1, key2
         {
-          unordered_set<string> keys(entry.keys().begin(), entry.keys().end());
+          std::unordered_set<string> keys(entry.keys().begin(),
+                                          entry.keys().end());
           EXPECT_EQ(1U, keys.count(key1));
           EXPECT_EQ(1U, keys.count(key2));
           EXPECT_EQ("gcc", entry.data().name());
@@ -579,7 +583,7 @@ TEST_F(CompilerInfoCacheTest, Unmarshal) {
   EXPECT_EQ(2U, keys_by_hash().size());
   auto found = keys_by_hash().find(hash1);
   EXPECT_TRUE(found != keys_by_hash().end());
-  const unordered_set<string>* keys = found->second;
+  const std::unordered_set<string>* keys = found->second;
   EXPECT_EQ(2U, keys->size());
   EXPECT_EQ(1U, keys->count("/usr/bin/gcc -O2 @"));
   EXPECT_EQ(1U, keys->count("/usr/bin/gcc -O2 -fno-diagnostics-show-option @"));

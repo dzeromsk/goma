@@ -143,7 +143,7 @@ ssize_t ScopedNamedPipe::WriteWithTimeout(
   return WaitAsyncOp(handle_, bufsize, &op, timeout_sec);
 }
 
-int ScopedNamedPipe::WriteString(StringPiece message, int timeout) const {
+int ScopedNamedPipe::WriteString(absl::string_view message, int timeout) const {
   const char* p = message.data();
   int size = message.size();
   while (size > 0) {

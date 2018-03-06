@@ -5,9 +5,10 @@
 
 #ifdef USE_EPOLL
 
-#include <memory>
-
 #include "descriptor_poller.h"
+
+#include <memory>
+#include <unordered_set>
 
 #include <linux/version.h>
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 19)
@@ -20,7 +21,6 @@
 #include "socket_descriptor.h"
 #include "glog/logging.h"
 #include "scoped_fd.h"
-#include "unordered.h"
 
 namespace devtools_goma {
 
@@ -147,8 +147,8 @@ class EpollDescriptorPoller : public DescriptorPollerBase {
     EpollDescriptorPoller* poller_;
     int idx_;
     struct epoll_event* current_ev_;
-    unordered_set<SocketDescriptor*>::const_iterator timedout_iter_;
-    unordered_set<SocketDescriptor*> event_received_;
+    std::unordered_set<SocketDescriptor*>::const_iterator timedout_iter_;
+    std::unordered_set<SocketDescriptor*> event_received_;
 
     DISALLOW_COPY_AND_ASSIGN(EpollEventEnumerator);
   };
@@ -162,7 +162,7 @@ class EpollDescriptorPoller : public DescriptorPollerBase {
   friend class EpollEventEnumerator;
   ScopedFd epoll_fd_;
   std::unique_ptr<struct epoll_event[]> events_;
-  unordered_set<SocketDescriptor*> timeout_waiters_;
+  std::unordered_set<SocketDescriptor*> timeout_waiters_;
   int nevents_;
   int last_nevents_;
   int nfds_;

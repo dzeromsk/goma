@@ -107,7 +107,7 @@ void TmpdirUtil::MkdirForPath(const string& path, bool is_dir) {
   } else {
     size_t last_slash = fullpath.rfind('\\');
     dirname = fullpath.substr(0, last_slash);
-    if (File::IsDirectory(dirname.c_str()))
+    if (file::IsDirectory(dirname, file::Defaults()).ok())
       return;
   }
   int result = SHCreateDirectoryExA(nullptr, dirname.c_str(), nullptr);

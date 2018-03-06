@@ -15,7 +15,7 @@ namespace devtools_goma {
 
 class NamedPipeFactory {
  public:
-  explicit NamedPipeFactory(const std::string& name);
+  NamedPipeFactory(const std::string& name, int timeout_ms);
   ~NamedPipeFactory();
 
   NamedPipeFactory(const NamedPipeFactory&) = delete;
@@ -29,6 +29,7 @@ class NamedPipeFactory {
 
  private:
   const std::string name_;
+  const int timeout_ms_;
 };
 
 }  // namespace devtools_goma

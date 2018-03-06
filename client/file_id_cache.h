@@ -6,16 +6,16 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_FILE_ID_CACHE_H_
 #define DEVTOOLS_GOMA_CLIENT_FILE_ID_CACHE_H_
 
-#include <string>
 #include <sstream>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
+#include "absl/base/thread_annotations.h"
 #include "basictypes.h"
 #include "file_id.h"
 #include "lockhelper.h"
 #include "platform_thread.h"
-#include "thread_annotations.h"
-#include "unordered.h"
 
 using std::string;
 
@@ -33,7 +33,7 @@ class GlobalFileIdCache {
   static GlobalFileIdCache* Instance();
 
  private:
-  ReadWriteLock mu_;
+  mutable ReadWriteLock mu_;
   std::unordered_map<string, FileId> file_ids_ GUARDED_BY(mu_);
 
   static GlobalFileIdCache* instance_;
@@ -61,7 +61,7 @@ class FileIdCache {
   friend class DepsCacheTest;
 
  private:
-  typedef unordered_map<string, FileId> FileIdMap;
+  typedef std::unordered_map<string, FileId> FileIdMap;
 
   bool is_acquired_;
   PlatformThreadId owner_thread_id_;

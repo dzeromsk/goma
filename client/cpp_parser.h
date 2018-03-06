@@ -12,8 +12,11 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "autolock_timer.h"
 #include "basictypes.h"
 #include "compiler_info.h"
@@ -25,8 +28,6 @@
 #include "gtest/gtest_prod.h"
 #include "platform_thread.h"
 #include "predefined_macros.h"
-#include "string_piece.h"
-#include "unordered.h"
 
 #ifdef _WIN32
 # include "config_win.h"
@@ -168,8 +169,8 @@ class CppParser {
   static string DebugString(TokenList::const_iterator begin,
                             TokenList::const_iterator end);
 
-  void Error(StringPiece error);
-  void Error(StringPiece error, StringPiece arg);
+  void Error(absl::string_view error);
+  void Error(absl::string_view error, absl::string_view arg);
   string DebugStringPrefix();
 
   typedef void (CppParser::*DirectiveHandler)();
@@ -442,7 +443,7 @@ class CppParser {
   Token ProcessHasCheckMacro(
       const string& name,
       const ArrayTokenList& tokens,
-      const unordered_map<string, int>& has_check_macro);
+      const std::unordered_map<string, int>& has_check_macro);
 
 #ifdef _WIN32
   static BOOL WINAPI InitializeWinOnce(PINIT_ONCE, PVOID, PVOID*);
@@ -465,7 +466,7 @@ class CppParser {
   string base_file_;
   int counter_;
 
-  unordered_map<string, bool> enabled_predefined_macros_;
+  std::unordered_map<string, bool> enabled_predefined_macros_;
 
   bool is_cplusplus_;
 
@@ -476,7 +477,7 @@ class CppParser {
   ErrorObserver* error_observer_;
 
   // When include guard macro is detected, the token is preserved here.
-  unordered_map<string, string> include_guard_ident_;
+  std::unordered_map<string, string> include_guard_ident_;
 
   const CompilerInfo* compiler_info_;
   bool is_vc_;
@@ -498,8 +499,9 @@ class CppParser {
 
   PlatformThreadId owner_thread_id_;
 
-  typedef unordered_map<string, Macro::CallbackObj> PredefinedObjMacroMap;
-  typedef unordered_map<string, Macro::CallbackFunc> PredefinedFuncMacroMap;
+  typedef std::unordered_map<string, Macro::CallbackObj> PredefinedObjMacroMap;
+  typedef std::unordered_map<string, Macro::CallbackFunc>
+      PredefinedFuncMacroMap;
 
   static PredefinedObjMacroMap* predefined_macros_;
   static PredefinedFuncMacroMap* predefined_func_macros_;

@@ -12,8 +12,11 @@
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
+#include "absl/strings/str_join.h"
 #include "autolock_timer.h"
 #include "compiler_flags.h"
 #include "compiler_info.h"
@@ -25,14 +28,12 @@
 #include "goma_hash.h"
 #include "include_cache.h"
 #include "include_processor.h"
-#include "join.h"
 #include "path.h"
 #include "path_resolver.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/deps_cache_data.pb.h"
 #include "prototmp/goma_stats.pb.h"
 MSVC_POP_WARNING()
-#include "split.h"
 #include "util.h"
 
 using std::string;
@@ -340,15 +341,15 @@ bool DepsCache::LoadGomaDeps() {
   LOG(INFO) << "Version matched.";
 
   // Load FilenameIdTable
-  unordered_set<FilenameIdTable::Id> valid_ids;
+  std::unordered_set<FilenameIdTable::Id> valid_ids;
   if (!filename_id_table_.LoadFrom(goma_deps.filename_id_table(), &valid_ids)) {
     Clear();
     return false;
   }
 
   // Load DepsIdTable
-  unordered_map<FilenameIdTable::Id,
-                std::pair<FileId, string>> deps_hash_id_map;
+  std::unordered_map<FilenameIdTable::Id,
+                     std::pair<FileId, string>> deps_hash_id_map;
   {
     const GomaDepsIdTable& table = goma_deps.deps_id_table();
     UnorderedMapReserve(table.record_size(), &deps_hash_id_map);
@@ -483,7 +484,7 @@ bool DepsCache::SaveGomaDeps() {
   //   FilenameIdTable::Id -> pair<FileId, directive-hash>.
   // When we saw multiple DepsHashId for one FilenameIdTable::Id,
   // we choose the one whose mtime is the latest.
-  unordered_map<FilenameIdTable::Id, std::pair<FileId, SHA256HashValue>> m;
+  std::unordered_map<FilenameIdTable::Id, std::pair<FileId, SHA256HashValue>> m;
   for (const auto& deps_table_entry : deps_table_) {
     for (const auto& deps_hash_id : deps_table_entry.second.deps_hash_ids) {
       FilenameIdTable::Id id = deps_hash_id.id;

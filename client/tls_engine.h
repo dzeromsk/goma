@@ -16,8 +16,8 @@
 
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "socket_factory.h"
-#include "string_piece.h"
 
 using std::string;
 
@@ -46,7 +46,7 @@ class TLSEngine {
   virtual size_t GetBufSizeFromTransport() = 0;
   // Sets |data| come from the transport layer.
   // Returns size (>=0) written to the engine or TLSErrorReason if error.
-  virtual int SetDataFromTransport(const StringPiece& data) = 0;
+  virtual int SetDataFromTransport(const absl::string_view& data) = 0;
 
   // An interface to an application:
   // Read and Write return number of read/write bytes if success.

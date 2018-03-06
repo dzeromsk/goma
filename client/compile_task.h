@@ -11,6 +11,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <json/json.h>
@@ -34,7 +35,6 @@ MSVC_POP_WARNING()
 #include "subprocess_task.h"
 #include "threadpool_http_server.h"
 #include "timestamp.h"
-#include "unordered.h"
 
 namespace devtools_goma {
 
@@ -373,7 +373,7 @@ class CompileTask {
   // |system_library_paths_| is used only when linking_ == true.
   std::vector<string> system_library_paths_;
   // list of interleave uploaded files_to confirm the mechanism works fine.
-  unordered_set<string> interleave_uploaded_files_;
+  std::unordered_set<string> interleave_uploaded_files_;
 
   std::unique_ptr<ExecResp> resp_;
   std::unique_ptr<ExecResp> exec_resp_;
@@ -459,7 +459,7 @@ class CompileTask {
   std::string local_output_cache_key_;
 
   // Protects ref counts, subproc_ and http_rpc_status_.
-  Lock mu_;
+  mutable Lock mu_;
   int refcnt_;
 
   PlatformThreadId thread_id_;

@@ -30,6 +30,8 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_split.h"
 #include "basictypes.h"
 #include "file.h"
 #include "file_dir.h"
@@ -37,8 +39,6 @@
 #include "glog/logging.h"
 #include "path_util.h"
 #include "scoped_fd.h"
-#include "split.h"
-#include "string_piece_utils.h"
 
 using std::string;
 
@@ -56,24 +56,25 @@ namespace devtools_goma {
 // content_length will be set to string::npos.
 // TODO: to be more conformant to the http standard
 bool FindContentLengthAndBodyOffset(
-    StringPiece data, size_t *content_length, size_t *body_offset,
+    absl::string_view data, size_t *content_length, size_t *body_offset,
     bool *is_chunked) {
   const char kContentLength[] = "Content-Length: ";
   const char kTransferEncoding[] = "Transfer-Encoding: ";
   const char kChunked[] = "chunked";
   const char kCrlf[] = "\r\n";
-  const StringPiece::size_type content_length_pos = data.find(kContentLength);
-  const StringPiece::size_type transfer_encoding_pos =
+  const absl::string_view::size_type content_length_pos =
+      data.find(kContentLength);
+  const absl::string_view::size_type transfer_encoding_pos =
       data.find(kTransferEncoding);
-  const StringPiece::size_type response_body = data.find("\r\n\r\n");
+  const absl::string_view::size_type response_body = data.find("\r\n\r\n");
 
-  if (response_body == StringPiece::npos) {
+  if (response_body == absl::string_view::npos) {
     LOG(ERROR) << "GOMA: Invalid, missing CRLFCRLF";
     return false;
   }
   *body_offset = response_body + 4;
 
-  if (content_length_pos == StringPiece::npos) {
+  if (content_length_pos == absl::string_view::npos) {
     // Content-Length does not exist for GET requests. This might be
     // such request. If so, assume the header is short and return here.
     *content_length = string::npos;
@@ -83,13 +84,13 @@ bool FindContentLengthAndBodyOffset(
     // know how much further we should read.
     *content_length = string::npos;
   } else {
-    StringPiece lenstr =
+    absl::string_view lenstr =
         data.substr(content_length_pos + strlen(kContentLength));
     *content_length = atoi(string(lenstr).c_str());
   }
 
   if (is_chunked != nullptr) {
-    if (transfer_encoding_pos == StringPiece::npos) {
+    if (transfer_encoding_pos == absl::string_view::npos) {
       // Transfer-Encoding does not exist for GET requests.
       *is_chunked = false;
     } else if (transfer_encoding_pos >= response_body) {
@@ -98,9 +99,10 @@ bool FindContentLengthAndBodyOffset(
     } else {
       // The Transfer-Encoding string is in the header.
       // We should check its value is "chunked" or not.
-      StringPiece transfer_encoding_value = data.substr(
+      absl::string_view transfer_encoding_value = data.substr(
           transfer_encoding_pos + strlen(kTransferEncoding));
-      StringPiece::size_type value_end = transfer_encoding_value.find(kCrlf);
+      absl::string_view::size_type value_end =
+          transfer_encoding_value.find(kCrlf);
       transfer_encoding_value = StringStrip(
           transfer_encoding_value.substr(0, value_end));
       if (transfer_encoding_value == kChunked) {
@@ -114,16 +116,16 @@ bool FindContentLengthAndBodyOffset(
   return true;
 }
 
-StringPiece StringRstrip(StringPiece str) {
+absl::string_view StringRstrip(absl::string_view str) {
   size_t found = str.find_last_not_of(kWhitespaces);
   if (found != string::npos)
     return str.substr(0, found + 1);
   return str.substr(str.size(), 0);  // empty string piece.
 }
 
-StringPiece StringStrip(StringPiece str) {
-  StringPiece::size_type found = str.find_last_not_of(kWhitespaces);
-  if (found == StringPiece::npos)
+absl::string_view StringStrip(absl::string_view str) {
+  absl::string_view::size_type found = str.find_last_not_of(kWhitespaces);
+  if (found == absl::string_view::npos)
     return str.substr(str.size(), 0);  // empty string piece.
   str = str.substr(0, found + 1);
   found = str.find_first_not_of(kWhitespaces);
@@ -154,7 +156,7 @@ void AppendStringToFileOrDie(const string &data, const string &filename,
   }
 }
 
-void WriteStdout(StringPiece data) {
+void WriteStdout(absl::string_view data) {
 #ifdef _WIN32
   HANDLE stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
   DWORD bytes_written = 0;
@@ -168,7 +170,7 @@ void WriteStdout(StringPiece data) {
 #endif
 }
 
-void WriteStderr(StringPiece data) {
+void WriteStderr(absl::string_view data) {
 #ifdef _WIN32
   HANDLE stderr_handle = GetStdHandle(STD_ERROR_HANDLE);
   DWORD bytes_written = 0;
@@ -246,7 +248,7 @@ string GetCurrentDirNameOrDie(void) {
 // Parse the HTTP response header.
 // Return true if it got whole header, or error response.
 // Return false if it needs more data.
-bool ParseHttpResponse(StringPiece response,
+bool ParseHttpResponse(absl::string_view response,
                        int* http_status_code,
                        size_t* offset,
                        size_t* content_length,
@@ -269,7 +271,7 @@ bool ParseHttpResponse(StringPiece response,
     return true;
   }
 
-  StringPiece codestr = response.substr(strlen(kHttpHeader) + 2);
+  absl::string_view codestr = response.substr(strlen(kHttpHeader) + 2);
   *http_status_code = atoi(string(codestr).c_str());
   if (*http_status_code != 200 && *http_status_code != 204)
     return true;
@@ -376,10 +378,10 @@ string SimpleEncodeChartData(const std::vector<double>& value, double max) {
 // discard trailers.
 //
 // Reference: RFC2616 3.6.1 Chunked Transfer Coding.
-bool ParseChunkedBody(StringPiece response,
+bool ParseChunkedBody(absl::string_view response,
                       size_t offset,
                       size_t* remaining_chunk_length,
-                      std::vector<StringPiece>* chunks) {
+                      std::vector<absl::string_view>* chunks) {
   size_t head = offset;
   *remaining_chunk_length = string::npos;
   chunks->clear();
@@ -420,8 +422,8 @@ bool ParseChunkedBody(StringPiece response,
       // CRLF
 
       // skip chunk-extension.
-      StringPiece::size_type crlf_pos = response.find("\r\n", head);
-      if (crlf_pos == StringPiece::npos) {
+      absl::string_view::size_type crlf_pos = response.find("\r\n", head);
+      if (crlf_pos == absl::string_view::npos) {
         // need more data.
         // 4 comes from \r\n<trailer (which can be omitted)>\r\n.
         *remaining_chunk_length = 4;
@@ -446,9 +448,9 @@ bool ParseChunkedBody(StringPiece response,
 
         crlf_pos = response.find("\r\n", head);
 
-        if (crlf_pos == StringPiece::npos) {
+        if (crlf_pos == absl::string_view::npos) {
           // incomplete trailer header ends with CR
-          if (strings::EndsWith(response, "\r")) {
+          if (absl::EndsWith(response, "\r")) {
             *remaining_chunk_length = 3;
             return false;
           }
@@ -472,8 +474,8 @@ bool ParseChunkedBody(StringPiece response,
             << ", head:" << head
             << ", chunk_len:" << chunk_length;
     // skip chunk-extension.
-    StringPiece::size_type crlf_pos = response.find("\r\n", head);
-    if (crlf_pos == StringPiece::npos) {
+    absl::string_view::size_type crlf_pos = response.find("\r\n", head);
+    if (crlf_pos == absl::string_view::npos) {
       // need more data.
       // 4 comes from \r\n<chunk>\r\n.
       *remaining_chunk_length = chunk_length + 4;
@@ -502,7 +504,7 @@ bool ParseChunkedBody(StringPiece response,
   return false;
 }
 
-string CombineChunks(const std::vector<StringPiece>& chunks) {
+string CombineChunks(const std::vector<absl::string_view>& chunks) {
   string dechunked;
   for (const auto& it : chunks) {
     dechunked.append(it.data(), it.size());
@@ -520,18 +522,15 @@ std::map<string, string> ParseQuery(const string& query) {
   if (pos != string::npos) {
     query_str = query.substr(0, pos);
   }
-  std::vector<string> q = strings::Split(query_str, "&");
-  for (const auto& p : q) {
-    if (p.empty()) {
-      continue;
-    }
+
+  for (auto&& p : absl::StrSplit(query_str, '&', absl::SkipEmpty())) {
     size_t i = p.find('=');
     if (i == string::npos) {
-      params.insert(make_pair(p, ""));
+      params.insert(make_pair(string(p), ""));
       continue;
     }
-    string k = p.substr(0, i);
-    string v = p.substr(i + 1);
+    string k(p.substr(0, i));
+    string v(p.substr(i + 1));
     // TODO: url decode?
     params.insert(make_pair(k, v));
   }

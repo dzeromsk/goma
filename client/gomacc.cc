@@ -46,7 +46,6 @@ MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 MSVC_POP_WARNING()
 #include "scoped_fd.h"
 #include "simple_timer.h"
-#include "strutil.h"
 #include "subprocess.h"
 #include "util.h"
 
@@ -92,6 +91,7 @@ using devtools_goma::SpawnAndWaitNonGomacc;
 
 namespace {
 
+#ifndef _WIN32
 // Dump for debugging
 string DumpArgvString(
     size_t argc, const char *argv[], const char *message) {
@@ -104,7 +104,6 @@ string DumpArgvString(
   return ss.str();
 }
 
-#ifndef _WIN32
 static void DumpArgv(size_t argc, const char *argv[], const char *message) {
   std::cerr << DumpArgvString(argc, argv, message);
 }
@@ -114,7 +113,7 @@ bool HandleHttpPortRequest(int argc, char* argv[]) {
   if (argc < 2 || strcmp(argv[1], "port") != 0) {
     return false;
   }
-  StringPiece basename = file::Basename(argv[0]);
+  absl::string_view basename = file::Basename(argv[0]);
   if (basename != "gomacc"
 #ifdef _WIN32
       && basename != "gomacc.exe"

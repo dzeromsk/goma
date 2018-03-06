@@ -13,8 +13,10 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "compiler_specific.h"
 #include "file_id.h"
 #include "google/protobuf/repeated_field.h"
@@ -24,8 +26,6 @@
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/compiler_info_data.pb.h"
 MSVC_POP_WARNING()
-#include "string_piece.h"
-#include "unordered.h"
 
 using std::string;
 
@@ -131,7 +131,7 @@ class CompilerInfoBuilder {
   static bool HasAsPath(const std::vector<string>& subprogram_paths);
 
   // Parses "-xc -v -E /dev/null" output and returns real clang path.
-  static string ParseRealClangPath(StringPiece v_out);
+  static string ParseRealClangPath(absl::string_view v_out);
 
   // Get real compiler path.
   // See: go/ma/resources-for-developers/goma-compiler-selection-mechanism
@@ -306,7 +306,8 @@ class CompilerInfo {
 
   // Updates FileId to the current FileId when hash is matched.
   // Returns false if hash doesn't match.
-  bool UpdateFileIdIfHashMatch(unordered_map<string, string>* sha256_cache);
+  bool UpdateFileIdIfHashMatch(
+      std::unordered_map<string, string>* sha256_cache);
 
   // Returns true if CompilerInfo has some error.
   bool HasError() const { return data_->has_error_message(); }
@@ -369,23 +370,25 @@ class CompilerInfo {
   const string& lang() const { return data_->lang(); }
   const string& error_message() const { return data_->error_message(); }
 
-  const unordered_map<string, bool>& supported_predefined_macros() const {
+  const std::unordered_map<string, bool>& supported_predefined_macros() const {
     return supported_predefined_macros_;
   }
-  const unordered_map<string, int>& has_feature() const { return has_feature_; }
-  const unordered_map<string, int>& has_extension() const {
+  const std::unordered_map<string, int>& has_feature() const {
+    return has_feature_;
+  }
+  const std::unordered_map<string, int>& has_extension() const {
     return has_extension_;
   }
-  const unordered_map<string, int>& has_attribute() const {
+  const std::unordered_map<string, int>& has_attribute() const {
     return has_attribute_;
   }
-  const unordered_map<string, int>& has_cpp_attribute() const {
+  const std::unordered_map<string, int>& has_cpp_attribute() const {
     return has_cpp_attribute_;
   }
-  const unordered_map<string, int>& has_declspec_attribute() const {
+  const std::unordered_map<string, int>& has_declspec_attribute() const {
     return has_declspec_attribute_;
   }
-  const unordered_map<string, int>& has_builtin() const {
+  const std::unordered_map<string, int>& has_builtin() const {
     return has_builtin_;
   }
   const std::vector<string>& additional_flags() const {
@@ -433,13 +436,13 @@ class CompilerInfo {
 
   // <macro name, hidden>.
   // If it is hidden macro like __has_include__ in GCC 5, hidden is set.
-  unordered_map<string, bool> supported_predefined_macros_;
-  unordered_map<string, int> has_feature_;
-  unordered_map<string, int> has_extension_;
-  unordered_map<string, int> has_attribute_;
-  unordered_map<string, int> has_cpp_attribute_;
-  unordered_map<string, int> has_declspec_attribute_;
-  unordered_map<string, int> has_builtin_;
+  std::unordered_map<string, bool> supported_predefined_macros_;
+  std::unordered_map<string, int> has_feature_;
+  std::unordered_map<string, int> has_extension_;
+  std::unordered_map<string, int> has_attribute_;
+  std::unordered_map<string, int> has_cpp_attribute_;
+  std::unordered_map<string, int> has_declspec_attribute_;
+  std::unordered_map<string, int> has_builtin_;
 
   std::vector<string> additional_flags_;
 

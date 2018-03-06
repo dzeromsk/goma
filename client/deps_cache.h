@@ -6,10 +6,10 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_DEPS_CACHE_H_
 #define DEVTOOLS_GOMA_CLIENT_DEPS_CACHE_H_
 
-#include <map>
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include "autolock_timer.h"
@@ -120,7 +120,8 @@ class DepsCache {
   };
 
   typedef SHA256HashValue Key;
-  typedef unordered_map<Key, DepsTableData, SHA256HashValueHasher> DepsTable;
+  typedef std::unordered_map<Key, DepsTableData, SHA256HashValueHasher>
+      DepsTable;
 
   DepsCache(const string& cache_filename,
             int identifier_alive_duration,
@@ -156,7 +157,7 @@ class DepsCache {
   const int max_proto_size_in_mega_bytes_;
 
   // protects deps_table_.
-  Lock mu_;
+  mutable Lock mu_;
   DepsTable deps_table_;
 
   // Instead of using a filename, we alternatively use an id for
@@ -164,7 +165,7 @@ class DepsCache {
   // between filename and id.
   FilenameIdTable filename_id_table_;
 
-  Lock count_mu_;
+  mutable Lock count_mu_;
   unsigned int hit_count_;
   unsigned int missed_count_;
   unsigned int missed_by_updated_count_;

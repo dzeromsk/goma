@@ -85,7 +85,7 @@ class AutoLockStats {
   void TextReport(std::ostringstream* ss);
 
  private:
-  Lock mu_;
+  mutable Lock mu_;
   std::vector<AutoLockStat*> stats_ GUARDED_BY(mu_);
   DISALLOW_COPY_AND_ASSIGN(AutoLockStats);
 };
@@ -94,12 +94,12 @@ extern AutoLockStats* g_auto_lock_stats;
 
 class MutexAcquireStrategy {
  public:
-  static void Acquire(const Lock& lock) EXCLUSIVE_LOCK_FUNCTION(lock) {
-    lock.Acquire();
+  static void Acquire(Lock* lock) EXCLUSIVE_LOCK_FUNCTION(lock) {
+    lock->Acquire();
   }
 
-  static void Release(const Lock& lock) UNLOCK_FUNCTION(lock) {
-    lock.Release();
+  static void Release(Lock* lock) UNLOCK_FUNCTION(lock) {
+    lock->Release();
   }
 
  private:
@@ -108,12 +108,12 @@ class MutexAcquireStrategy {
 
 class ReadWriteLockAcquireSharedStrategy {
  public:
-  static void Acquire(const ReadWriteLock& lock) SHARED_LOCK_FUNCTION(lock) {
-    lock.AcquireShared();
+  static void Acquire(ReadWriteLock* lock) SHARED_LOCK_FUNCTION(lock) {
+    lock->AcquireShared();
   }
 
-  static void Release(const ReadWriteLock& lock) UNLOCK_FUNCTION(lock) {
-    lock.ReleaseShared();
+  static void Release(ReadWriteLock* lock) UNLOCK_FUNCTION(lock) {
+    lock->ReleaseShared();
   }
 
  private:
@@ -122,12 +122,12 @@ class ReadWriteLockAcquireSharedStrategy {
 
 class ReadWriteLockAcquireExclusiveStrategy {
  public:
-  static void Acquire(const ReadWriteLock& lock) EXCLUSIVE_LOCK_FUNCTION(lock) {
-    lock.AcquireExclusive();
+  static void Acquire(ReadWriteLock* lock) EXCLUSIVE_LOCK_FUNCTION(lock) {
+    lock->AcquireExclusive();
   }
 
-  static void Release(const ReadWriteLock& lock) UNLOCK_FUNCTION(lock) {
-    lock.ReleaseExclusive();
+  static void Release(ReadWriteLock* lock) UNLOCK_FUNCTION(lock) {
+    lock->ReleaseExclusive();
   }
 
  private:
@@ -142,8 +142,8 @@ class AutoLockTimerBase {
   // If |statp| is NULL, it doesn't collect stats (i.e. it works as
   // almost same as AutoLock).
   // If |statp| is not NULL, it holds stats for lock wait/hold time.
-  AutoLockTimerBase(const LockType* lock, AutoLockStat* statp)
-      : lock_(*lock), stat_(nullptr), timer_(SimpleTimer::NO_START) {
+  AutoLockTimerBase(LockType* lock, AutoLockStat* statp)
+      : lock_(lock), stat_(nullptr), timer_(SimpleTimer::NO_START) {
     if (statp)
       timer_.Start();
     LockAcquireStrategy::Acquire(lock_);
@@ -162,7 +162,7 @@ class AutoLockTimerBase {
   }
 
  private:
-  const LockType& lock_;
+  LockType* lock_;
   AutoLockStat* stat_;
   SimpleTimer timer_;
   DISALLOW_COPY_AND_ASSIGN(AutoLockTimerBase);
@@ -171,7 +171,7 @@ class AutoLockTimerBase {
 class SCOPED_LOCKABLE AutoLockTimer
     : private AutoLockTimerBase<Lock, MutexAcquireStrategy> {
  public:
-  AutoLockTimer(const Lock* lock,
+  AutoLockTimer(Lock* lock,
                 AutoLockStat* statp) EXCLUSIVE_LOCK_FUNCTION(lock)
       : AutoLockTimerBase(lock, statp) {
   }
@@ -184,7 +184,7 @@ class SCOPED_LOCKABLE AutoReadWriteLockSharedTimer
     : private AutoLockTimerBase<ReadWriteLock,
                                 ReadWriteLockAcquireSharedStrategy> {
  public:
-  AutoReadWriteLockSharedTimer(const ReadWriteLock* lock,
+  AutoReadWriteLockSharedTimer(ReadWriteLock* lock,
                                AutoLockStat* statp) SHARED_LOCK_FUNCTION(lock)
       : AutoLockTimerBase(lock, statp) {
   }
@@ -196,7 +196,7 @@ class SCOPED_LOCKABLE AutoReadWriteLockExclusiveTimer
     : private AutoLockTimerBase<ReadWriteLock,
                                 ReadWriteLockAcquireExclusiveStrategy> {
  public:
-  AutoReadWriteLockExclusiveTimer(const ReadWriteLock* lock,
+  AutoReadWriteLockExclusiveTimer(ReadWriteLock* lock,
                                   AutoLockStat* statp)
       EXCLUSIVE_LOCK_FUNCTION(lock)
       : AutoLockTimerBase(lock, statp) {

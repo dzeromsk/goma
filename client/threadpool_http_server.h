@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "basictypes.h"
 #include "lockhelper.h"
 #ifdef _WIN32
@@ -17,7 +18,6 @@
 #endif
 #include "scoped_fd.h"
 #include "simple_timer.h"
-#include "string_piece.h"
 #include "worker_thread_manager.h"
 
 using std::string;
@@ -100,8 +100,8 @@ class ThreadpoolHttpServer {
     // Full request string with all the headers and body.
     const string& request() const { return request_; }
 
-    StringPiece header() const {
-      StringPiece h(request_.data(), request_offset_);
+    absl::string_view header() const {
+      absl::string_view h(request_.data(), request_offset_);
       return h;
     }
     size_t header_size() const { return request_offset_; }
@@ -192,7 +192,7 @@ class ThreadpoolHttpServer {
   // Utility function: Parse HTTP request string and extract method,
   // path, and query string.
   static bool ParseRequestLine(
-      StringPiece request, string* method, string* path, string* query);
+      absl::string_view request, string* method, string* path, string* query);
 
   int port() const { return port_; }
 
@@ -256,7 +256,7 @@ class ThreadpoolHttpServer {
 
   const int max_num_sockets_;
 
-  Lock mu_;
+  mutable Lock mu_;
   ConditionVariable cond_;
   int max_sockets_[NUM_SOCKET_TYPES];
   int num_sockets_[NUM_SOCKET_TYPES];

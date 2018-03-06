@@ -14,9 +14,10 @@
 
 #include <sstream>
 
+#include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
 #include "glog/logging.h"
-#include "join.h"
-#include "split.h"
+#include "util.h"
 
 namespace devtools_goma {
 
@@ -51,8 +52,7 @@ string TrustedIpsManager::DebugString() const {
        ++iter) {
     res.push_back(iter->DebugString());
   }
-  string netspecs;
-  JoinStrings(res, ",", &netspecs);
+  string netspecs = absl::StrJoin(res, ",");
   out << netspecs;
   out << "]";
   return out.str();
@@ -60,9 +60,9 @@ string TrustedIpsManager::DebugString() const {
 
 TrustedIpsManager::NetSpec::NetSpec(const string& netspec)
     : netmask_(0xffffffff) {
-  std::vector<string> res;
-  SplitStringUsing(netspec, "/", &res);
-  CHECK_GT(res.size(), 0U) << "Wrong format of netspec:" << netspec;
+  std::vector<string> res = ToVector(absl::StrSplit(netspec, '/'));
+  CHECK(res.size() == 1 || res.size() == 2)
+      << "Wrong format of netspec:" << netspec;
   inet_aton(res[0].c_str(), &in_addr_);
   if (res.size() == 2) {
     int masklen = atoi(res[1].c_str());

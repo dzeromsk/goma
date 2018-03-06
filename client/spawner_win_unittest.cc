@@ -135,6 +135,35 @@ TEST(SpawnerWin, SpawnerEscapeArgs) {
       "\\10\\include\\10.0.14393.0\\um");
   argv.push_back(
       "-DSTR=\"str\"");
+  argv.push_back("-D\"STR2=\\\"str2\\\"\"");
+
+  argv.push_back("-D\"SPACE=\\\"space \\\"\"");
+
+  argv.push_back("-DFOO=\\\"BAR\\\"");
+
+  // empty string
+  argv.push_back("");
+
+  // unbalanced
+  argv.push_back("\"");
+
+  // unbalanced with space
+  argv.push_back("\" ");
+
+  // backslash in unbalanced
+  argv.push_back("\" \\");
+
+  argv.push_back("\" \\\\\\\\\\\\");
+
+  // even number backslash
+  argv.push_back("a\\\\\"b");
+
+  // test cases from https://msdn.microsoft.com/en-us/library/17w5ykft(v=vs.85).aspx
+  argv.push_back("a\\\\\\b");
+  argv.push_back("de fg");
+  argv.push_back("a\\\"b");
+  argv.push_back("a\\\\b c");
+
   // TODO: remove these when spawn_win do not find command.
   env.push_back("PATH=" + devtools_goma::GetEnv("PATH"));
   env.push_back("PATHEXT=" + devtools_goma::GetEnv("PATHEXT"));
@@ -169,6 +198,107 @@ TEST(SpawnerWin, SpawnerEscapeArgs) {
   token = strtok_s(nullptr, "\r\n", &next_token);
   EXPECT_TRUE(token != nullptr);
   EXPECT_STREQ("-DSTR=\"str\"", token);
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  EXPECT_STREQ("-D\"STR2=\\\"str2\\\"\"", token);
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  EXPECT_STREQ("-D\"SPACE=\\\"space \\\"\"", token);
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  EXPECT_STREQ("-DFOO=\\\"BAR\\\"", token);
+
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+
+  // empty string check first
+  size_t tok_idx = token - &output[0];
+  // strtok_s skip \r\n
+  ASSERT_GE(tok_idx - 4, 0);
+  EXPECT_EQ(output[tok_idx - 4], '\0');
+  EXPECT_EQ(output[tok_idx - 3], '\n');
+  EXPECT_EQ(output[tok_idx - 2], '\r');
+  EXPECT_EQ(output[tok_idx - 1], '\n');
+
+  EXPECT_STREQ("\"", token);
+
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  EXPECT_STREQ("\" ", token);
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  EXPECT_STREQ("\" \\", token);
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  EXPECT_STREQ("\" \\\\\\\\\\\\", token);
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  // `a\\"b`
+  EXPECT_STREQ("a\\\\\"b", token);
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  // `a\\\b`
+  EXPECT_STREQ("a\\\\\\b", token);
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  EXPECT_STREQ("de fg", token);
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  // `a\"b`
+  EXPECT_STREQ("a\\\"b", token);
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  // `a\\b c`
+  EXPECT_STREQ("a\\\\b c", token);
+}
+
+// This is test for regression happens on passing path longer than
+// MAX_PATH to _splitpath_s.
+TEST(SpawnerWin, SpawnerLongArgs) {
+  char buffer[PATH_MAX] = {0};
+  GetModuleFileNameA(nullptr, buffer, PATH_MAX);
+  *strrchr(buffer, '\\') = 0;
+
+  std::string cwd(buffer);
+  std::string prog(".\\dump_env.exe");
+  std::vector<std::string> argv, env;
+  argv.push_back(prog);
+  argv.push_back(std::string(MAX_PATH + 10, 'a'));
+
+  // TODO: remove these when spawn_win do not find command.
+  env.push_back("PATH=" + devtools_goma::GetEnv("PATH"));
+  env.push_back("PATHEXT=" + devtools_goma::GetEnv("PATHEXT"));
+
+  // priority not supported yet
+  // req.set_priority(devtools_goma::SubProcessReq_Priority_HIGH_PRIORITY);
+
+  devtools_goma::SpawnerWin spawner;
+  std::string output;
+  spawner.SetConsoleOutputBuffer(&output,
+                                 devtools_goma::Spawner::MERGE_STDOUT_STDERR);
+  int pid = spawner.Run(prog, argv, env, cwd);
+  EXPECT_NE(0, pid);
+  while (spawner.IsChildRunning())
+    spawner.Wait(devtools_goma::Spawner::WAIT_INFINITE);
+
+  char* next_token;
+  char* token = strtok_s(&output[0], "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  EXPECT_EQ(std::string(MAX_PATH + 10, 'a'), token);
 }
 
 TEST(SpawnerWin, SpawnerFailed) {

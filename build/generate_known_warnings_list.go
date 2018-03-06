@@ -15,6 +15,9 @@ import (
 	"strings"
 )
 
+const GnuDocumentUrl = "https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html"
+const ClangDocumentUrl = "https://clang.llvm.org/docs/DiagnosticsReference.html"
+
 // Already known warnings. These warnings will be merged.
 var knownWarnings = []string{
 	"",
@@ -75,6 +78,7 @@ var knownWarnings = []string{
 	"expansion-to-defined",
 	"extra",
 	"extra-semi",
+	"fallthrough",
 	"fatal-errors",
 	"float-conversion",
 	"float-equal",
@@ -138,6 +142,7 @@ var knownWarnings = []string{
 	"no-aggressive-loop-optimizations",
 	"no-array-bounds",
 	"no-attributes",
+	"no-backend-plugin",
 	"no-bitfield-width",
 	"no-bool-conversion",
 	"no-builtin-declaration-mismatch",
@@ -184,6 +189,7 @@ var knownWarnings = []string{
 	"no-error",
 	"no-error-sometimes-uninitialized",
 	"no-error-unused",
+	"no-error=",
 	"no-exit-time-destructors",
 	"no-expansion-to-defined",
 	"no-extern-c-compat",
@@ -203,6 +209,7 @@ var knownWarnings = []string{
 	"no-format-zero-length",
 	"no-four-char-constants",
 	"no-frame-larger-than",
+	"no-frame-larger-than=",
 	"no-free-nonheap-object",
 	"no-gcc-compat",
 	"no-global-constructors",
@@ -234,7 +241,9 @@ var knownWarnings = []string{
 	"no-int-to-void-pointer-cast",
 	"no-invalid-noreturn",
 	"no-invalid-offsetof",
+	"no-knr-promoted-parameter",
 	"no-literal-conversion",
+	"no-logical-not-parentheses",
 	"no-logical-op-parentheses",
 	"no-long-long",
 	"no-macro-redefined",
@@ -261,6 +270,7 @@ var knownWarnings = []string{
 	"no-non-virtual-dtor",
 	"no-nonnull",
 	"no-nonportable-include-path",
+	"no-nonportable-system-include-path",
 	"no-null-conversion",
 	"no-null-dereference",
 	"no-null-pointer-arithmetic",
@@ -289,6 +299,7 @@ var knownWarnings = []string{
 	"no-return-type",
 	"no-scalar-storage-order",
 	"no-self-assign",
+	"no-section",
 	"no-semicolon-before-method-body",
 	"no-sequence-point",
 	"no-shadow",
@@ -361,6 +372,7 @@ var knownWarnings = []string{
 	"no-varargs",
 	"no-variadic-macros",
 	"no-virtual-move-assign",
+	"no-visibility",
 	"no-vla",
 	"no-weak-vtables",
 	"no-writable-strings",
@@ -483,9 +495,19 @@ var knownWarnings = []string{
 	"zero-as-null-pointer-constant",
 }
 
-// loadFromWeb reads gnu documents.
-func loadFromWeb() (string, error) {
-	resp, err := http.Get("https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html")
+// removeAfterEqual removes string after '='. '=' is preserved.
+func removeAfterEqual(s string) string {
+	p := strings.Index(s, "=")
+	if p >= 0 {
+		return s[:p+1]
+	}
+
+	return s
+}
+
+// loadFromWeb reads body from url.
+func loadFromWeb(url string) (string, error) {
+	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
 	}
@@ -499,46 +521,81 @@ func loadFromWeb() (string, error) {
 	return string(body), nil
 }
 
-func main() {
-	body, err := loadFromWeb()
+// parseGnuDocument loads gnu document and parses it to list all warnings.
+// The result might contain "no-" form warnings or duplicate.
+func parseGnuDocument() ([]string, error) {
+	body, err := loadFromWeb(GnuDocumentUrl)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load from the web: %v", err)
-		os.Exit(1)
+		return nil, err
 	}
 
-	warnings := knownWarnings
+	var warnings []string
 
 	codeRE := regexp.MustCompile(`(?m)<dt><code>-W(.*)</code></dt>`)
 	removeTagRE := regexp.MustCompile(`<.*>`)
 	for _, matched := range codeRE.FindAllStringSubmatch(body, -1) {
 		s := matched[1]
 		s = removeTagRE.ReplaceAllString(s, "")
-
-		// Remove after '='. Don't remove '='.
-		p := strings.Index(s, "=")
-		if p >= 0 {
-			s = s[:p+1]
-		}
-
-		// Remove spaces
-		s = strings.TrimSpace(s)
-
-		warnings = append(warnings, s)
+		s = removeAfterEqual(s)
+		warnings = append(warnings, strings.TrimSpace(s))
 	}
 
-	sort.Strings(warnings)
+	return warnings, nil
+}
 
-	// unique.
-	var uniqueWarnings []string
-	visited := make(map[string]bool)
-	for _, w := range warnings {
-		if visited[w] {
-			continue
-		}
-
-		visited[w] = true
-		uniqueWarnings = append(uniqueWarnings, w)
+// parseClangDocument loads clang document and parses it to list all warnings.
+// The result might contain "no-" form warnings or duplicate.
+func parseClangDocument() ([]string, error) {
+	body, err := loadFromWeb(ClangDocumentUrl)
+	if err != nil {
+		return nil, err
 	}
+
+	var warnings []string
+
+	// clang document has ToC which consists of lines like the following:
+	//   <li><a class="reference internal" href="#wcl4" id="id8">-WCL4</a></li>
+	// In this example, take "CL4" from this line. The content of href and id varies.
+	codeRE := regexp.MustCompile(`<li><a class="reference internal" href=".*" id=".*">-W(.*)</a></li>`)
+	for _, matched := range codeRE.FindAllStringSubmatch(body, -1) {
+		s := matched[1]
+		s = removeAfterEqual(s)
+		warnings = append(warnings, strings.TrimSpace(s))
+	}
+
+	return warnings, nil
+}
+
+func main() {
+	clangWarnings, err := parseClangDocument()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to read clang documents: %v\n", err)
+		os.Exit(1)
+	}
+
+	gnuWarnings, err := parseGnuDocument()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to read gnu documents: %v\n", err)
+		os.Exit(1)
+	}
+
+	warnings := make(map[string]bool)
+	// We register warnings without "no-" form.
+	for _, w := range knownWarnings {
+		warnings[strings.TrimPrefix(w, "no-")] = true
+	}
+	for _, w := range clangWarnings {
+		warnings[strings.TrimPrefix(w, "no-")] = true
+	}
+	for _, w := range gnuWarnings {
+		warnings[strings.TrimPrefix(w, "no-")] = true
+	}
+
+	var sortedWarnings []string
+	for w, _ := range warnings {
+		sortedWarnings = append(sortedWarnings, w)
+	}
+	sort.Strings(sortedWarnings)
 
 	fmt.Print(`// Copyright 2017 Google Inc. All Rights Reserved.
 //
@@ -551,7 +608,7 @@ func main() {
 namespace devtools_goma {
 const char* const kKnownWarningOptions[] {
 `)
-	for _, w := range uniqueWarnings {
+	for _, w := range sortedWarnings {
 		fmt.Printf("  \"%s\",\n", w)
 	}
 	fmt.Print(`};

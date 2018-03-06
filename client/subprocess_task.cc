@@ -44,7 +44,7 @@ string SubProcessTask::ReadCommandOutput(
   for (const auto& env : envs)
     req->add_env(env);
   if (cwd.empty()) {
-    req->set_cwd(SubProcessControllerClient::Get()->tmp_dir());
+    req->set_cwd(SubProcessControllerClient::Get()->TmpDir());
   } else {
     req->set_cwd(cwd);
   }
@@ -91,7 +91,6 @@ SubProcessTask::SubProcessTask(
     const string& trace_id, const char* prog, char* const argv[])
     : thread_id_(0),
       callback_(nullptr),
-      cond_(&mu_),
       state_(SubProcessState::SETUP) {
   DCHECK(SubProcessControllerClient::IsRunning());
   DCHECK(SubProcessControllerClient::Get()->Initialized());
@@ -152,7 +151,7 @@ void SubProcessTask::StartInternal(OneshotClosure* callback) {
     // blocking mode.
     AUTOLOCK(lock, &mu_);
     while (state_ != SubProcessState::FINISHED) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
   }
 }

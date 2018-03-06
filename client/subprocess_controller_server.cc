@@ -35,7 +35,7 @@ MSVC_POP_WARNING()
 
 namespace {
 
-static bool CanKillCommand(StringPiece command,
+static bool CanKillCommand(absl::string_view command,
                            const std::set<string>& dont_kill_commands) {
   string prog = string(file::Stem(command));
 #ifdef _WIN32
@@ -49,7 +49,10 @@ static bool CanKillCommand(StringPiece command,
 namespace devtools_goma {
 
 static const int kIdleIntervalMilliSec = 500;
+
+#ifndef _WIN32
 static const int kWaitIntervalMilliSec = 5;
+#endif
 
 #ifndef _WIN32
 // siginfo is passed from signal handler to SubProcessControllerServer loop.
@@ -112,7 +115,7 @@ void SubProcessControllerServer::Loop() {
       FD_SET(sock_fd_.get(), &write_fd);
       MSVC_POP_WARNING();
     }
-    int max_fd = std::max(-1, sock_fd_.get());
+    int max_fd = std::max<int>(-1, sock_fd_.get());
 #ifndef _WIN32
     FD_SET(signal_fd_.fd(), &read_fd);
     max_fd = std::max(max_fd, signal_fd_.fd());

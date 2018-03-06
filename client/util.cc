@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <deque>
 
+#include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
 #include "compiler_flags.h"
 #include "env_flags.h"
 #include "file_id.h"
@@ -15,9 +17,6 @@
 #include "glog/stl_logging.h"
 #include "path.h"
 #include "path_resolver.h"
-#include "split.h"
-#include "string_piece.h"
-#include "string_util.h"
 
 using std::string;
 
@@ -30,17 +29,20 @@ const char* kPathListSep = ";";
 #endif
 
 #ifdef _WIN32
-
 std::deque<string> ParsePathExts(const string& pathext_spec) {
   std::vector<string> pathexts;
   if (!pathext_spec.empty()) {
-    SplitStringUsing(pathext_spec, kPathListSep, &pathexts);
+    pathexts = ToVector(absl::StrSplit(pathext_spec,
+                                       kPathListSep,
+                                       absl::SkipEmpty()));
   } else {
     // If |pathext_spec| is empty, we should use the default PATHEXT.
     // See:
     // http://technet.microsoft.com/en-us/library/cc723564.aspx#XSLTsection127121120120
     static const char* kDefaultPathext = ".COM;.EXE;.BAT;.CMD";
-    SplitStringUsing(kDefaultPathext, kPathListSep, &pathexts);
+    pathexts = ToVector(absl::StrSplit(kDefaultPathext,
+                                       kPathListSep,
+                                       absl::SkipEmpty()));
   }
 
   for (auto& pathext : pathexts) {
@@ -205,11 +207,11 @@ bool GetRealExecutablePath(
 
   for (size_t pos = 0, next_pos; pos != string::npos; pos = next_pos) {
     next_pos = path_env.find(kPathListSep, pos);
-    StringPiece dir;
-    if (next_pos == StringPiece::npos) {
-      dir.set(path_env.c_str() + pos, path_env.size() - pos);
+    absl::string_view dir;
+    if (next_pos == absl::string_view::npos) {
+      dir = absl::string_view(path_env.c_str() + pos, path_env.size() - pos);
     } else {
-      dir.set(path_env.c_str() + pos, next_pos - pos);
+      dir = absl::string_view(path_env.c_str() + pos, next_pos - pos);
       ++next_pos;
     }
 
@@ -314,8 +316,8 @@ pid_t Getpid() {
 }
 
 string ToShortNodename(const string& nodename) {
-  std::vector<string> entries = strings::Split(nodename, ".");
-  return ToLower(entries[0]);
+  std::vector<string> entries = ToVector(absl::StrSplit(nodename, '.'));
+  return absl::AsciiStrToLower(entries[0]);
 }
 
 }  // namespace devtools_goma

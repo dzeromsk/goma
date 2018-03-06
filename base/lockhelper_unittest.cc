@@ -258,7 +258,7 @@ class ConditionVariableTestThread : public PlatformThread::Delegate {
   void Count1() {
     for (;;) {
       lock_->Acquire();
-      cond_->Wait();
+      cond_->Wait(lock_);
       data_->count++;
       // Use EXPECT_TRUE instead of ASSERT_TRUE, since when the condition
       // does not hold, ASSERT_TRUE will cause function exit, it means
@@ -308,7 +308,7 @@ class ConditionVariableTestThread : public PlatformThread::Delegate {
 
 bool ConditionVar() {
   Lock lock;
-  ConditionVariable cond(&lock);
+  ConditionVariable cond;
   ConditionVariableTestThread::Data data;
 
   std::unique_ptr<ConditionVariableTestThread> threads[2];

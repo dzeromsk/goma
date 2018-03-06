@@ -2,30 +2,6 @@ config("chromium_base_config") {
   include_dirs = [ "." ]
 }
 
-static_library("string") {
-  sources = [
-    "string_piece.cc",
-    "string_piece.h",
-    "string_util.h",
-  ]
-
-  public_configs = [ ":chromium_base_config" ]
-}
-
-executable("string_piece_unittest") {
-  testonly = true
-  sources = [
-    "string_piece_unittest.cc",
-  ]
-  deps = [
-    ":string",
-    "//build/config/sanitizers:deps",
-    "//third_party:glog",
-    "//third_party:gtest",
-    "//third_party:gtest_main",
-  ]
-}
-
 static_library("cpu") {
   sources = [
     "cpu.cc",
@@ -42,7 +18,6 @@ executable("cpu_unittest") {
   ]
   deps = [
     ":cpu",
-    ":string",
     "//third_party:glog",
     "//third_party:gtest",
     "//third_party:gtest_main",
@@ -71,6 +46,7 @@ if (os == "mac") {
 
     deps = [
       "//third_party:glog",
+      "//third_party/abseil",
     ]
 
     public_configs = [ ":chromium_base_config" ]
@@ -83,7 +59,6 @@ if (os == "mac") {
     ]
     deps = [
       ":mac_version",
-      ":string",
       "//third_party:glog",
       "//third_party:gtest",
       "//third_party:gtest_main",

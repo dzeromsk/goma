@@ -9,16 +9,17 @@
 #include <utility>
 #include <vector>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
 #include "compiler_flags.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
-#include "join.h"
 #include "path.h"
 #include "path_resolver.h"
 #include "path_util.h"
-#include "string_piece_utils.h"
 using ::google::protobuf::RepeatedPtrField;
-using ::strings::StrCat;
+using ::absl::StrCat;
 
 namespace {
 
@@ -93,7 +94,7 @@ bool RewritePathWithDebugPrefixMap(
   // See CGDebugInfo::remapDIPath
   // https://clang.llvm.org/doxygen/CGDebugInfo_8cpp_source.html
   for (const auto& iter : debug_prefix_map) {
-    if (strings::StartsWith(*path, iter.first)) {
+    if (absl::StartsWith(*path, iter.first)) {
       *path = file::JoinPath(iter.second, path->substr(iter.first.length()));
       return true;
     }
@@ -127,7 +128,7 @@ bool HasAmbiguityInDebugPrefixMap(
 
   string prev;
   for (const auto& path : debug_prefix_map) {
-    if (!prev.empty() && strings::StartsWith(path.first, prev)) {
+    if (!prev.empty() && absl::StartsWith(path.first, prev)) {
       return true;
     }
     prev = path.first;
@@ -164,7 +165,7 @@ void NormalizeExecReqInputOrderForCacheKey(ExecReq* req) {
   inputs_not_in_cwd.reserve(req->input_size());
 
   for (const auto& input : req->input()) {
-    if (strings::StartsWith(input.filename(), req->cwd())) {
+    if (absl::StartsWith(input.filename(), req->cwd())) {
       inputs_in_cwd.push_back(&input);
     } else {
       inputs_not_in_cwd.push_back(&input);
@@ -553,7 +554,7 @@ void NormalizeExecReqForCacheKey(
     if (keep_cwd & kNormalizeWithDebugPrefixMap) {
       // If there is PWD= in env, replace cwd with content of PWD=.
       for (const auto& env_var : req->env()) {
-        if (strings::StartsWith(env_var, kPwd)) {
+        if (absl::StartsWith(env_var, kPwd)) {
           *req->mutable_cwd() = env_var.substr(strlen(kPwd));
           break;
         }
@@ -568,7 +569,7 @@ void NormalizeExecReqForCacheKey(
     // Drop PWD from env.
     auto it = req->mutable_env()->begin();
     while (it != req->mutable_env()->end()) {
-      if (strings::StartsWith(*it, kPwd)) {
+      if (absl::StartsWith(*it, kPwd)) {
         if (keep_cwd & kNormalizeWithDebugPrefixMap) {
           string path = it->substr(strlen(kPwd));
           RewritePathWithDebugPrefixMap(debug_prefix_map, &path);
@@ -602,7 +603,7 @@ void NormalizeExecReqForCacheKey(
   std::vector<string> new_env;
   bool changed = false;
   for (const auto& env_var : req->env()) {
-    if (strings::StartsWith(env_var, "DEVELOPER_DIR=")) {
+    if (absl::StartsWith(env_var, "DEVELOPER_DIR=")) {
       changed = true;
       continue;
     }

@@ -14,25 +14,18 @@ static_library("base") {
     "file.h",
     "file_dir.cc",
     "file_dir.h",
-    "join.cc",
-    "join.h",
     "lockhelper.cc",
     "lockhelper.h",
     "path.cc",
     "path.h",
-    "split.cc",
-    "split.h",
-    "string_piece_utils.cc",
-    "string_piece_utils.h",
-    "strutil.cc",
-    "strutil.h",
+    "status.h",
   ]
   deps = [
     "//third_party:glog",
   ]
   public_deps = [
+    "//third_party/abseil",
     "//third_party/chromium_base:platform_thread",
-    "//third_party/chromium_base:string",
   ]
 
   if (os == "win") {
@@ -60,66 +53,10 @@ static_library("goma_unittest") {
   ]
 }
 
-executable("join_unittest") {
-  testonly = true
-  sources = [
-    "join_unittest.cc",
-  ]
-  deps = [
-    ":base",
-    ":goma_unittest",
-    "//build/config/sanitizers:deps",
-    "//third_party:glog",
-    "//third_party:gtest",
-  ]
-}
-
 executable("lockhelper_unittest") {
   testonly = true
   sources = [
     "lockhelper_unittest.cc",
-  ]
-  deps = [
-    ":base",
-    ":goma_unittest",
-    "//build/config/sanitizers:deps",
-    "//third_party:glog",
-    "//third_party:gtest",
-  ]
-}
-
-executable("split_unittest") {
-  testonly = true
-  sources = [
-    "split_unittest.cc",
-  ]
-  deps = [
-    ":base",
-    ":goma_unittest",
-    "//build/config/sanitizers:deps",
-    "//third_party:glog",
-    "//third_party:gtest",
-  ]
-}
-
-executable("string_piece_utils_unittest") {
-  testonly = true
-  sources = [
-    "string_piece_utils_unittest.cc",
-  ]
-  deps = [
-    ":base",
-    ":goma_unittest",
-    "//build/config/sanitizers:deps",
-    "//third_party:glog",
-    "//third_party:gtest",
-  ]
-}
-
-executable("strutil_unittest") {
-  testonly = true
-  sources = [
-    "strutil_unittest.cc",
   ]
   deps = [
     ":base",

@@ -8,11 +8,11 @@
 
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 
 #include "basictypes.h"
-#include "unordered.h"
 using std::string;
 
 class FlagParser {
@@ -129,7 +129,7 @@ class FlagParser {
     std::vector<string> values_;
     std::vector<string>* values_output_;
     Callback* parse_callback_;
-    unordered_map<int, string> parsed_args_;
+    std::unordered_map<int, string> parsed_args_;
     DISALLOW_COPY_AND_ASSIGN(Flag);
   };
 

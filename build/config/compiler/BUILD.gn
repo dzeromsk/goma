@@ -286,7 +286,16 @@ config("no_size_t_to_int_warning") {
 # Toggles between higher and lower warnings for code that is part of goma.
 config("goma_code") {
   if (os == "win") {
-    cflags = [ "/W4" ]  # Warning level 4.
+    cflags = [
+      "/W4",  # Warning level 4.
+      "/wd4127",  # (for abseil) conditional expression is constant
+      "/wd4244",  # (for abseil) any conversion that may cause loss of data
+    ]
+
+    if (is_clang) {
+      # TODO: remove this.
+      cflags += [ "-Wno-sign-compare" ]
+    }
   } else {
     cflags = [
       "-Wall",
@@ -332,6 +341,23 @@ config("no_goma_code") {
       # Suppress warning on unsafe functions.
       "_CRT_SECURE_NO_WARNINGS",
     ]
+
+    if (is_clang) {
+      cflags += [
+        "-Wno-deprecated-declarations",
+        "-Wno-enum-compare-switch",
+        "-Wno-invalid-noreturn",
+        "-Wno-microsoft-cast",
+        "-Wno-microsoft-include",
+        "-Wno-missing-field-initializers",
+        "-Wno-reorder",
+        "-Wno-unused-const-variable",
+        "-Wno-unused-function",
+        "-Wno-unused-variable",
+        "-Wno-tautological-constant-compare",
+        "-Wno-shift-negative-value",
+      ]
+    }
   }
 
   if (os == "linux") {

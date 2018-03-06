@@ -12,8 +12,8 @@
 #include <intrin.h>
 #endif
 
+#include "absl/strings/ascii.h"
 #include "compiler_specific.h"
-#include "string_util.h"
 
 namespace {
 
@@ -199,8 +199,15 @@ bool CppTokenizer::NextTokenFrom(CppInputStream* stream,
         }
         return true;
       }
+      case '\'':
+        if (ReadCharLiteral(stream, token)) {
+          return true;
+        }
+        // Non-ended single quotation is valid in preprocessor.
+        // e.g. 'A will be PUNCTUATOR '\'' and IDENTIFIER('A).
+        FALLTHROUGH_INTENDED;
       default:
-        if (c == '_' || IsAsciiAlpha(c)) {
+        if (c == '_' || absl::ascii_isalpha(c)) {
           *token = ReadIdentifier(stream, cur);
           return true;
         }
@@ -264,7 +271,7 @@ CppToken CppTokenizer::ReadIdentifier(CppInputStream* stream,
   CppToken token(CppToken::IDENTIFIER);
   for (;;) {
     int c = stream->GetChar();
-    if (IsAsciiAlphaDigit(c) || c == '_' ||
+    if (absl::ascii_isalnum(c) || c == '_' ||
         (c == '\\' && HandleLineFoldingWithToken(stream, &token, &begin))) {
       continue;
     }
@@ -308,11 +315,11 @@ CppToken CppTokenizer::ReadNumber(CppInputStream* stream, int c0,
 
   if (maybe_int_constant) {
     // Read the digits part.
-    c = ToLowerASCII(stream->GetChar());
+    c = absl::ascii_tolower(stream->GetChar());
     while ((c >= '0' && c <= ('0' + std::min(9, base - 1))) ||
            (base == 16 && c >= 'a' && c <= 'f')) {
       value = value * base + ((c >= 'a') ? (c - 'a' + 10) : (c - '0'));
-      c = ToLowerASCII(stream->GetChar());
+      c = absl::ascii_tolower(stream->GetChar());
     }
     stream->UngetChar(c);
   }
@@ -327,7 +334,7 @@ CppToken CppTokenizer::ReadNumber(CppInputStream* stream, int c0,
       maybe_int_constant = false;
       continue;
     }
-    c = ToLowerASCII(c);
+    c = absl::ascii_tolower(c);
     if (c >= 'a' && c <= 'z') {
       if (maybe_int_constant) {
         suffix += static_cast<char>(c);
@@ -361,6 +368,122 @@ bool CppTokenizer::ReadString(CppInputStream* stream,
   CppToken token(CppToken::STRING);
   if (!ReadStringUntilDelimiter(stream, &token.string_value,
                                 '"', error_reason)) {
+    return false;
+  }
+
+  *result_token = std::move(token);
+  return true;
+}
+
+int hex2int(int ch) {
+  if (ch >= '0' && ch <= '9') {
+    return ch - '0';
+  }
+  if (ch >= 'a' && ch <= 'f') {
+    return ch - 'a' + 10;
+  }
+  return ch - 'A' + 10;
+}
+
+// http://www.iso-9899.info/n1256.html#6.4.4.4
+// static
+bool CppTokenizer::ReadCharLiteral(CppInputStream* stream,
+                                   CppToken* result_token) {
+  // TODO: preserve original literal in token.string_value?
+  CppToken token(CppToken::CHAR_LITERAL);
+  const char* cur = stream->cur();
+  const ptrdiff_t cur_len = stream->end() - cur;
+
+  if (cur_len >= 3 && cur[0] == '\\' && cur[2] == '\'') {
+    switch (cur[1]) {
+      case '0': case '1': case '2': case '3': case '4':
+      case '5': case '6': case '7':
+        // \ octal-digit
+        token.v.int_value = cur[1] - '0';
+        break;
+      case '\'':
+        token.v.int_value = '\'';
+        break;
+      case '"':
+        token.v.int_value = '"';
+        break;
+      case '?':
+        token.v.int_value = '?';
+        break;
+      case '\\':
+        token.v.int_value = '\\';
+        break;
+      case 'a':
+        token.v.int_value = '\a';
+        break;
+      case 'b':
+        token.v.int_value = '\b';
+        break;
+      case 'f':
+        token.v.int_value = '\f';
+        break;
+      case 'n':
+        token.v.int_value = '\n';
+        break;
+      case 'r':
+        token.v.int_value = '\r';
+        break;
+      case 't':
+        token.v.int_value = '\t';
+        break;
+      case 'v':
+        token.v.int_value = '\v';
+        break;
+      default:
+        LOG(ERROR) << "Unexpected escaped char literal?: " << cur[1]
+                   << " in line " << stream->line()
+                   << " of file: " << stream->filename();
+        return false;
+    }
+
+    stream->Advance(3, 0);
+  } else if (cur_len >= 2 &&
+             cur[0] != '\\' && cur[0] != '\'' &&
+             cur[0] != '\n' &&
+             cur[1] == '\'') {
+    // c-char
+    token.v.int_value = cur[0];
+
+    stream->Advance(2, 0);
+  } else if (cur_len >= 5 && cur[0] == '\\'
+        && cur[1] == 'x' &&
+        absl::ascii_isxdigit(cur[2]) &&
+        absl::ascii_isxdigit(cur[3]) &&
+        cur[4] == '\'') {
+      // \x hexadecimal-digit hexadecimal-digit
+    token.v.int_value = hex2int(cur[2]) << 4 | hex2int(cur[3]);
+    stream->Advance(5, 0);
+  } else if (cur_len >= 4 && cur[0] == '\\' &&
+             cur[1] >= '0' && cur[1] < '8' &&
+             cur[2] >= '0' && cur[2] < '8' &&
+             cur[3] == '\'') {
+    // \ octal-digit octal-digit
+    token.v.int_value =
+        (cur[1] - '0') << 3 |
+        (cur[2] - '0');
+    stream->Advance(4, 0);
+  } else if (cur_len >= 5 && cur[0] == '\\' &&
+             cur[1] >= '0' && cur[1] < '8' &&
+             cur[2] >= '0' && cur[2] < '8' &&
+             cur[3] >= '0' && cur[3] < '8' &&
+             cur[4] == '\'') {
+    // \ octal-digit octal-digit octal-digit
+    token.v.int_value =
+        (cur[1] - '0') << 6 |
+        (cur[2] - '0') << 3 |
+        (cur[3] - '0');
+    stream->Advance(5, 0);
+  } else {
+    // TODO: Support other literal form if necessary.
+    LOG(ERROR) << "Unsupported char literal?: "
+               << absl::string_view(cur, std::min<ptrdiff_t>(10, cur_len))
+               << " in line " << stream->line()
+               << " of file: " << stream->filename();
     return false;
   }
 

@@ -15,9 +15,10 @@ namespace devtools_goma {
 class CppInputStream {
  public:
   explicit CppInputStream(
-      std::unique_ptr<Content> content, const FileId& fileid)
+      std::unique_ptr<Content> content, const FileId& fileid,
+      const string& filename)
       : content_(std::move(content)), cur_(content_->buf()), line_(1),
-        fileid_(fileid) {}
+        fileid_(fileid), filename_(filename) {}
 
   CppInputStream(const CppInputStream&) = delete;
   void operator=(const CppInputStream&) = delete;
@@ -28,6 +29,7 @@ class CppInputStream {
   const char* end() const { return content_->buf_end(); }
   size_t pos() const { return cur_ - content_->buf(); }
   const FileId& fileid() const { return fileid_; }
+  const string& filename() const { return filename_; }
 
   void ConsumeChar();
   size_t GetLengthToCurrentFrom(const char* from, int lastchar) const;
@@ -44,7 +46,14 @@ class CppInputStream {
   const char* cur_;
   int line_;
   const FileId fileid_;
+  const string filename_;
 };
+
+// Utility functions
+template <typename Char>
+inline bool IsCppBlank(Char c) {
+  return c == ' ' || c == '\t' || c == '\f' || c == '\v';
+}
 
 }  // namespace devtools_goma
 

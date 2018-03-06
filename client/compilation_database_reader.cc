@@ -30,7 +30,7 @@ namespace devtools_goma {
 // the directory in the first input file and its all parent paths.
 // static
 string CompilationDatabaseReader::FindCompilationDatabase(
-    StringPiece build_path, StringPiece first_input_file_dir) {
+    absl::string_view build_path, absl::string_view first_input_file_dir) {
   static const char kCompileCommandsJson[] = "compile_commands.json";
 
   if (!build_path.empty()) {
@@ -41,7 +41,7 @@ string CompilationDatabaseReader::FindCompilationDatabase(
     return string();
   }
 
-  StringPiece dir = first_input_file_dir;
+  absl::string_view dir = first_input_file_dir;
   while (!dir.empty()) {
     string s = file::JoinPath(dir, kCompileCommandsJson);
 

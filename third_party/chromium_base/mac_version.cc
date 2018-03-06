@@ -11,8 +11,6 @@
 
 #include <glog/logging.h>
 
-#include "string_piece.h"
-
 namespace {
 
 // Returns the running system's Darwin major version. Don't call this, it's

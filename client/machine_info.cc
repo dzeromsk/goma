@@ -42,7 +42,7 @@ int64_t GetSystemTotalMemory() {
   MEMORYSTATUSEX status;
   status.dwLength = sizeof(status);
   if (!GlobalMemoryStatusEx(&status)) {
-    fprintf(stderr, "GlobalMemoryStatusEx failed: %d\n", GetLastError());
+    fprintf(stderr, "GlobalMemoryStatusEx failed: %lu\n", GetLastError());
     return 0;
   }
 

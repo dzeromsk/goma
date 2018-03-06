@@ -10,10 +10,10 @@
 #include <iterator>
 #include <utility>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_replace.h"
+#include "absl/strings/string_view.h"
 #include "glog/logging.h"
-#include "string_piece.h"
-#include "string_piece_utils.h"
-#include "strutil.h"
 using std::string;
 
 namespace {
@@ -103,7 +103,7 @@ bool FlagParser::Flag::Parse(const std::vector<string>& args, size_t i,
     }
     return false;
   }
-  if (!strings::StartsWith(key, name_)) {
+  if (!absl::StartsWith(key, name_)) {
     return false;
   }
   if (key == name_) {
@@ -174,7 +174,7 @@ string FlagParser::Flag::GetLastValue() const {
 }
 
 const string& FlagParser::Flag::GetParsedArgs(int i) const {
-  unordered_map<int, string>::const_iterator found = parsed_args_.find(i);
+  std::unordered_map<int, string>::const_iterator found = parsed_args_.find(i);
   CHECK(found != parsed_args_.end()) << name_ << " at " << i;
   return found->second;
 }
@@ -207,7 +207,7 @@ void FlagParser::Flag::Output(int i, const string& arg, const string* value) {
     parsed_value = parse_callback_->ParseFlagValue(*this, *value);
   string parsed_arg = arg;
   if (parsed_value != *value) {
-    parsed_arg = StringReplace(arg, *value, parsed_value, true);
+    parsed_arg = absl::StrReplaceAll(arg, {{*value, parsed_value}});
   }
   CHECK(parsed_args_.insert(std::make_pair(i, parsed_arg)).second);
 }

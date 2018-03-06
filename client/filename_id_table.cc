@@ -35,8 +35,9 @@ void FilenameIdTable::ClearUnlocked() {
   next_available_id_ = 0;
 }
 
-bool FilenameIdTable::LoadFrom(const GomaFilenameIdTable& table,
-                               unordered_set<FilenameIdTable::Id>* valid_ids) {
+bool FilenameIdTable::LoadFrom(
+    const GomaFilenameIdTable& table,
+    std::unordered_set<FilenameIdTable::Id>* valid_ids) {
   AUTO_EXCLUSIVE_LOCK(lock, &mu_);
 
   for (const auto& record : table.record()) {

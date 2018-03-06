@@ -737,6 +737,7 @@ if (os == "win") {
       # clang complains about microsoft-specific goto extensions. Instead of
       # rewriting decade-old, goto-ridden code, disable the warning.
       cflags = [ "-Wno-microsoft-goto" ]
+      configs += [ ":goma_breakpad_config" ]
     }
   }
 }
@@ -749,7 +750,10 @@ if (os == "win") {
   config("breakpad_handler_warnings") {
     if (is_clang) {
       # See https://crbug.com/google-breakpad/658.
-      cflags = [ "-Wno-reorder" ]
+      cflags = [
+        "-Wno-reorder",
+        "-Wno-missing-field-initializers",
+      ]
     }
   }
 

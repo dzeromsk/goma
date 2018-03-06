@@ -177,7 +177,7 @@ TEST_F(IncludeCacheTest, GetDirectiveHash)
 
     std::unique_ptr<Content> content(ic->GetCopyIfNotModified(bh, file_id));
     ASSERT_TRUE(content.get() != nullptr);
-    EXPECT_EQ("#include <math.h>\n", content->ToStringPiece());
+    EXPECT_EQ("#include <math.h>\n", content->ToStringView());
   }
 }
 

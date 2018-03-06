@@ -34,7 +34,7 @@ size_t FakeTLSEngine::GetBufSizeFromTransport() {
   return 1024;
 }
 
-int FakeTLSEngine::SetDataFromTransport(const StringPiece& data) {
+int FakeTLSEngine::SetDataFromTransport(const absl::string_view& data) {
   if (broken_ == FAKE_TLS_SET_BROKEN) {
     execute_broken_ = true;
     return TLSEngine::TLS_ERROR;

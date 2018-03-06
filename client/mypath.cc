@@ -73,7 +73,7 @@ static string GetTempDirectoryEnv() {
       std::vector<const char*>(&kTmpdirEnvs[0],
                                &kTmpdirEnvs[arraysize(kTmpdirEnvs)]),
       [](const string& tmpdir) {
-        return File::IsDirectory(tmpdir.c_str());
+        return file::IsDirectory(tmpdir, file::Defaults()).ok();
       },
       "/tmp");
 }
@@ -82,7 +82,7 @@ static string GetTempDirectoryEnv() {
 static string GetUserRuntimeDirectory() {
   char buf[1024];
   snprintf(buf, sizeof(buf), "/run/user/%d", getuid());
-  if (File::IsDirectory(buf)) {
+  if (file::IsDirectory(buf, file::Defaults()).ok()) {
     return buf;
   }
   return string();

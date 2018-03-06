@@ -117,6 +117,13 @@ config("unittest_config") {
 
   # So that gtest headers can find themselves.
   include_dirs = [ "gtest/include" ]
+
+  if (is_clang) {
+    cflags = [
+      "-Wno-deprecated-declarations",
+      "-Wno-unused-variable",
+    ]
+  }
 }
 
 # http://stackoverflow.com/questions/12558327/google-test-in-visual-studio-2012

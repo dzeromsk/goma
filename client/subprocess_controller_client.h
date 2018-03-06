@@ -30,7 +30,16 @@ class SubProcessControllerClient: public SubProcessController {
   static void Initialize(WorkerThreadManager* wm, const std::string& tmp_dir);
 
   WorkerThreadManager* wm() const { return wm_; }
-  const std::string& tmp_dir() const { return tmp_dir_; }
+
+  void SetTmpDir(const std::string& tmp_dir) {
+    AUTO_EXCLUSIVE_LOCK(lock, &tmp_dir_mu_);
+    tmp_dir_ = tmp_dir;
+  }
+  // This does not return "const std::string&", otherwise lock is meaningless.
+  std::string TmpDir() const {
+    AUTO_SHARED_LOCK(lock, &tmp_dir_mu_);
+    return tmp_dir_;
+  }
 
   void SetInitialized();
   bool Initialized() const;
@@ -90,9 +99,11 @@ class SubProcessControllerClient: public SubProcessController {
   // Ownership is transferred to d_ at Setup().
   ScopedSocket fd_;
   const pid_t server_pid_;
-  std::string tmp_dir_;
 
-  Lock mu_;
+  mutable ReadWriteLock tmp_dir_mu_;
+  std::string tmp_dir_ GUARDED_BY(tmp_dir_mu_);
+
+  mutable Lock mu_;
   ConditionVariable cond_;  // condition to wait for all subproc_tasks_ done.
   int next_id_ GUARDED_BY(mu_);
   std::map<int, SubProcessTask*> subproc_tasks_ GUARDED_BY(mu_);
@@ -100,7 +111,7 @@ class SubProcessControllerClient: public SubProcessController {
   PeriodicClosureId periodic_closure_id_ GUARDED_BY(mu_);
   bool quit_ GUARDED_BY(mu_);
 
-  Lock initialized_mu_;
+  mutable Lock initialized_mu_;
   bool initialized_ GUARDED_BY(initialized_mu_);
 
   DISALLOW_COPY_AND_ASSIGN(SubProcessControllerClient);

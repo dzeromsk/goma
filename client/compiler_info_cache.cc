@@ -3,17 +3,19 @@
 // found in the LICENSE file.
 
 
-#include <memory>
-
 #include "compiler_info_cache.h"
 
+#include <memory>
+#include <unordered_map>
+#include <unordered_set>
+
+#include "absl/strings/str_join.h"
 #include "autolock_timer.h"
 #include "compiler_flags.h"
 #include "compiler_proxy_info.h"
 #include "file.h"
 #include "glog/logging.h"
 #include "goma_hash.h"
-#include "join.h"
 #include "path.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/compiler_info_data.pb.h"
@@ -105,8 +107,7 @@ CompilerInfoCache::Key CompilerInfoCache::CreateKey(
   const std::vector<string>& compiler_info_flags = flags.compiler_info_flags();
   std::vector<string> compiler_info_keys(compiler_info_flags);
   copy(key_envs.begin(), key_envs.end(), back_inserter(compiler_info_keys));
-  string compiler_info_keys_str;
-  JoinStrings(compiler_info_keys, " ", &compiler_info_keys_str);
+  string compiler_info_keys_str = absl::StrJoin(compiler_info_keys, " ");
 
   Key key;
   key.base = compiler_info_keys_str + " lang:" + flags.lang() + " @";
@@ -179,7 +180,7 @@ CompilerInfoState* CompilerInfoCache::Store(
   {
     auto found = keys_by_hash_.find(hash);
     if (found != keys_by_hash_.end()) {
-      unordered_set<string>* keys = found->second;
+      std::unordered_set<string>* keys = found->second;
       if (!keys->empty()) {
         const string& compiler_info_key = *keys->begin();
         state.reset(LookupUnlocked(
@@ -227,10 +228,10 @@ CompilerInfoState* CompilerInfoCache::Store(
     }
   }
   {
-    unordered_set<string>* keys = nullptr;
+    std::unordered_set<string>* keys = nullptr;
     auto p = keys_by_hash_.insert(std::make_pair(hash, keys));
     if (p.second) {
-      p.first->second = new unordered_set<string>;
+      p.first->second = new std::unordered_set<string>;
     }
     p.first->second->insert(compiler_info_key);
     LOG(INFO) << "hash=" << hash << " key=" << compiler_info_key;
@@ -342,7 +343,7 @@ void CompilerInfoCache::DumpCompilersJSON(Json::Value* json) {
 
   Json::Value arr(Json::arrayValue);
 
-  unordered_set<std::string> used;
+  std::unordered_set<std::string> used;
   for (const auto& info : compiler_info_) {
     const CompilerInfoData& data = info.second->info().data();
 
@@ -458,7 +459,7 @@ void CompilerInfoCache::UpdateOlderCompilerInfo() {
   // Check CompilerInfo validity. Obsolete CompilerInfo will be removed.
   // Since calculating sha256 is slow, we need cache. Otherwise, we will
   // need more than 2 seconds to check.
-  unordered_map<string, string> sha256_cache;
+  std::unordered_map<string, string> sha256_cache;
   std::vector<string> keys_to_remove;
   time_t now = time(nullptr);
 
@@ -507,7 +508,7 @@ void CompilerInfoCache::UpdateOlderCompilerInfo() {
 
 bool CompilerInfoCache::Unmarshal(const CompilerInfoDataTable& table) {
   for (const auto& it : table.compiler_info_data()) {
-    unordered_set<string>* keys = new unordered_set<string>;
+    std::unordered_set<string>* keys = new std::unordered_set<string>;
     for (const auto& key : it.keys()) {
       keys->insert(key);
     }
@@ -545,7 +546,7 @@ bool CompilerInfoCache::Save() {
 }
 
 bool CompilerInfoCache::Marshal(CompilerInfoDataTable* table) {
-  unordered_map<string, CompilerInfoDataTable::Entry*> by_hash;
+  std::unordered_map<string, CompilerInfoDataTable::Entry*> by_hash;
   for (const auto& it : compiler_info_) {
     const string& info_key = it.first;
     CompilerInfoState* state = it.second;

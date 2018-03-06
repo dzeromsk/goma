@@ -6,6 +6,7 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_HTTP_H_
 #define DEVTOOLS_GOMA_CLIENT_HTTP_H_
 
+#include <atomic>
 #include <deque>
 #include <map>
 #include <memory>
@@ -22,13 +23,13 @@
 
 #include <json/json.h>
 
+#include "absl/base/thread_annotations.h"
+#include "absl/strings/string_view.h"
 #include "basictypes.h"
 #include "gtest/gtest_prod.h"
 #include "lockhelper.h"
 #include "luci_context.h"
 #include "oauth2.h"
-#include "string_piece.h"
-#include "thread_annotations.h"
 #include "tls_engine.h"
 #include "worker_thread_manager.h"
 
@@ -96,11 +97,11 @@ class HttpClient {
     // socket_pool, and retry connection.
     bool force_connect_errorneous_address;
 
-    bool InitFromURL(StringPiece url);
+    bool InitFromURL(absl::string_view url);
 
     string SocketHost() const;
     int SocketPort() const;
-    string RequestURL(StringPiece path) const;
+    string RequestURL(absl::string_view path) const;
     string Host() const;
 
     string DebugString() const;
@@ -125,6 +126,25 @@ class HttpClient {
     };
     Status();
 
+    // HACK: to provide copy constructor of std::atomic<bool>.
+    struct AtomicBool {
+      std::atomic<bool> value;
+
+      AtomicBool(bool b) : value(b) {}  // NOLINT
+      AtomicBool(const AtomicBool& b) : value(b.value.load()) {}
+      AtomicBool& operator=(const AtomicBool& b) {
+        value = b.value.load();
+        return *this;
+      }
+      AtomicBool& operator=(bool b) {
+        value = b;
+        return *this;
+      }
+      operator bool() const {
+        return value.load();
+      }
+    };
+
     State state;
 
     // If true, timeout is treated as http error (default).
@@ -135,7 +155,7 @@ class HttpClient {
     bool connect_success;
 
     // Whether RPC was finished or not.
-    bool finished;
+    AtomicBool finished;
 
     // Result of RPC for CallWithAsync. OK=success, or error code.
     int err;
@@ -227,7 +247,7 @@ class HttpClient {
     // BuildMessage creates HTTP request message with additional headers
     // and body.
     string BuildMessage(const std::vector<string>& headers,
-                        StringPiece body) const;
+                        absl::string_view body) const;
 
    private:
     string method_;
@@ -248,7 +268,7 @@ class HttpClient {
     virtual ~Response();
 
     bool HasHeader() const;
-    StringPiece Header() const;
+    absl::string_view Header() const;
 
     // HttpClient will use the following methods to receive HTTP response.
     void SetRequestPath(const string& path);
@@ -309,7 +329,7 @@ class HttpClient {
     size_t content_length_;  // content length specified in http response header
     bool is_chunked_;  // chunked transfer encoding?
     size_t remaining_;  // remaining bytes for full response.
-    std::vector<StringPiece> chunks_;
+    std::vector<absl::string_view> chunks_;
 
     int status_code_;
 
@@ -509,12 +529,12 @@ class HttpClient {
 
   WorkerThreadManager* wm_;
 
-  Lock mu_;
+  mutable Lock mu_;
   ConditionVariable cond_;  // signaled when num_active_ is 0.
   string health_status_ GUARDED_BY(mu_);
   bool shutting_down_ GUARDED_BY(mu_);
   std::deque<std::pair<time_t, int>> recent_http_status_code_ GUARDED_BY(mu_);
-  int bad_status_num_in_recent_http_ GUARDED_BY(mu_);
+  size_t bad_status_num_in_recent_http_ GUARDED_BY(mu_);
 
   std::unique_ptr<NetworkErrorMonitor> monitor_ GUARDED_BY(mu_);
   // Checking network error state. When we get fatal http error
@@ -592,7 +612,7 @@ class HttpResponse : public HttpClient::Response {
   HttpResponse();
   ~HttpResponse() override;
 
-  StringPiece Body() const;
+  absl::string_view Body() const;
 
  protected:
   // ParseBody parses body.

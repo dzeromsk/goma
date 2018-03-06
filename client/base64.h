@@ -7,12 +7,12 @@
 
 #include <string>
 
-#include "string_piece.h"
+#include "absl/strings/string_view.h"
 
 namespace devtools_goma {
 
 // Base64UrlEncode encodes str with base64 url encoding.
-std::string Base64UrlEncode(StringPiece str, bool padding);
+std::string Base64UrlEncode(absl::string_view str, bool padding);
 
 }  // namespace devtools_goma
 

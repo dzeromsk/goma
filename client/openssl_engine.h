@@ -13,11 +13,11 @@
 #include <openssl/ssl.h>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "autolock_timer.h"
 #include "tls_engine.h"
-#include "unordered.h"
 
 using std::string;
 
@@ -79,7 +79,8 @@ class OpenSSLContext {
   // See: http://tools.ietf.org/html/rfc2818#section-3.1
   //
   // Limitation: it does not support the case with multiple wildcards.
-  static bool IsHostnameMatched(StringPiece hostname, StringPiece pattern);
+  static bool IsHostnameMatched(absl::string_view hostname,
+                                absl::string_view pattern);
 
   const string& hostname() { return hostname_; }
 
@@ -92,7 +93,7 @@ class OpenSSLContext {
 
   // Lock for OpenSSL context (ctx_, crls_, is_crl_ready_, certs_info_
   // and last_error_).
-  Lock mu_;
+  mutable Lock mu_;
   SSL_CTX* ctx_;
   // Since we do not know good way to get CRLs from SSL_CTX, we will use crls_
   // to check revoked certificate.
@@ -128,7 +129,7 @@ class OpenSSLEngine : public TLSEngine {
 
   int GetDataToSendTransport(string* data) override;
   size_t GetBufSizeFromTransport() override;
-  int SetDataFromTransport(const StringPiece& data) override;
+  int SetDataFromTransport(const absl::string_view& data) override;
 
   int Read(void* data, int size) override;
   int Write(const void* data, int size) override;
@@ -205,10 +206,10 @@ class OpenSSLEngineCache : public TLSEngineFactory {
   void InvalidateContext();
 
   // Lock for ctx_, contexts_to_delete_, ssl_map_, certs_ and proxy configs.
-  Lock mu_;
+  mutable Lock mu_;
   std::unique_ptr<OpenSSLContext> ctx_;
   std::vector<std::unique_ptr<OpenSSLContext>> contexts_to_delete_;
-  unordered_map<int, OpenSSLEngine*> ssl_map_;
+  std::unordered_map<int, OpenSSLEngine*> ssl_map_;
   // Proxy configs to download CRLs.
   string hostname_;
   string proxy_host_;

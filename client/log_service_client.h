@@ -65,7 +65,7 @@ class LogServiceClient {
   PeriodicClosureId periodic_callback_id_;
 
   // mu_ protects save_log_job_, num_save_log_job_ and last_timestamp_ms_.
-  Lock mu_;
+  mutable Lock mu_;
   // Condition to check num_save_log_job_ becomes 0.
   ConditionVariable cond_;
   // Current SaveLogJob accumulating logs.

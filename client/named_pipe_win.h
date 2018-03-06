@@ -10,9 +10,9 @@
 #include <ostream>
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "config_win.h"
 #include "scoped_fd.h"
-#include "string_piece.h"
 
 namespace devtools_goma {
 
@@ -44,7 +44,7 @@ class ScopedNamedPipe : public IOChannel {
   ssize_t WriteWithTimeout(const char* buf,
                            size_t bufsize,
                            int timeout_sec) const override;
-  int WriteString(StringPiece message, int timeout) const override;
+  int WriteString(absl::string_view message, int timeout) const override;
 
   bool is_secure() const override { return true; }
 

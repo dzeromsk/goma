@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "compiler_flags.h"
-#include "string_piece.h"
 
 namespace devtools_goma {
 
@@ -28,7 +28,7 @@ class CompilationDatabaseReader {
   // Returns the path to compile_commands.json.
   // Return empty string if not found.
   static std::string FindCompilationDatabase(
-      StringPiece build_path, StringPiece dir);
+      absl::string_view build_path, absl::string_view dir);
 
   // Creates corresponding clang args from clang tidy flag for IncludeProcessor.
   static bool MakeClangArgs(const ClangTidyFlags& clang_tidy_flags,

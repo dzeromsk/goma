@@ -7,7 +7,9 @@
 #define DEVTOOLS_GOMA_BASE_FILE_H_
 
 #include <string>
-#include "string_piece.h"
+
+#include "absl/strings/string_view.h"
+#include "status.h"
 
 namespace File {
 
@@ -16,8 +18,17 @@ bool Copy(const char* from, const char* to, bool overwrite);
 // |mode| will be ignored in Windows.
 bool CreateDir(const std::string& path, int mode);
 
-bool IsDirectory(const char* path);
-
 }  // namespace File
+
+namespace file {
+
+class Options {
+};
+
+Options Defaults();
+
+util::Status IsDirectory(absl::string_view path, const Options& options);
+
+}  // namespace file
 
 #endif  // DEVTOOLS_GOMA_BASE_FILE_H_

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "file.h"
 #include "file_helper.h"
 #include "glog/logging.h"
@@ -16,7 +17,6 @@
 #include "gtest/gtest.h"
 #include "mypath.h"
 #include "path.h"
-#include "string_piece.h"
 #include "unittest_util.h"
 
 // How to make jar file to be used as expected.jar.
@@ -86,8 +86,8 @@ class JarFileReaderTest : public testing::Test {
       offset += read_bytes;
 
       ASSERT_EQ(read_bytes, fd.Read(expected_buf.get(), read_bytes));
-      EXPECT_EQ(StringPiece(expected_buf.get(), read_bytes),
-                StringPiece(jar_buf.get(), read_bytes));
+      EXPECT_EQ(absl::string_view(expected_buf.get(), read_bytes),
+                absl::string_view(jar_buf.get(), read_bytes));
     }
   }
 

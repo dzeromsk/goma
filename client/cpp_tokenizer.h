@@ -31,6 +31,10 @@ class CppTokenizer {
   static bool ReadString(CppInputStream* stream,
                          CppToken* result_token,
                          std::string* error_reason);
+  // Reads character literal CppToken.
+  static bool ReadCharLiteral(CppInputStream* stream,
+                              CppToken* result_token);
+
   // Reads string until |delimiter|.
   // When error happened, error reason is set to |error_reason|, and false is
   // returned.

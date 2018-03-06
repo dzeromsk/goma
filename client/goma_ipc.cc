@@ -239,7 +239,7 @@ int GomaIPC::ReadResponse(const IOChannel* chan,
       // Now we've got the first response. The next response
       // should come soon. Let's make the timeout shorter.
       timeout_sec = status->read_timeout_sec;
-      StringPiece resp(response.data(), response_len);
+      absl::string_view resp(response.data(), response_len);
       if ((found_header || ParseHttpResponse(resp, http_return_code,
                                              &offset, &content_length,
                                              nullptr)) &&

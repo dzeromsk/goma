@@ -9,7 +9,7 @@
 #include <string>
 
 
-#include "string_piece.h"
+#include "absl/strings/string_view.h"
 using std::string;
 
 namespace devtools_goma {

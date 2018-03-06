@@ -7,6 +7,7 @@
 
 #include "compiler_specific.h"
 #include "content.h"
+#include "counterz.h"
 #include "directive_filter.h"
 #include "file_id.h"
 #include "goma_hash.h"
@@ -14,7 +15,6 @@
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_stats.pb.h"
 MSVC_POP_WARNING()
-#include "strutil.h"
 
 namespace devtools_goma {
 
@@ -109,6 +109,7 @@ const IncludeCache::Item* IncludeCache::GetItemIfNotModifiedUnlocked(
 
 std::unique_ptr<Content> IncludeCache::GetCopyIfNotModified(
     const string& filepath, const FileId& file_id) {
+  GOMA_COUNTERZ("GetCopyIfNotModified");
 
   std::unique_ptr<Content> result;
   {
@@ -117,6 +118,7 @@ std::unique_ptr<Content> IncludeCache::GetCopyIfNotModified(
     AUTO_SHARED_LOCK(lock, &rwlock_);
     const Item* item = GetItemIfNotModifiedUnlocked(filepath, file_id);
     if (item != nullptr) {
+      GOMA_COUNTERZ("CreateFromContent");
       result = Content::CreateFromContent(*item->content());
     }
   }
@@ -169,7 +171,7 @@ std::unique_ptr<Content> IncludeCache::InsertInternal(
 
   if (calculates_directive_hash_) {
     DCHECK(directive_hash);
-    ComputeDataHashKeyForSHA256HashValue(filtered_content->ToStringPiece(),
+    ComputeDataHashKeyForSHA256HashValue(filtered_content->ToStringView(),
                                          directive_hash);
   }
 

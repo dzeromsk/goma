@@ -87,6 +87,11 @@ std::string CppToken::DebugString() const {
     case MACRO_PARAM_VA_ARGS:
       str.append("[MACRO_PARAM_VA_ARGS]");
       break;
+    case CHAR_LITERAL:
+      str.append("[CHAR_LITERAL(");
+      str.append(std::to_string(v.int_value));
+      str.append(")]");
+      break;
     case END:
       return "[END]";
     case BEGIN_HIDE:

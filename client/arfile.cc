@@ -43,8 +43,8 @@ extern "C" {
 
 #include <sstream>
 
+#include "absl/strings/match.h"
 #include "glog/logging.h"
-#include "string_piece_utils.h"
 
 // VS2010 and VS2012 doesn't provide C99's atoll(), but VS2013 does.
 #if defined(_WIN32) && defined(_MSC_VER) && (_MSC_VER < 1800)
@@ -406,7 +406,7 @@ bool ArFile::CleanIfRanlib(const EntryHeader& hdr, string* body) {
   static const char* kRanlibName = "#1/20           ";
   static const size_t kSymdefMagicSize = 20;  // size of SYMDEF magic.
   if (hdr.orig_ar_name != kRanlibName ||
-      body->size() <= kSymdefMagicSize || !strings::StartsWith(*body, SYMDEF)) {
+      body->size() <= kSymdefMagicSize || !absl::StartsWith(*body, SYMDEF)) {
     VLOG(1) << "Not mac ranlib file.";
     return true;
   }

@@ -9,13 +9,13 @@
 #include <cstdint>
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "atomic_stats_counter.h"
 #include "autolock_timer.h"
 #include "compiler_specific.h"
 #include "goma_hash.h"
 #include "linked_unordered_map.h"
 #include "sha256hash_hasher.h"
-#include "string_piece.h"
 #include "worker_thread_manager.h"
 
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
@@ -135,9 +135,9 @@ class LocalOutputCache {
   void SetReady(bool ready);
 
   // Full path of cache directory + key prefix.
-  std::string CacheDirWithKeyPrefix(StringPiece key) const;
+  std::string CacheDirWithKeyPrefix(absl::string_view key) const;
   // Full path of cache directory + key prefix + key.
-  std::string CacheFilePath(StringPiece key) const;
+  std::string CacheFilePath(absl::string_view key) const;
 
   static LocalOutputCache* instance_;
 
@@ -150,19 +150,19 @@ class LocalOutputCache {
 
   // Using in initial load of cache entries.
   // After loading all cache entries, |ready_| will become true.
-  Lock ready_mu_;
+  mutable Lock ready_mu_;
   ConditionVariable ready_cond_;
   bool ready_ GUARDED_BY(ready_mu_);
 
   // cache entries. Older cache is first.
   using CacheEntryMap =
       LinkedUnorderedMap<SHA256HashValue, CacheEntry, SHA256HashValueHasher>;
-  ReadWriteLock entries_mu_ ACQUIRED_AFTER(gc_mu_);
+  mutable ReadWriteLock entries_mu_ ACQUIRED_AFTER(gc_mu_);
   CacheEntryMap entries_ GUARDED_BY(entries_mu_);
   // total cache amount in bytes.
   std::int64_t entries_total_cache_amount_ GUARDED_BY(entries_mu_);
 
-  Lock gc_mu_;
+  mutable Lock gc_mu_;
   ConditionVariable gc_cond_;
   bool gc_should_done_ GUARDED_BY(gc_mu_);
   bool gc_working_ GUARDED_BY(gc_mu_);

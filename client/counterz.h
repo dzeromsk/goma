@@ -13,8 +13,12 @@
 
 #include "atomic_stats_counter.h"
 #include "autolock_timer.h"
+#include "compiler_specific.h"
 #include "json/json.h"
 #include "lockhelper.h"
+MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
+#include "prototmp/counterz.pb.h"
+MSVC_POP_WARNING()
 
 namespace devtools_goma {
 
@@ -22,14 +26,8 @@ class CounterInfo {
  public:
   CounterInfo(const char* const location,
               const char* const funcname,
-              const char* const name) {
-    name_.reserve(strlen(location) + strlen(funcname) + strlen(name) + 3);
-    name_ += location;
-    name_ += "(";
-    name_ += funcname;
-    name_ += ":";
-    name_ += name;
-    name_ += ")";
+              const char* const name)
+      : location_(location), funcname_(funcname), name_(name) {
   }
 
   void Inc(int64_t time_ns) {
@@ -38,12 +36,15 @@ class CounterInfo {
   }
 
   void Dump(std::string* name, int64_t* time_ns, int64_t* count) const;
+  void DumpToProto(CounterzStat* counterz) const;
 
  private:
   CounterInfo(const CounterInfo&) = delete;
   CounterInfo& operator=(const CounterInfo&) = delete;
 
-  std::string name_;
+  const std::string location_;
+  const std::string funcname_;
+  const std::string name_;
   StatsCounter counter_;
   StatsCounter total_time_in_ns_;
 };
@@ -51,6 +52,7 @@ class CounterInfo {
 class Counterz {
  public:
   void DumpToJson(Json::Value* json) const;
+  void DumpToProto(CounterzStats* counters) const;
 
   CounterInfo* NewCounterInfo(const char* const location,
                               const char* const funcname,
@@ -61,6 +63,12 @@ class Counterz {
   }
 
   static void Init();
+
+  // Dump exports counterz stats to |filename| if |filename| is not empty.
+  // If |filename| ends with ".json", it exports stat in json format,
+  // otherwise stats is exported in binary protobuf.
+  static void Dump(const std::string& filename);
+
   static void Quit();
   static Counterz* Instance();
 
@@ -83,7 +91,9 @@ class ScopedCounter {
   }
 
   ~ScopedCounter() {
-    counter_info_->Inc(timer_.GetInNanoSeconds());
+    if (counter_info_ != nullptr) {
+      counter_info_->Inc(timer_.GetInNanoSeconds());
+    }
   }
 
  private:

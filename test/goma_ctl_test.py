@@ -172,6 +172,9 @@ class FakeGomaEnv(object):
   def GetScriptDir(self):
     return 'fake'
 
+  def GetUsername(self):
+    return 'fakeuser'
+
   def HttpDownload(self, url,
                    rewrite_url=None, headers=None, destination_file=None):
     if destination_file:
@@ -2745,7 +2748,7 @@ class GomaEnvTest(GomaCtlTestCommon):
       if tmp in os.environ:
         del os.environ[tmp]
     fake_user = 'chrome-bot'
-    self._module._GetUsername = lambda: fake_user
+    self._module._GetUsernameEnv = lambda: fake_user
     self._module._GetUserRuntimeDirectory = lambda: None
     try:
       if os.name == 'nt':
@@ -2808,7 +2811,7 @@ class GomaEnvTest(GomaCtlTestCommon):
       return
     fake_user = 'chrome-bot'
     fake_dir = '/run/user/1000'
-    self._module._GetUsername = lambda: fake_user
+    self._module._GetUsernameEnv = lambda: fake_user
     self._module._GetUserRuntimeDirectory = lambda: fake_dir
 
     oenv = os.environ.copy()
@@ -2849,6 +2852,11 @@ class GomaEnvTest(GomaCtlTestCommon):
       else:
         del os.environ['GOMA_CACHE_DIR']
 
+  def testShouldFallbackGomaUsernameNoEnvIfNoEnvSet(self):
+    self._module._GetUsernameEnv = lambda: ''
+    env = self._module._GOMA_ENVS[os.name]()
+    self.assertNotEqual(env.GetUsername(), '')
+
 
 class GomaCtlLargeTestCommon(GomaCtlTestCommon):
   """Large tests for goma_ctl.py.
@@ -2882,9 +2890,7 @@ class GomaCtlLargeTestCommon(GomaCtlTestCommon):
 
   def tearDown(self):
     if self._driver:
-      self._driver._ShutdownCompilerProxy()
-      if not self._driver._WaitCooldown():
-        self._driver._KillStakeholders()
+      self._driver._EnsureStopCompilerProxy()
     super(GomaCtlLargeTestCommon, self).tearDown()
 
   def StartWithModifiedVersion(self, version=None):
@@ -2962,8 +2968,7 @@ class GomaCtlLargeTestCommon(GomaCtlTestCommon):
       # Check compiler proxy restarted.
       self.assertTrue(self._driver._env.CompilerProxyRunning())
     finally:
-      self._driver._ShutdownCompilerProxy()
-      self._driver._WaitCooldown()
+      self._driver._EnsureStopCompilerProxy()
     new_timestamp = os.stat(os.path.join(
         self._tmp_dir, self._TMP_SUBDIR_NAME,
         self._driver._env._COMPILER_PROXY)).st_mtime
@@ -3025,10 +3030,8 @@ class GomaCtlLargeTestCommon(GomaCtlTestCommon):
     try:
       self._driver._StartCompilerProxy()
     finally:
-      self._driver._ShutdownCompilerProxy()
-      self._driver._WaitCooldown()
-      driver0._ShutdownCompilerProxy()
-      driver0._WaitCooldown()
+      self._driver._EnsureStopCompilerProxy()
+      driver0._EnsureStopCompilerProxy()
 
     # Time stamp should be changed.
     new_timestamp = os.stat(os.path.join(
@@ -3077,10 +3080,8 @@ class GomaCtlLargeTestCommon(GomaCtlTestCommon):
       after_version = self._driver._env.ControlCompilerProxy(
           '/versionz')['message']
     finally:
-      self._driver._ShutdownCompilerProxy()
-      self._driver._WaitCooldown()
-      driver0._ShutdownCompilerProxy()
-      driver0._WaitCooldown()
+      self._driver._EnsureStopCompilerProxy()
+      driver0._EnsureStopCompilerProxy()
 
     self.assertTrue(after_version)
     self.assertNotEquals(before_version, after_version)
@@ -3100,8 +3101,7 @@ class GomaCtlLargeTestCommon(GomaCtlTestCommon):
       self._driver._EnsureStartCompilerProxy()
       self.assertTrue(self._driver._env.CompilerProxyRunning())
     finally:
-      self._driver._ShutdownCompilerProxy()
-      self._driver._WaitCooldown()
+      self._driver._EnsureStopCompilerProxy()
 
   def testMultipleCompilerProxyInstancesRuns(self):
     if isinstance(self._platform_specific, WindowsSpecific):
@@ -3131,15 +3131,13 @@ class GomaCtlLargeTestCommon(GomaCtlTestCommon):
         self._driver._EnsureStartCompilerProxy()
         self.assertTrue(self._driver._env.CompilerProxyRunning())
       finally:
-        self._driver._ShutdownCompilerProxy()
-        self._driver._WaitCooldown()
+        self._driver._EnsureStopCompilerProxy()
         for key, value in prev_envs.items():
           if value:
             os.environ[key] = value
 
     finally:
-      self._driver._ShutdownCompilerProxy()
-      self._driver._WaitCooldown()
+      self._driver._EnsureStopCompilerProxy()
 
   def testPullShouldNotUpdateInSecondTime(self):
     driver = self._module.GetGomaDriver()

@@ -9,6 +9,8 @@
 #include <ctime>
 #include <sstream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "basictypes.h"
@@ -16,7 +18,6 @@
 #include "compiler_info.h"
 #include "json/json.h"
 #include "lockhelper.h"
-#include "unordered.h"
 
 namespace devtools_goma {
 
@@ -135,10 +136,11 @@ class CompilerInfoCache {
   mutable ReadWriteLock mu_;
 
   // key: compiler_info_key
-  unordered_map<std::string, CompilerInfoState*> compiler_info_;
+  std::unordered_map<std::string, CompilerInfoState*> compiler_info_;
 
   // key: hash of CompilerInfoData. value: compiler_info_key.
-  unordered_map<std::string, unordered_set<std::string>*> keys_by_hash_;
+  std::unordered_map<std::string,
+                     std::unordered_set<std::string>*> keys_by_hash_;
 
   int num_stores_;
   int num_store_dups_;

@@ -277,7 +277,6 @@ MultiHttpRPC::MultiHttpRPC(
       multi_path_(multi_path),
       options_(options),
       periodic_callback_id_(kInvalidPeriodicClosureId),
-      cond_(&mu_),
       num_multi_job_(0),
       available_(true),
       num_call_by_req_num_(0),
@@ -373,7 +372,7 @@ void MultiHttpRPC::Wait() {
       break;
     }
     LOG(INFO) << "num_multi_job=" << num_multi_job_;
-    cond_.Wait();
+    cond_.Wait(&mu_);
   }
 }
 

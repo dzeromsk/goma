@@ -299,7 +299,7 @@ def _GetLogDirectory():
   return _GetEnvMatchedCondition(candidates, os.path.isdir, '/tmp')
 
 
-def _GetUsername():
+def _GetUsernameEnv():
   """Get user name.
 
   Returns:
@@ -308,7 +308,7 @@ def _GetUsername():
   candidates = ['SUDO_USER', 'USERNAME', 'USER', 'LOGNAME']
   return _GetEnvMatchedCondition(candidates,
                                  lambda x: x != 'root',
-                                 'unknown')
+                                 '')
 
 
 def _GetHostname():
@@ -455,6 +455,7 @@ class GomaDriver(object):
         'update': self._Update,
         'restart': self._RestartCompilerProxy,
         'ensure_start': self._EnsureStartCompilerProxy,
+        'ensure_stop': self._EnsureStopCompilerProxy,
         'fetch': self._Fetch,
         'stat': self._PrintStatistics,
         'histogram': self._PrintHistogram,
@@ -635,6 +636,11 @@ class GomaDriver(object):
 
   def _EnsureStartCompilerProxy(self):
     self._GenericStartCompilerProxy(ensure=True)
+
+  def _EnsureStopCompilerProxy(self):
+    self._ShutdownCompilerProxy()
+    if not self._WaitCooldown():
+      self._KillStakeholders()
 
   def _GetStatus(self):
     reply = self._env.ControlCompilerProxy('/healthz')
@@ -1800,6 +1806,24 @@ class GomaEnv(object):
     """
     raise NotImplementedError
 
+  def GetUsername(self):
+    user = _GetUsernameEnv()
+    if user:
+      return user
+    user = self._GetUsernameNoEnv()
+    if user:
+      os.environ['USER'] = user
+      return user
+    return 'unknown'
+
+  def _GetUsernameNoEnv(self):
+    """OS specific way of getting username without environment variables.
+
+    Returns:
+      a string of an user name if available.  If not, empty string.
+    """
+    raise NotImplementedError
+
 
 class GomaEnvWin(GomaEnv):
   """Goma running environment for Windows."""
@@ -1827,6 +1851,7 @@ class GomaEnvWin(GomaEnv):
 
   def __init__(self):
     self._win32process = __import__('win32process')
+    self._win32api = __import__('win32api')
     GomaEnv.__init__(self)
     self._platform = 'win64'
 
@@ -1977,6 +2002,9 @@ class GomaEnvWin(GomaEnv):
       if handle:
         win32api.CloseHandle(handle)
 
+  def _GetUsernameNoEnv(self):
+    return self._win32api.GetUserName()
+
 
 class GomaEnvPosix(GomaEnv):
   """Goma running environment for POSIX."""
@@ -2025,7 +2053,7 @@ class GomaEnvPosix(GomaEnv):
     tmp_dir = _GetUserRuntimeDirectory()
     if not tmp_dir:
       tmp_dir = _GetTempDirectory()
-    return os.path.join(tmp_dir, _TMP_DIR_PREFIX + _GetUsername())
+    return os.path.join(tmp_dir, _TMP_DIR_PREFIX + self.GetUsername())
 
   @staticmethod
   def GetPackageExtension(platform):
@@ -2221,6 +2249,8 @@ class GomaEnvPosix(GomaEnv):
       signal.alarm(0)
       signal.signal(signal.SIGALRM, signal.SIG_DFL)
 
+  def _GetUsernameNoEnv(self):
+    return self._pwd.getpwuid(os.getuid()).pw_name
 
 
 _GOMA_ENVS = {

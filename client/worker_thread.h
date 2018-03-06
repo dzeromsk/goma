@@ -170,7 +170,7 @@ class WorkerThreadManager::WorkerThread : public PlatformThread::Delegate {
 
   const std::string name_;
 
-  Lock mu_;
+  mutable Lock mu_;
   ConditionVariable cond_handle_;  // signaled when handle_ is ready.
   ConditionVariable cond_id_;      // signaled when id_ is ready.
   // These auto_lock_stat_* are owned by g_auto_lock_stats.

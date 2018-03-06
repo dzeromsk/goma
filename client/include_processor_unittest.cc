@@ -29,6 +29,10 @@
 #include <glog/stl_logging.h>
 #include <gtest/gtest.h>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
 #include "compiler_flags.h"
 #include "compiler_info.h"
 #include "compiler_info_cache.h"
@@ -38,13 +42,9 @@
 #include "include_file_finder.h"
 #include "include_processor.h"
 #include "ioutil.h"
-#include "join.h"
 #include "mypath.h"
 #include "path.h"
 #include "path_resolver.h"
-#include "split.h"
-#include "string_piece.h"
-#include "string_piece_utils.h"
 #include "subprocess.h"
 #include "unittest_util.h"
 #include "util.h"
@@ -95,12 +95,7 @@ class IncludeProcessorTest : public testing::Test {
     string content;
     CHECK(ReadFileToString(envfile_path, &content))
         << "failed to read environment.x86: " << envfile_path;
-    env_ = strings::Split(content, '\0');
-    // Remove empty string.
-    env_.erase(std::remove_if(env_.begin(),
-                              env_.end(),
-                              [](const string& s) { return s.empty(); }),
-               env_.end());
+    env_ = ToVector(absl::StrSplit(content, '\0', absl::SkipEmpty()));
 #endif
   }
 
@@ -237,12 +232,14 @@ class IncludeProcessorTest : public testing::Test {
     // stdio: /usr/include/stdio.h /usr/include/features.h \\\n
     //   /usr/include/sys/cdefs.h /usr/include/bits/wordsize.h \\\n
     //   ...
-    std::vector<string> files;
     int exit_status;
-    SplitStringUsing(ReadCommandOutputByPopen(args[0], args, env,
-                                              tmpdir_util_->tmpdir(),
-                                              STDOUT_ONLY, &exit_status),
-                     " \n\r\\", &files);
+    string command_output = ReadCommandOutputByPopen(args[0], args, env,
+                                                     tmpdir_util_->tmpdir(),
+                                                     STDOUT_ONLY, &exit_status);
+    std::vector<string> files = ToVector(
+        absl::StrSplit(command_output,
+                       absl::ByAnyChar(" \n\r\\"),
+                       absl::SkipEmpty()));
     LOG_IF(INFO, exit_status != 0)
         << "non-zero exit status."
         << " args=" << args
@@ -322,16 +319,17 @@ class IncludeProcessorTest : public testing::Test {
     LOG(INFO) << args;
     static const char kNoteIncluding[] = "Note: including file: ";
 
-    std::vector<string> lines;
     VLOG(1) << cl_wrapper_path_;
     VLOG(1) << "args:" << args;
     VLOG(1) << "env:" << env_;
     int32_t status;
-    SplitStringUsing(ReadCommandOutputByRedirector(
-                         cl_wrapper_path_, args, env_, tmpdir_util_->tmpdir(),
-                         MERGE_STDOUT_STDERR, &status),
-                     "\n\r", &lines);
-
+    string command_output = ReadCommandOutputByRedirector(
+        cl_wrapper_path_, args, env_, tmpdir_util_->tmpdir(),
+        MERGE_STDOUT_STDERR, &status);
+    std::vector<string> lines = ToVector(
+        absl::StrSplit(command_output,
+                       absl::ByAnyChar("\n\r"),
+                       absl::SkipEmpty()));
     if (status != 0) {
       LOG(INFO) << "status: " << status;
       for (size_t i = 0; i < lines.size(); ++i) {
@@ -347,7 +345,7 @@ class IncludeProcessorTest : public testing::Test {
 
     size_t lineno = 0;
     for (; lineno < lines.size(); ++lineno) {
-      if (strings::StartsWith(lines[lineno], "where cl")) {
+      if (absl::StartsWith(lines[lineno], "where cl")) {
         ++lineno;
         break;
       }
@@ -357,7 +355,7 @@ class IncludeProcessorTest : public testing::Test {
     LOG(INFO) << "bare_cl=" << bare_cl;
     ++lineno;
     for (; lineno < lines.size(); ++lineno) {
-      if (strings::StartsWith(lines[lineno], "env")) {
+      if (absl::StartsWith(lines[lineno], "env")) {
         ++lineno;
         break;
       }
@@ -365,7 +363,7 @@ class IncludeProcessorTest : public testing::Test {
 
     std::vector<string> compiler_env;
     for (; lineno < lines.size(); ++lineno) {
-      if (strings::StartsWith(lines[lineno], "run cl")) {
+      if (absl::StartsWith(lines[lineno], "run cl")) {
         ++lineno;
         break;
       }
@@ -385,7 +383,7 @@ class IncludeProcessorTest : public testing::Test {
     // to lower case characters.
     for (; lineno < lines.size(); ++lineno) {
       const string& line = lines[lineno];
-      if (strings::StartsWith(line, kNoteIncluding)) {
+      if (absl::StartsWith(line, kNoteIncluding)) {
         string path = line.substr(sizeof(kNoteIncluding) - 1);
         size_t pos = path.find_first_not_of(' ');
         if (pos != string::npos) {
@@ -448,9 +446,9 @@ class IncludeProcessorTest : public testing::Test {
               << " extra:" << extra_files.size()
               << " missing:" << missing_files.size();
     LOG_IF(INFO, !extra_files.empty()) << "extra files: "
-                                       << strings::Join(extra_files, ", ");
+                                       << absl::StrJoin(extra_files, ", ");
     LOG_IF(INFO, !missing_files.empty()) << "missing files: "
-                                         << strings::Join(missing_files, ", ");
+                                         << absl::StrJoin(missing_files, ", ");
 
     EXPECT_EQ(0U, missing_files.size()) << missing_files;
 #ifdef __MACH__
@@ -713,7 +711,7 @@ TEST_F(IncludeProcessorTest, fnohosted) {
 // TODO: Move some tests out from ifndef _WIN32 to share test cases.
 
 TEST_F(IncludeProcessorTest, recursive) {
-  StringPiece tmp_dir_basename = file::Basename(tmpdir_util_->tmpdir());
+  absl::string_view tmp_dir_basename = file::Basename(tmpdir_util_->tmpdir());
   CHECK(!tmp_dir_basename.empty());
 
   // If we don't normalize .. and ., this will take exponential time.
@@ -1229,17 +1227,34 @@ TEST_F(IncludeProcessorTest, include_in_linecomment) {
 }
 
 TEST_F(IncludeProcessorTest, include_with_predefined) {
-# define _S(x) #x
-# define S(x) _S(x)
-  CreateTmpFile("#include <stdio.h>\n", "foo" S(__GNUC__) ".h");
-# undef S
-  std::vector<string> args;
-  RunTest("/usr/bin/gcc",
+  const string bare_gcc = "/usr/bin/gcc";
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlags::MustNew(std::vector<string> { bare_gcc, "-c", "foo.c" },
+                             tmpdir_util_->tmpdir()));
+  ScopedCompilerInfoState cis(
+      GetCompilerInfoFromCacheOrCreate(*flags, bare_gcc, env_));
+
+  const char kDefineGnuc[] = "#define __GNUC__ ";
+
+  // Taking __GNUC__ value from predefined macros.
+  const string& macros = cis.get()->info().predefined_macros();
+  auto begin_pos = macros.find(kDefineGnuc);
+  ASSERT_NE(begin_pos, string::npos);
+  ASSERT_LT(begin_pos + strlen(kDefineGnuc), macros.length());
+  begin_pos += strlen(kDefineGnuc);  // skip #define __GNUC__
+
+  // __GNUC__ is 4, 5, 6, ... (it depends on gcc version)
+  auto end_pos = macros.find('\n', begin_pos);
+  ASSERT_NE(end_pos, string::npos);
+
+  const string gnuc = macros.substr(begin_pos, end_pos - begin_pos);
+  CreateTmpFile("#include <stdio.h>\n", "foo" + gnuc + ".h");
+  RunTest(bare_gcc,
           CreateTmpFile("#define S(x) #x\n"
                         "#define _X(x) S(foo##x.h)\n"
                         "#define X(x) _X(x)\n"
                         "#include X(__GNUC__)\n", "foo.c"),
-          args);
+          std::vector<string>());
 }
 
 TEST_F(IncludeProcessorTest, include_with_cpp_predefined) {

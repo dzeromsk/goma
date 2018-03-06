@@ -6,8 +6,10 @@
 
 #include <utility>
 
+#include "absl/strings/str_split.h"
 #include "glog/logging.h"
-#include "split.h"
+
+using std::string;
 
 namespace {
 
@@ -30,23 +32,19 @@ namespace devtools_goma {
 
 bool ParseRewriteRule(const std::string& contents,
                       std::map<std::string, std::string>* mapping) {
-  std::vector<string> lines;
-  SplitStringUsing(contents, "\n", &lines);
-  for (const auto& line : lines) {
-    if (line.empty())
-      continue;
+  for (auto&& line : absl::StrSplit(contents, '\n', absl::SkipEmpty())) {
     size_t pos = line.find(":");
     if (pos == string::npos) {
       LOG(WARNING) << "wrong rule file.";
       return false;
     }
-    const string& key = line.substr(0, pos);
+    string key(line.substr(0, pos));
     if (!IsSha256Hexadecimal(key)) {
       LOG(WARNING) << "The key seems not SHA256 hexadecimal."
                    << " key=" << key;
       return false;
     }
-    const string& value = line.substr(pos + 1);
+    string value(line.substr(pos + 1));
     if (!IsSha256Hexadecimal(value)) {
       LOG(WARNING) << "The value seems not SHA256 hexadecimal."
                    << " value=" << value;

@@ -63,7 +63,7 @@ class AutoUpdater {
   ThreadpoolHttpServer::RegisteredClosureID pull_closure_id_;
 
   // protect |subproc_|
-  Lock mu_;
+  mutable Lock mu_;
   // signaled if subproc_ become nullptr.
   ConditionVariable cond_;
   // If subproc_ != nullptr, "goma_ctl pull" is running.

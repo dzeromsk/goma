@@ -99,12 +99,12 @@ class HttpRPC {
   void CallDone(std::unique_ptr<CallData> call);
 
   void DisableCompression();
-  void EnableCompression(StringPiece header);
+  void EnableCompression(absl::string_view header);
   bool IsCompressionEnabled() const;
 
   HttpClient* client_;
   const Options options_;
-  Lock mu_;
+  mutable Lock mu_;
   bool compression_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpRPC);

@@ -13,8 +13,9 @@
 
 namespace devtools_goma {
 
-NamedPipeFactory::NamedPipeFactory(const std::string& name)
-    : name_(name) {
+NamedPipeFactory::NamedPipeFactory(const std::string& name,
+                                   int timeout_ms)
+    : name_(name), timeout_ms_(timeout_ms) {
 }
 
 NamedPipeFactory::~NamedPipeFactory() {
@@ -22,12 +23,10 @@ NamedPipeFactory::~NamedPipeFactory() {
 
 ScopedNamedPipe NamedPipeFactory::New() {
   std::string pipename = "\\\\.\\pipe\\" + name_;
-  // TODO: This is mitigation for b/36493466
-  const int kTimeoutMillisec = 13 * 1000;
   SimpleTimer t;
 
   for (;;) {
-    int left_time = kTimeoutMillisec - t.GetInMs();
+    int left_time = timeout_ms_ - t.GetInMs();
     if (left_time <= 0) {
       break;
     }
@@ -36,7 +35,12 @@ ScopedNamedPipe NamedPipeFactory::New() {
       DWORD last_error = GetLastError();
       if (last_error == ERROR_SEM_TIMEOUT) {
         LOG(ERROR) << "Timed-out to WaitNamedPipe " << pipename
-                   << " with timeout_ms=" << kTimeoutMillisec;
+                   << " with timeout_ms=" << timeout_ms_
+                   << ", passed " << t.GetInMs() << " ms."
+                   << " Please consider to specify longer timeout by"
+                   << " setting GOMA_NAMEDPIPE_WAIT_TIMEOUT_MS envvar"
+                   << " before `gn gen` or invoking gomacc directly."
+                   << " b/70640154";
       }
       LOG_SYSRESULT(last_error);
       return ScopedNamedPipe();

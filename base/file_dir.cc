@@ -16,6 +16,7 @@
 
 #include "file.h"
 #include "path.h"
+#include "status.h"
 
 namespace devtools_goma {
 
@@ -60,7 +61,7 @@ bool ListDirectory(const string& dirname, std::vector<DirEntry>* entries) {
     return true;
 
   const string pattern = dirname + "\\*";
-  WIN32_FIND_DATAA find_data = {0};
+  WIN32_FIND_DATAA find_data = {};
   HANDLE find_handle = FindFirstFileA(pattern.c_str(), &find_data);
   if (find_handle == INVALID_HANDLE_VALUE)
     return false;
@@ -121,7 +122,7 @@ bool RecursivelyDelete(const string& name) {
 }
 
 bool EnsureDirectory(const string& dirname, int mode) {
-  if (File::IsDirectory(dirname.c_str())) {
+  if (file::IsDirectory(dirname, file::Defaults()).ok()) {
     return true;
   }
   if (File::CreateDir(dirname.c_str(), mode)) {
@@ -130,7 +131,7 @@ bool EnsureDirectory(const string& dirname, int mode) {
 
   // When multiple processes call EnsureDirectory simultaneously, race might
   // happen. So, we need to check IsDirectory again for the safe here.
-  return File::IsDirectory(dirname.c_str());
+  return file::IsDirectory(dirname, file::Defaults()).ok();
 }
 
 }  // namespace devtools_goma

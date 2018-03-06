@@ -37,6 +37,9 @@
 #include <string>
 #include <unordered_set>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_replace.h"
+#include "absl/strings/str_split.h"
 #include "arfile_reader.h"
 #include "autolock_timer.h"
 #include "auto_updater.h"
@@ -98,9 +101,6 @@ MSVC_POP_WARNING()
 #include "scoped_fd.h"
 #include "settings.h"
 #include "socket_factory.h"
-#include "split.h"
-#include "string_piece_utils.h"
-#include "strutil.h"
 #include "subprocess.h"
 #include "subprocess_controller.h"
 #include "subprocess_controller_client.h"
@@ -146,11 +146,11 @@ string FindLogFile(string log_dir, string base_name, string log_type) {
   pattern.append("*");
 
   string found_file;
-  WIN32_FIND_DATAA find_data = {0};
+  WIN32_FIND_DATAA find_data = {};
   HANDLE find_handle = FindFirstFileA(pattern.c_str(), &find_data);
   if (find_handle != INVALID_HANDLE_VALUE) {
     do {
-      if (strings::EndsWith(find_data.cFileName, pid) &&
+      if (absl::EndsWith(find_data.cFileName, pid) &&
           strstr(find_data.cFileName, log_type.c_str())) {
         found_file = file::JoinPath(log_dir, find_data.cFileName);
         break;
@@ -355,6 +355,8 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
         FLAGS_MAX_SUM_OUTPUT_SIZE_IN_MB * 1024 * 1024);
     service_.SetStoreLocalRunOutput(FLAGS_STORE_LOCAL_RUN_OUTPUT);
     service_.SetEnableRemoteLink(FLAGS_ENABLE_REMOTE_LINK);
+    service_.SetShouldFailForUnsupportedCompilerFlag(
+        FLAGS_FAIL_FOR_UNSUPPORTED_COMPILER_FLAGS);
     service_.SetTmpDir(tmpdir_);
     service_.SetAllowedNetworkErrorDuration(
         FLAGS_ALLOWED_NETWORK_ERROR_DURATION);
@@ -363,9 +365,10 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
     service_.SetAllowedMaxActiveFailFallbackDuration(
         FLAGS_ALLOWED_MAX_ACTIVE_FAIL_FALLBACK_DURATION);
 
-    std::vector<string> timeout_secs_str;
-    SplitStringUsing(FLAGS_COMPILER_PROXY_RPC_TIMEOUT_SECS, ",",
-                     &timeout_secs_str);
+    std::vector<string> timeout_secs_str = ToVector(
+        absl::StrSplit(FLAGS_COMPILER_PROXY_RPC_TIMEOUT_SECS,
+                       ',',
+                       absl::SkipEmpty()));
     std::vector<int> timeout_secs;
     for (const auto& it : timeout_secs_str)
       timeout_secs.push_back(atoi(it.c_str()));
@@ -682,16 +685,17 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
         http_server_request->SendReply(response);
         http_server_request = nullptr;
       } else if (path == "/quitquitquit") {
-        http_server_request->SendReply("HTTP/1.1 200 OK\r\n\r\nquit!");
-        http_server_request = nullptr;
         DumpStatsToInfoLog();
         service_.wm()->DebugLog();
         DumpHistogramToInfoLog();
         DumpIncludeCacheLogToInfoLog();
         DumpContentionLogToInfoLog();
         DumpStatsProto();
+        DumpCounterz();
         LOG(INFO) << "Dump done.";
         devtools_goma::FlushLogFiles();
+        http_server_request->SendReply("HTTP/1.1 200 OK\r\n\r\nquit!");
+        http_server_request = nullptr;
         service_.Quit();
       } else if (path == "/abortabortabort") {
         http_server_request->SendReply("HTTP/1.1 200 OK\r\n\r\nquit!");
@@ -771,7 +775,8 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
     return 400;
   }
 
-  void OutputOkHeaderAndBody(const char* content_type, StringPiece content,
+  void OutputOkHeaderAndBody(const char* content_type,
+                             absl::string_view content,
                              std::ostringstream* ss) {
     *ss << "HTTP/1.1 200 OK\r\n"
         << "Content-Type: " << content_type << "\r\n"
@@ -791,7 +796,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
                              string* response) {
     std::ostringstream ss;
     OutputOkHeaderAndBody("text/html; charset=utf-8",
-                          StringPiece(compilerz_html_html_start,
+                          absl::string_view(compilerz_html_html_start,
                                       compilerz_html_html_size),
                           &ss);
     *response = ss.str();
@@ -802,7 +807,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
                             string* response) {
     std::ostringstream ss;
     OutputOkHeaderAndBody("text/javascript; charset=utf-8",
-                          StringPiece(compilerz_script_js_start,
+                          absl::string_view(compilerz_script_js_start,
                                       compilerz_script_js_size),
                           &ss);
     *response = ss.str();
@@ -813,7 +818,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
                            string* response) {
     std::ostringstream ss;
     OutputOkHeaderAndBody("text/css; charset=utf-8",
-                          StringPiece(compilerz_style_css_start,
+                          absl::string_view(compilerz_style_css_start,
                                       compilerz_style_css_size),
                           &ss);
     *response = ss.str();
@@ -824,7 +829,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
                    string* response) {
     std::ostringstream ss;
     OutputOkHeaderAndBody("text/javascript; charset=utf-8",
-                          StringPiece(jquery_min_js_start,
+                          absl::string_view(jquery_min_js_start,
                                       jquery_min_js_size),
                           &ss);
 
@@ -836,10 +841,11 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   int HandleStatusJavaScript(const HttpServerRequest& request,
                              string* response) {
       std::ostringstream ss;
-      OutputOkHeaderAndBody("text/javascript; charset=utf-8",
-                            StringPiece(compiler_proxy_status_script_js_start,
-                                        compiler_proxy_status_script_js_size),
-                            &ss);
+      OutputOkHeaderAndBody(
+          "text/javascript; charset=utf-8",
+          absl::string_view(compiler_proxy_status_script_js_start,
+                            compiler_proxy_status_script_js_size),
+          &ss);
       *response = ss.str();
       return 200;
   }
@@ -848,7 +854,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
                                   string* response) {
       std::ostringstream ss;
       OutputOkHeaderAndBody("text/javascript; charset=utf-8",
-                            StringPiece(
+                            absl::string_view(
                                 compiler_proxy_contentionz_script_js_start,
                                 compiler_proxy_contentionz_script_js_size),
                             &ss);
@@ -859,30 +865,28 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   int HandleStatusCSS(const HttpServerRequest& request,
                       string* response) {
       std::ostringstream ss;
-      OutputOkHeaderAndBody("text/css; charset=utf-8",
-                            StringPiece(compiler_proxy_status_style_css_start,
-                                        compiler_proxy_status_style_css_size),
-                            &ss);
+      OutputOkHeaderAndBody(
+          "text/css; charset=utf-8",
+          absl::string_view(compiler_proxy_status_style_css_start,
+                            compiler_proxy_status_style_css_size),
+          &ss);
       *response = ss.str();
       return 200;
   }
 
   // Helper function for HandleStatusRequest() and HandleStatusRequestOld().
   int HandleStatusRequestHtml(const HttpServerRequest& request,
-                              string original_status, string* response) {
-    string status;
-
+                              const string& original_status, string* response) {
     std::ostringstream endpoints;
     GetEndpoints(&endpoints);
-    StringReplace(original_status, "{{ENDPOINTS}}", endpoints.str(), true,
-                  &status);
-
-    original_status.swap(status);
-    status.clear();
     std::ostringstream global_info;
     GetGlobalInfo(request, &global_info);
-    StringReplace(original_status, "{{GLOBAL_INFO}}", global_info.str(), true,
-                  &status);
+    string status = absl::StrReplaceAll(
+        original_status,
+        {{ "{{ENDPOINTS}}", endpoints.str() },
+         { "{{GLOBAL_INFO}}", global_info.str() },
+        }
+    );
 
     std::ostringstream ss;
     ss << "HTTP/1.1 200 OK\r\n";
@@ -897,7 +901,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
 
   void GetEndpoints(std::ostringstream* ss) {
     for (const auto& iter : http_handlers_) {
-      if (strings::StartsWith(iter.first, "/api/"))
+      if (absl::StartsWith(iter.first, "/api/"))
         continue;
       *ss << "<a href='" << iter.first << "'>" << iter.first << "</a>";
       *ss << " ";
@@ -1171,7 +1175,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   int HandleStatsRequest(const HttpServerRequest& request,
                          string* response) {
     bool emit_json = false;
-    for (const auto& s : strings::Split(request.query(), "&")) {
+    for (const auto& s : absl::StrSplit(request.query(), '&')) {
       if (s == "format=json") {
         emit_json = true;
         break;
@@ -1243,7 +1247,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
         "worker_thread::NextClosure",
       };
 
-      for (const auto& s : strings::Split(request.query(), "&")) {
+      for (const auto& s : absl::StrSplit(request.query(), '&')) {
         if (s == "detailed=1") {
           skip_name.clear();
           break;
@@ -1584,6 +1588,13 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
     service_.DumpStatsToFile(FLAGS_DUMP_STATS_FILE);
   }
 
+  void DumpCounterz() {
+    if (FLAGS_DUMP_COUNTERZ_FILE.empty())
+      return;
+
+    Counterz::Dump(FLAGS_DUMP_COUNTERZ_FILE);
+  }
+
 #if HAVE_HEAP_PROFILER
   int HandleHeapRequest(const HttpServerRequest& request,
                         string* response) {
@@ -1651,7 +1662,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   LogCleaner log_cleaner_;
   PeriodicClosureId log_cleaner_closure_id_;
   PeriodicClosureId memory_tracker_closure_id_;
-  Lock rpc_sent_count_mu_;
+  mutable Lock rpc_sent_count_mu_;
   uint64_t rpc_sent_count_ GUARDED_BY(rpc_sent_count_mu_);
 
   std::map<string, HttpHandlerMethod> http_handlers_;
@@ -1671,7 +1682,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   // such as oauth2 etc.
   HttpClient::Options http_options_;
 
-  Lock login_state_mu_;
+  mutable Lock login_state_mu_;
   string oauth2_login_state_;
   string oauth2_redirect_uri_;
 
@@ -1764,10 +1775,10 @@ void InitResourceLimits(int* nfile) {
 }
 
 void InitTrustedIps(devtools_goma::TrustedIpsManager* trustedipsmanager) {
-  std::vector<string> trusted_ips;
-  SplitStringUsing(FLAGS_COMPILER_PROXY_TRUSTED_IPS, ",", &trusted_ips);
-  for (const auto& ip : trusted_ips) {
-    trustedipsmanager->AddAllow(ip);
+  for (auto&& ip : absl::StrSplit(FLAGS_COMPILER_PROXY_TRUSTED_IPS,
+                                  ',',
+                                  absl::SkipEmpty())) {
+    trustedipsmanager->AddAllow(string(ip));
   }
 }
 
@@ -1797,7 +1808,9 @@ int main(int argc, char* argv[], const char* envp[]) {
   devtools_goma::Init(argc, argv, envp);
 
 #if HAVE_COUNTERZ
-  devtools_goma::Counterz::Init();
+  if (FLAGS_ENABLE_COUNTERZ) {
+    devtools_goma::Counterz::Init();
+  }
 #endif
 
   if (FLAGS_ENABLE_GLOBAL_FILE_ID_CACHE) {
@@ -1888,9 +1901,10 @@ int main(int argc, char* argv[], const char* envp[]) {
   subproc_options.max_subprocs_heavy_weight = FLAGS_MAX_SUBPROCS_HEAVY;
   subproc_options.dont_kill_subprocess = FLAGS_DONT_KILL_SUBPROCESS;
   if (!FLAGS_DONT_KILL_COMMANDS.empty()) {
-    std::vector<string> dont_kill_commands;
-    SplitStringUsing(FLAGS_DONT_KILL_COMMANDS, ",", &dont_kill_commands);
-    for (string cmd : dont_kill_commands) {
+    for (auto&& cmd_view : absl::StrSplit(FLAGS_DONT_KILL_COMMANDS,
+                                          ',',
+                                          absl::SkipEmpty())) {
+      string cmd(cmd_view);
 #ifdef _WIN32
       std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
 #endif
@@ -1904,12 +1918,17 @@ int main(int argc, char* argv[], const char* envp[]) {
     devtools_goma::InitCrashReporter(devtools_goma::GetCrashDumpDirectory());
     LOG(INFO) << "breakpad is enabled";
   }
-  std::unique_ptr<devtools_goma::AutoUpdater> auto_updater(
-      new devtools_goma::AutoUpdater(FLAGS_CTL_SCRIPT_NAME));
-  if (auto_updater->my_version() > 0) {
-    LOG(INFO) << "goma version:" << auto_updater->my_version();
+
+  std::unique_ptr<devtools_goma::AutoUpdater> auto_updater;
+  if (FLAGS_ENABLE_AUTO_UPDATE) {
+    auto_updater.reset(new devtools_goma::AutoUpdater(FLAGS_CTL_SCRIPT_NAME));
+    if (auto_updater->my_version() > 0) {
+      LOG(INFO) << "goma version:" << auto_updater->my_version();
+    }
+    auto_updater->SetEnv(envp);
+  } else {
+    LOG(INFO) << "auto updater is disabled";
   }
-  auto_updater->SetEnv(envp);
 
   int max_nfile = 0;
   InitResourceLimits(&max_nfile);
@@ -1975,9 +1994,10 @@ int main(int argc, char* argv[], const char* envp[]) {
                   FLAGS_COMPILER_PROXY_THREADS,
                   FLAGS_MAX_OVERCOMMIT_INCOMING_SOCKETS);
   // TCP serves only status pages, no limit.
-  auto_updater->Start(&server, FLAGS_AUTO_UPDATE_IDLE_COUNT);
-  handler->SetAutoUpdater(std::move(auto_updater));
-
+  if (auto_updater) {
+    auto_updater->Start(&server, FLAGS_AUTO_UPDATE_IDLE_COUNT);
+    handler->SetAutoUpdater(std::move(auto_updater));
+  }
   if (FLAGS_WATCHDOG_TIMER > 0) {
     std::unique_ptr<devtools_goma::Watchdog> watchdog(
         new devtools_goma::Watchdog);
@@ -2048,7 +2068,9 @@ int main(int argc, char* argv[], const char* envp[]) {
   }
 
 #if HAVE_COUNTERZ
-  devtools_goma::Counterz::Quit();
+  if (FLAGS_ENABLE_COUNTERZ) {
+    devtools_goma::Counterz::Quit();
+  }
 #endif
 
   return 0;

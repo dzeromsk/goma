@@ -17,10 +17,13 @@
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <unordered_map>
 
 #include <google/protobuf/text_format.h>
 #include <json/json.h>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_join.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compilation_database_reader.h"
@@ -46,7 +49,6 @@
 #include "include_processor.h"
 #include "ioutil.h"
 #include "jar_parser.h"
-#include "join.h"
 #include "linker_input_processor.h"
 #include "local_output_cache.h"
 #include "lockhelper.h"
@@ -60,10 +62,8 @@ MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/subprocess.pb.h"
 MSVC_POP_WARNING()
 #include "simple_timer.h"
-#include "string_piece_utils.h"
 #include "subprocess_task.h"
 #include "timestamp.h"
-#include "unordered.h"
 #include "util.h"
 #include "worker_thread_manager.h"
 
@@ -104,7 +104,7 @@ static void DumpSubprograms(
 }
 
 static void LogCompilerOutput(
-    const string& trace_id, const string& name, StringPiece out) {
+    const string& trace_id, const string& name, absl::string_view out) {
   LOG(INFO) << trace_id << " " << name << ": size=" << out.size();
   static const int kMaxLines = 32;
   static const size_t kMaxCols = 200;
@@ -117,10 +117,10 @@ static void LogCompilerOutput(
   }
   for (int i = 0; out.size() > 0 && i < kMaxLines;) {
     size_t end = out.find_first_of("\r\n");
-    StringPiece line;
+    absl::string_view line;
     if (end == string::npos) {
       line = out;
-      out = StringPiece();
+      out = absl::string_view();
     } else if (end == 0) {
       out.remove_prefix(1);
       continue;
@@ -130,7 +130,7 @@ static void LogCompilerOutput(
     }
     if (line.size() == 0)
       continue;
-    if (strings::StartsWith(line, kClExeShowIncludePrefix))
+    if (absl::StartsWith(line, kClExeShowIncludePrefix))
       continue;
     size_t found = line.find("error");
     if (found == string::npos)
@@ -157,7 +157,7 @@ static void ReleaseMemoryForExecReqInput(ExecReq* req) {
 #ifndef _WIN32
 pthread_once_t CompileTask::init_once_ = PTHREAD_ONCE_INIT;
 #else
-INIT_ONCE CompileTask::init_once_;
+INIT_ONCE CompileTask::init_once_ = INIT_ONCE_STATIC_INIT;
 #endif
 Lock CompileTask::global_mu_;
 
@@ -273,7 +273,7 @@ class CompileTask::InputFileTask {
     InputFileTask* input_file_task = nullptr;
     {
       AUTOLOCK(lock, &global_mu_);
-      std::pair<unordered_map<string, InputFileTask*>::iterator, bool> p =
+      std::pair<std::unordered_map<string, InputFileTask*>::iterator, bool> p =
           task_by_filename_->insert(std::make_pair(filename, input_file_task));
       if (p.second) {
         p.first->second = new InputFileTask(wm, std::move(file_service_client),
@@ -405,7 +405,7 @@ class CompileTask::InputFileTask {
 
     {
       AUTOLOCK(lock, &global_mu_);
-      unordered_map<string, InputFileTask*>::iterator found =
+      std::unordered_map<string, InputFileTask*>::iterator found =
           task_by_filename_->find(filename_);
       DCHECK(found != task_by_filename_->end());
       DCHECK(found->second == this);
@@ -475,7 +475,7 @@ class CompileTask::InputFileTask {
     if (missed_content_)
       return true;
 
-    if (strings::EndsWith(filename_, ".rsp")) {
+    if (absl::EndsWith(filename_, ".rsp")) {
       return true;
     }
     if (is_new_file_) {
@@ -491,7 +491,7 @@ class CompileTask::InputFileTask {
   const char* upload_reason() const {
     if (missed_content_)
       return "missed content";
-    if (strings::EndsWith(filename_, ".rsp")) {
+    if (absl::EndsWith(filename_, ".rsp")) {
       return "rsp file";
     }
     if (is_new_file_) {
@@ -558,7 +558,7 @@ class CompileTask::InputFileTask {
   }
 #endif
   static void InitializeStaticOnce() {
-    task_by_filename_ = new unordered_map<string, InputFileTask*>;
+    task_by_filename_ = new std::unordered_map<string, InputFileTask*>;
   }
 
   WorkerThreadManager* wm_;
@@ -569,7 +569,7 @@ class CompileTask::InputFileTask {
   const string filename_;
   State state_;
 
-  Lock mu_;  // protects tasks_ and callbacks_.
+  mutable Lock mu_;  // protects tasks_ and callbacks_.
   std::map<CompileTask*, ExecReq_Input*> tasks_;
   std::vector<std::pair<WorkerThreadManager::ThreadId,
                         OneshotClosure*>> callbacks_;
@@ -611,7 +611,7 @@ class CompileTask::InputFileTask {
 
   // protects task_by_filename_.
   static Lock global_mu_;
-  static unordered_map<string, InputFileTask*>* task_by_filename_;
+  static std::unordered_map<string, InputFileTask*>* task_by_filename_;
 
   DISALLOW_COPY_AND_ASSIGN(InputFileTask);
 };
@@ -623,8 +623,8 @@ INIT_ONCE CompileTask::InputFileTask::init_once_;
 #endif
 Lock CompileTask::InputFileTask::global_mu_;
 
-unordered_map<string, CompileTask::InputFileTask*>*
-  CompileTask::InputFileTask::task_by_filename_;
+std::unordered_map<string, CompileTask::InputFileTask*>*
+    CompileTask::InputFileTask::task_by_filename_;
 
 // Returns true if all outputs are FILE blob (so no need of further http_rpc).
 bool IsOutputFileEmbedded(const ExecResult& result) {
@@ -973,7 +973,7 @@ void CompileTask::Start() {
                                         flags_->input_filenames()[0]);
       string output_filename;
       for (const auto& output_file : flags_->output_files()) {
-        if (strings::EndsWith(output_file, ".gch")) {
+        if (absl::EndsWith(output_file, ".gch")) {
           int output_filelen = output_file.size();
           // Full path and strip ".gch".
           output_filename =
@@ -1423,7 +1423,7 @@ void CompileTask::ProcessFileRequestDone() {
   // on backend.
   if (service_->enable_gch_hack()) {
     for (auto& input : *req_->mutable_input()) {
-      if (strings::EndsWith(input.filename(), GOMA_GCH_SUFFIX)) {
+      if (absl::EndsWith(input.filename(), GOMA_GCH_SUFFIX)) {
         input.mutable_filename()->resize(
             input.filename().size() - strlen(".goma"));
       }
@@ -1685,6 +1685,19 @@ void CompileTask::ProcessCallExecDone() {
             NewCallback(this, &CompileTask::ProcessCallExec),
             WorkerThreadManager::PRIORITY_LOW);
         return;
+      } else if (service_->should_fail_for_unsupported_compiler_flag() &&
+                 resp_->bad_request_reason_code() ==
+                     ExecResp::UNSUPPORTED_COMPILER_FLAGS) {
+        // TODO: Make a simple test for this after goma server has
+        // started returning bad request reason code.
+        string msg = "compile request was rejected by goma server. "
+            "The request might contain unsupported compiler flag.\n"
+            "If you want to continue compile with local fallback, set "
+            "environment variable "
+            "GOMA_FAIL_FOR_UNSUPPORTED_COMPILER_FLAGS=false and "
+            "restart the compiler_proxy.\n";
+        AddErrorToResponse(TO_USER, msg, true);
+        want_fallback_ = false;
       } else {
         LOG(WARNING) << trace_id_ << " exec error:"
                      << resp_->error()
@@ -1831,7 +1844,7 @@ void CompileTask::ProcessFileResponse() {
     string filename = file::JoinPathRespectAbsolute(
         stats_->cwd(), output_filename);
     // TODO: check output paths matches with flag's output filenames?
-    if (service_->enable_gch_hack() && strings::EndsWith(filename, ".gch"))
+    if (service_->enable_gch_hack() && absl::EndsWith(filename, ".gch"))
       filename += ".goma";
 
     OutputFileInfo* output_info = &output_file_[i];
@@ -2322,7 +2335,7 @@ void CompileTask::DoOutput(const string& opname,
 #endif
 
 void CompileTask::RewriteCoffTimestamp(const string& filename) {
-  StringPiece ext = file::Extension(filename);
+  absl::string_view ext = file::Extension(filename);
   if (ext != "obj")
     return;
 
@@ -2486,8 +2499,13 @@ void CompileTask::CommitOutput(bool use_remote) {
     // According to our measurement, this doesn't have
     // measureable performance penalty.
     // see b/24388745
-    if (use_remote && stats_->cache_hit()) {
-      RewriteCoffTimestamp(filename);
+    if (use_remote && stats_->cache_hit() && flags_->is_vc()) {
+      // We should not rewrite coff if /Brepro or something similar is set.
+      // See b/72768585
+      const VCFlags& vc_flag = static_cast<const VCFlags&>(*flags_);
+      if (!vc_flag.has_Brepro()) {
+        RewriteCoffTimestamp(filename);
+      }
     }
 
     service_->RecordOutputRename(need_rename);
@@ -2506,9 +2524,9 @@ void CompileTask::CommitOutput(bool use_remote) {
                               << " CommitOutput " << ms << " msec"
                               << " size=" << info.size
                               << " filename=" << info.filename;
-    StringPiece output_base = file::Basename(info.filename);
+    absl::string_view output_base = file::Basename(info.filename);
     output_bases.push_back(string(output_base));
-    StringPiece ext = file::Extension(output_base);
+    absl::string_view ext = file::Extension(output_base);
     if (flags_->is_gcc() && ext == "o") {
       has_obj = true;
     } else if (flags_->is_vc() && ext == "obj") {
@@ -2644,7 +2662,7 @@ void CompileTask::ProcessLocalFileOutput() {
     const string& filename =
         file::JoinPathRespectAbsolute(flags_->cwd(), output_file);
     // only uploads *.o
-    if (!strings::EndsWith(filename, ".o"))
+    if (!absl::EndsWith(filename, ".o"))
       continue;
     string hash_key;
     const FileId& output_file_id = output_file_id_cache_->Get(filename);
@@ -2766,7 +2784,7 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
   }
   (*root)["state"] = StateName(state_);
   if (abort_) (*root)["abort"] = 1;
-  if (subproc_pid != SubProcessState::kInvalidPid) {
+  if (subproc_pid != static_cast<pid_t>(SubProcessState::kInvalidPid)) {
     (*root)["subproc_state"] =
         SubProcessState::State_Name(subproc_state);
     (*root)["subproc_pid"] = Json::Value::Int64(subproc_pid);
@@ -2901,8 +2919,7 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
           Json::Value::Int64(SumRepeatedInt32(stats_->rpc_req_size()));
     }
     if (stats_->rpc_master_trace_id_size() > 0) {
-      string masters;
-      JoinStrings(stats_->rpc_master_trace_id(), " ", &masters);
+      string masters = absl::StrJoin(stats_->rpc_master_trace_id(), " ");
       (*root)["exec_rpc_master"] = masters;
     }
     if (stats_->rpc_throttle_time_size() > 0) {
@@ -3216,7 +3233,7 @@ bool CompileTask::FindLocalCompilerPath() {
       // we do not need to make local_comiler_path to absolute path
       // any more. (b/6340137, b/28088682)
       if (!pathext_.empty() &&
-          !strings::EndsWith(local_compiler,
+          !absl::EndsWith(local_compiler,
                              req_->command_spec().local_compiler_path())) {
         // PathExt should be resolved on Windows.  Let me use it.
         req_->mutable_command_spec()->set_local_compiler_path(local_compiler);
@@ -3313,7 +3330,7 @@ bool CompileTask::ShouldFallback() const {
                 << " force fallback linking.";
       return true;
     }
-    StringPiece ext = file::Extension(flags_->input_filenames()[0]);
+    absl::string_view ext = file::Extension(flags_->input_filenames()[0]);
     if (ext == "s" || ext == "S") {
       service_->RecordForcedFallbackInSetup(
           CompileService::kNoRemoteCompileSupported);
@@ -3898,8 +3915,7 @@ void CompileTask::ModifyRequestArgs() {
   req_->add_arg("/Y-");
   req_->add_expanded_arg("/Y-");
 
-  string joined;
-  JoinStrings(req_->arg(), " ", &joined);
+  string joined = absl::StrJoin(req_->arg(), " ");
   LOG(INFO) << "Modified args: " << joined;
 }
 
@@ -5382,7 +5398,10 @@ void CompileTask::DumpRequest() const {
     ExecReq_Input* input = req.add_input();
     input->set_filename(input_filename);
     FileServiceDumpClient fs;
-    if (!fs.CreateFileBlob(input_filename, true, input->mutable_content())) {
+    const string abs_input_filename = file::JoinPathRespectAbsolute(
+        req.cwd(), input_filename);
+    if (!fs.CreateFileBlob(abs_input_filename, true,
+                           input->mutable_content())) {
       LOG(ERROR) << trace_id_ << " DumpRequest failed to create fileblob:"
                  << input_filename;
     } else {

@@ -195,7 +195,7 @@ void TLSDescriptor::TransportLayerReadable() {
     return;
   } else if (connect_status_ == READY) {
     int ret = engine_->SetDataFromTransport(
-        StringPiece(network_read_buffer_, read_bytes));
+        absl::string_view(network_read_buffer_, read_bytes));
     if (ret < 0) {  // Error in TLS engine.
       StopTransportLayer();
       io_failed_ = true;
@@ -229,7 +229,7 @@ void TLSDescriptor::TransportLayerReadable() {
     }
   } else if (connect_status_ == NEED_WRITE) {
     LOG(ERROR) << "Unexpected read occured when waiting writable."
-               << "buf:" << StringPiece(network_read_buffer_, read_bytes);
+               << "buf:" << absl::string_view(network_read_buffer_, read_bytes);
   }
 }
 

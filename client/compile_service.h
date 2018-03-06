@@ -11,9 +11,10 @@
 #include <deque>
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <sstream>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "atomic_stats_counter.h"
@@ -23,7 +24,6 @@
 #include "lockhelper.h"
 #include "subprocess_option_setter.h"
 #include "threadpool_http_server.h"
-#include "unordered.h"
 #include "worker_thread_manager.h"
 #include "watchdog.h"
 
@@ -149,7 +149,7 @@ class CompileService {
     WorkerThreadManager* wm_;
     WorkerThreadManager::ThreadId caller_thread_id_;
     ThreadpoolHttpServer::HttpServerRequest* http_server_request_;
-    Lock mu_;
+    mutable Lock mu_;
     std::vector<RpcController*> rpcs_;
     std::unique_ptr<MultiExecResp> resp_;
     OneshotClosure* closed_callback_;
@@ -321,6 +321,13 @@ class CompileService {
   }
   bool enable_remote_link() const { return enable_remote_link_; }
 
+  void SetShouldFailForUnsupportedCompilerFlag(bool f) {
+    should_fail_for_unsupported_compiler_flag_ = f;
+  }
+  bool should_fail_for_unsupported_compiler_flag() const {
+    return should_fail_for_unsupported_compiler_flag_;
+  }
+
   void SetTmpDir(const string& tmp_dir) { tmp_dir_ = tmp_dir; }
   const string& tmp_dir() const { return tmp_dir_; }
 
@@ -482,13 +489,13 @@ class CompileService {
 
   WorkerThreadManager* wm_;
 
-  Lock quit_mu_;  // protects quit_
+  mutable Lock quit_mu_;  // protects quit_
   bool quit_;
 
-  Lock task_id_mu_;
+  mutable Lock task_id_mu_;
   int task_id_ GUARDED_BY(task_id_mu_);
 
-  Lock mu_;  // protects other fields.
+  mutable Lock mu_;  // protects other fields.
   ConditionVariable cond_;
 
   int max_active_tasks_;
@@ -496,7 +503,7 @@ class CompileService {
   int max_failed_tasks_;
   int max_long_tasks_;
   std::deque<CompileTask*> pending_tasks_;
-  std::set<CompileTask*> active_tasks_;
+  std::unordered_set<CompileTask*> active_tasks_;
   std::deque<CompileTask*> finished_tasks_;
   std::deque<CompileTask*> failed_tasks_;
   // long_tasks_ is a heap compared by task's handler time.
@@ -504,8 +511,8 @@ class CompileService {
   std::vector<CompileTask*> long_tasks_;
 
   // CompileTask's input that failed.
-  ReadWriteLock failed_inputs_mu_;
-  unordered_set<string> failed_inputs_;
+  mutable ReadWriteLock failed_inputs_mu_;
+  std::unordered_set<string> failed_inputs_;
 
   string username_;
   string nodename_;
@@ -525,10 +532,10 @@ class CompileService {
   int compiler_info_pool_;
 
   // protects compiler_info_waiters_, compiler_info_callbacks.
-  Lock compiler_info_mu_;
+  mutable Lock compiler_info_mu_;
   // key: key_cwd: value: a list of waiting param+closure.
-  unordered_map<std::string, CompilerInfoWaiterList*>
-    compiler_info_waiters_;
+  std::unordered_map<std::string, CompilerInfoWaiterList*>
+      compiler_info_waiters_;
 
   std::unique_ptr<FileHashCache> file_hash_cache_;
 
@@ -562,27 +569,28 @@ class CompileService {
   int local_run_delay_msec_;
   bool store_local_run_output_;
   bool enable_remote_link_;
+  bool should_fail_for_unsupported_compiler_flag_;
   string tmp_dir_;
 
   // key: "req_ver - resp_ver", value: count
-  unordered_map<string, int> command_version_mismatch_;
-  unordered_map<string, int> command_binary_hash_mismatch_;
+  std::unordered_map<string, int> command_version_mismatch_;
+  std::unordered_map<string, int> command_binary_hash_mismatch_;
 
   // key: "path hash", value: count
-  unordered_map<string, int> subprogram_mismatch_;
+  std::unordered_map<string, int> subprogram_mismatch_;
 
   // key: error reason, value: pair<is_error, count>
-  unordered_map<string, std::pair<bool, int>> error_to_log_;
+  std::unordered_map<string, std::pair<bool, int>> error_to_log_;
   // key: error reason, value: count
-  unordered_map<string, int> error_to_user_;
+  std::unordered_map<string, int> error_to_user_;
 
   // protects local_compiler_paths_
-  ReadWriteLock compiler_mu_;
+  mutable ReadWriteLock compiler_mu_;
 
   // key: <gomacc_path>:<basename>:<cwd>:<local_path>
   //     if all path in <local_path> are absolute, "." is used for <cwd>.
   // value: (local_compiler_path, no_goma_local_path)
-  unordered_map<string, std::pair<string, string>> local_compiler_paths_;
+  std::unordered_map<string, std::pair<string, string>> local_compiler_paths_;
 
   int num_exec_request_;
   int num_exec_success_;

@@ -6,6 +6,7 @@
 #include "compiler_info.h"
 
 #include <memory>
+#include <unordered_map>
 
 #include <glog/logging.h>
 #include <glog/stl_logging.h>
@@ -33,7 +34,7 @@ class CompilerInfoTest : public testing::Test {
     cid->set_predefined_macros(cid->predefined_macros() + macro);
   }
 
-  int FindValue(const unordered_map<string, int>& map, const string& key) {
+  int FindValue(const std::unordered_map<string, int>& map, const string& key) {
     const auto& it = map.find(key);
     if (it == map.end())
       return 0;
@@ -435,6 +436,23 @@ TEST_F(CompilerInfoTest, ParseClangTidyVersionTarget)
   EXPECT_EQ("x86_64-unknown-linux-gnu", target);
 }
 
+TEST_F(CompilerInfoTest, ParseClangTidyVersionTargetCRLF)
+{
+  const char kOutput[] =
+    "LLVM (http://llvm.org/):\r\n"
+    "  LLVM version 3.9.0svn\r\n"
+    "  Optimized build.\r\n"
+    "  Default target: x86_64-unknown-linux-gnu\r\n"
+    "  Host CPU: sandybridge\r\n";
+
+  string version;
+  string target;
+  CompilerInfoBuilder::ParseClangTidyVersionTarget(kOutput, &version, &target);
+
+  EXPECT_EQ("3.9.0svn", version);
+  EXPECT_EQ("x86_64-unknown-linux-gnu", target);
+}
+
 TEST_F(CompilerInfoTest, ClangGcc46) {
   // third_party/llvm-build/Release+Asserts/bin/clang++ -x c++ -v
   // -E /dev/null -o /dev/null
@@ -797,6 +815,21 @@ TEST_F(CompilerInfoTest, ParseClangVersionTarget) {
           &version, &target));
   EXPECT_EQ("clang version 3.5 (trunk)", version);
   EXPECT_EQ("i686-pc-win32", target);
+}
+
+TEST_F(CompilerInfoTest, ParseClangVersionTargetCRLF) {
+  static const char kClangSharpOutput[] =
+      "clang version 7.0.0 (trunk 324578)\r\n"
+      "Target: x86_64-pc-windows-msvc\r\n"
+      "Thread model: posix\r\n"
+      "InstalledDIr: C:\\somewhere\\\r\n";
+  string version, target;
+  EXPECT_TRUE(
+      CompilerInfoBuilder::ParseClangVersionTarget(
+          kClangSharpOutput,
+          &version, &target));
+  EXPECT_EQ("clang version 7.0.0 (trunk 324578)", version);
+  EXPECT_EQ("x86_64-pc-windows-msvc", target);
 }
 
 #ifdef _WIN32
@@ -1342,6 +1375,31 @@ TEST_F(CompilerInfoTest, FillFromCompilerOutputsShouldUseProperPath) {
   EXPECT_TRUE(data.get());
   EXPECT_EQ(0, data->failed_at());
 }
+
+#ifdef __linux__
+// Checks we can take CompilerInfo from /usr/bin/gcc etc.
+TEST_F(CompilerInfoTest, GccSmoke) {
+  // Assuming testcases[i][0] is a path to gcc.
+  const std::vector<std::vector<string>> testcases = {
+    { "/usr/bin/gcc", },
+    { "/usr/bin/gcc", "-xc" },
+    { "/usr/bin/gcc", "-xc++" },
+    { "/usr/bin/g++", },
+    { "/usr/bin/g++", "-xc" },
+    { "/usr/bin/g++", "-xc++" },
+  };
+  const std::vector<string> envs;
+
+  for (const auto& args : testcases) {
+    std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+    CompilerInfoBuilder cib;
+    CompilerInfo compiler_info(
+        cib.FillFromCompilerOutputs(*flags, args[0], envs));
+
+    EXPECT_FALSE(compiler_info.HasError());
+  }
+}
+#endif
 
 class ScopedCompilerInfoStateTest : public testing::Test {
  protected:

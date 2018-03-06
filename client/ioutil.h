@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "string_piece.h"
+#include "absl/strings/string_view.h"
 #ifdef _WIN32
 #include "socket_helper_win.h"
 #endif
@@ -25,10 +25,10 @@ const int kReadSelectTimeoutSec = 20;
 class ScopedSocket;
 
 // Removes tailing spaces from |str|.
-StringPiece StringRstrip(StringPiece str);
+absl::string_view StringRstrip(absl::string_view str);
 
 // Removes leading and tailing spaces from |str|.
-StringPiece StringStrip(StringPiece str);
+absl::string_view StringStrip(absl::string_view str);
 
 void WriteStringToFileOrDie(const string &data, const string &filename,
                             int permission);
@@ -39,8 +39,8 @@ void AppendStringToFileOrDie(const string &data, const string &filename,
 // Win32 std::cout, std::cerr open as text mode, so cout << "foo\r\n" emits
 // "foo\r\r\n".  It is not ninja friendly.
 // b/6617503
-void WriteStdout(StringPiece data);
-void WriteStderr(StringPiece data);
+void WriteStdout(absl::string_view data);
+void WriteStderr(absl::string_view data);
 
 void FlushLogFiles();
 
@@ -66,7 +66,7 @@ void GetBaseDir(const string& filepath, string* base_dir);
 // |is_chunked| become true if HTTP response is sent with chunked transfer
 // encoding. Note that the function will not check chunked transfer coding
 // if |is_chunked| == NULL.
-bool ParseHttpResponse(StringPiece response,
+bool ParseHttpResponse(absl::string_view response,
                        int* http_status_code,
                        size_t* offset,
                        size_t* content_length,
@@ -80,7 +80,7 @@ bool ParseHttpResponse(StringPiece response,
 //
 // Do not check chunked transfer coding if is_chunked == NULL.
 bool FindContentLengthAndBodyOffset(
-    StringPiece data, size_t *content_length, size_t *body_offset,
+    absl::string_view data, size_t *content_length, size_t *body_offset,
     bool *is_chunked);
 
 void DeleteRecursivelyOrDie(const string& dirname);
@@ -101,11 +101,11 @@ string SimpleEncodeChartData(const std::vector<double>& value, double max);
 //
 // chunks is set only when ParseChunkedBody returns true and
 // *remaining_chunk_length == 0.
-bool ParseChunkedBody(StringPiece response,
+bool ParseChunkedBody(absl::string_view response,
                       size_t offset, size_t* remaining_chunk_length,
-                      std::vector<StringPiece>* chunks);
+                      std::vector<absl::string_view>* chunks);
 
-string CombineChunks(const std::vector<StringPiece>& chunks);
+string CombineChunks(const std::vector<absl::string_view>& chunks);
 
 std::map<string, string> ParseQuery(const string& query);
 

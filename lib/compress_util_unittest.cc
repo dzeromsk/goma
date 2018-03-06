@@ -8,9 +8,9 @@
 
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "glog/logging.h"
 #include "gtest/gtest.h"
-#include "string_piece.h"
 #ifdef ENABLE_LZMA
 # include "google/protobuf/io/zero_copy_stream_impl.h"
 # include "prototmp/goma_log.pb.h"

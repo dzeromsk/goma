@@ -107,8 +107,6 @@ WorkerThreadManager::WorkerThread::WorkerThread(
       shutting_down_(false),
       quit_(false),
       name_(name),
-      cond_handle_(&mu_),
-      cond_id_(&mu_),
       auto_lock_stat_next_closure_(nullptr),
       auto_lock_stat_poll_events_(nullptr) {
   int pipe_fd[2];
@@ -200,7 +198,7 @@ void WorkerThreadManager::WorkerThread::ThreadMain() {
   {
     AUTOLOCK(lock, &mu_);
     while (handle_ == kNullThreadHandle)
-      cond_handle_.Wait();
+      cond_handle_.Wait(&mu_);
   }
   CHECK_NE(handle_, kNullThreadHandle);
   {
@@ -245,10 +243,11 @@ bool WorkerThreadManager::WorkerThread::Dispatch() {
 
 #ifndef _WIN32
 pthread_once_t WorkerThreadManager::WorkerThread::key_worker_once_ =
-                   PTHREAD_ONCE_INIT;
+    PTHREAD_ONCE_INIT;
 pthread_key_t WorkerThreadManager::WorkerThread::key_worker_;
 #else
-INIT_ONCE WorkerThreadManager::WorkerThread::key_worker_once_;
+INIT_ONCE WorkerThreadManager::WorkerThread::key_worker_once_ =
+    INIT_ONCE_STATIC_INIT;
 DWORD WorkerThreadManager::WorkerThread::key_worker_ = TLS_OUT_OF_INDEXES;
 #endif
 
@@ -625,7 +624,7 @@ void WorkerThreadManager::WorkerThread::Start() {
   CHECK_NE(handle_, kNullThreadHandle);
   cond_handle_.Signal();
   while (id_ == 0)
-    cond_id_.Wait();
+    cond_id_.Wait(&mu_);
 }
 
 void WorkerThreadManager::WorkerThread::Join() {

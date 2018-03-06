@@ -37,7 +37,9 @@ const int WorkerThreadManager::kFreePool = 0;
 // subprocess_task_unittest.
 // g_initialize_atfork is used to call pthread_atfork once.
 // g_enable_fork will be true when WorkerThreadManager is not alive.
+#ifndef _WIN32
 static bool g_initialize_atfork = false;
+#endif
 static bool g_enable_fork = false;
 
 WorkerThreadManager::CancelableClosure::CancelableClosure(
@@ -385,8 +387,7 @@ WorkerThreadManager::WorkerThread* WorkerThreadManager::GetCurrentWorker() {
 WorkerThreadRunner::WorkerThreadRunner(
     WorkerThreadManager* wm,
     const char* const location, OneshotClosure* closure)
-    : cond_(&mu_),
-      done_(false) {
+    : done_(false) {
   LOG(INFO) << "run closure=" << closure
             << " from " << location;
   wm->RunClosure(location,
@@ -404,7 +405,7 @@ WorkerThreadRunner::~WorkerThreadRunner() {
 void WorkerThreadRunner::Wait() {
   AUTOLOCK(lock, &mu_);
   while (!done_) {
-    cond_.Wait();
+    cond_.Wait(&mu_);
   }
 }
 

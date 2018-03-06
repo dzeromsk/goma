@@ -26,7 +26,7 @@ class FakeTLSEngine : public TLSEngine {
 
   int GetDataToSendTransport(string* data) override;
   size_t GetBufSizeFromTransport() override;
-  int SetDataFromTransport(const StringPiece& data) override;
+  int SetDataFromTransport(const absl::string_view& data) override;
 
   // Read and Write return number of read/write bytes if success.
   // Otherwise, TLSErrorReason.

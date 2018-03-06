@@ -10,9 +10,9 @@
 #include <fstream>
 #include <sstream>
 
+#include "absl/strings/match.h"
 #include "compiler_flags.h"
 #include "path.h"
-#include "string_piece_utils.h"
 
 namespace devtools_goma {
 
@@ -26,7 +26,7 @@ bool BuildGomaccArgv(int orig_argc, const char* orig_argv[],
   int argv0 = -1;
   const string progname = string(file::Basename(orig_argv[0]));
   for (int i = 0; i < orig_argc; i++) {
-    if (strings::StartsWith(orig_argv[i], kGomaVerifyCommandFlag)) {
+    if (absl::StartsWith(orig_argv[i], kGomaVerifyCommandFlag)) {
       // --goma-veirfy-command is useful for end-to-end test.
       // It always sends a compile request from compiler_proxy to remote server,
       // ignores cache, and checks compiler version between local and remote.
@@ -58,7 +58,7 @@ bool BuildGomaccArgv(int orig_argc, const char* orig_argv[],
 #endif
     }
     // found command name.
-    const StringPiece p = file::Basename(orig_argv[i]);
+    const absl::string_view p = file::Basename(orig_argv[i]);
     if (p == "gomacc"
 #ifdef _WIN32
         || p == "gomacc.exe"
@@ -131,7 +131,8 @@ string EscapeWinArg(const string& arg) {
           // \ before " => ..\\\"..
           ss << '\\';
         }  // otherwise, backslashes are interpreted literally.
-        // fallthrough
+
+        FALLTHROUGH_INTENDED;
       default:
         ss << c;
         break;

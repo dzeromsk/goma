@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
@@ -27,7 +28,6 @@ MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 MSVC_POP_WARNING()
 #include "scoped_fd.h"
 #include "simple_timer.h"
-#include "string_piece.h"
 #include "worker_thread_manager.h"
 
 using std::string;
@@ -354,11 +354,11 @@ void HttpRPC::DisableCompression() {
   compression_enabled_ = false;
 }
 
-void HttpRPC::EnableCompression(StringPiece header) {
+void HttpRPC::EnableCompression(absl::string_view header) {
   AUTOLOCK(lock, &mu_);
-  StringPiece::size_type accept_encoding =
+  absl::string_view::size_type accept_encoding =
       header.find("Accept-Encoding: deflate");
-  if (accept_encoding != StringPiece::npos) {
+  if (accept_encoding != absl::string_view::npos) {
     if (!compression_enabled_)
       LOG(INFO) << "Compression enabled";
     compression_enabled_ = true;
@@ -405,7 +405,7 @@ string HttpRPC::CallRequest::CreateMessage() const {
       headers.push_back(
           HttpClient::Request::CreateHeader("Content-Encoding", "deflate"));
       status_->raw_req_size = gzip_stream.ByteCount();
-      StringPiece body(compressed);
+      absl::string_view body(compressed);
       // Omit zlib header (since server assumes no zlib header).
       body.remove_prefix(2);
       return BuildMessage(headers, body);

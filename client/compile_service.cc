@@ -19,6 +19,8 @@
 
 #include <json/json.h>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_join.h"
 #include "atomic_stats_counter.h"
 #include "autolock_timer.h"
 #include "auto_updater.h"
@@ -41,7 +43,6 @@
 #include "include_cache.h"
 #include "include_processor.h"
 #include "ioutil.h"
-#include "join.h"
 #include "local_output_cache.h"
 #include "lockhelper.h"
 #include "log_service_client.h"
@@ -55,8 +56,6 @@ MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_stats.pb.h"
 #include "prototmp/goma_statz_stats.pb.h"
 MSVC_POP_WARNING()
-#include "split.h"
-#include "string_piece_utils.h"
 #include "timestamp.h"
 #include "util.h"
 #include "watchdog.h"
@@ -114,8 +113,8 @@ void CompileService::RpcController::AttachMultiRpcController(
 
 // Returns true if header looks like a request coming from browser.
 // see also goma_ipc.cc:GomaIPC::SendRequest.
-bool IsBrowserRequest(StringPiece header) {
-  if (header.find("\r\nHost: 0.0.0.0\r\n") != StringPiece::npos) {
+bool IsBrowserRequest(absl::string_view header) {
+  if (header.find("\r\nHost: 0.0.0.0\r\n") != absl::string_view::npos) {
     return false;
   }
   // TODO: check it doesn't contain Origin header etc?
@@ -123,7 +122,7 @@ bool IsBrowserRequest(StringPiece header) {
 }
 
 bool CompileService::RpcController::ParseRequest(ExecReq* req) {
-  StringPiece header = http_server_request_->header();
+  absl::string_view header = http_server_request_->header();
   if (http_server_request_->request_content_length() <= 0) {
     LOG(WARNING) << "Invalid request from client (no content-length):"
                  << header;
@@ -136,7 +135,7 @@ bool CompileService::RpcController::ParseRequest(ExecReq* req) {
     return false;
   }
   if (header.find("\r\nContent-Type: binary/x-protocol-buffer\r\n") ==
-      StringPiece::npos) {
+      absl::string_view::npos) {
     LOG(WARNING) << "Invalid request from client (invalid content-type):"
                  << header;
     return false;
@@ -312,7 +311,6 @@ CompileService::CompileService(WorkerThreadManager* wm)
     : wm_(wm),
       quit_(false),
       task_id_(0),
-      cond_(&mu_),
       max_active_tasks_(1000),
       max_finished_tasks_(1000),
       max_failed_tasks_(1000),
@@ -652,7 +650,9 @@ void CompileService::Quit() {
     AUTOLOCK(lock, &quit_mu_);
     quit_ = true;
   }
-  auto_updater_->Stop();
+  if (auto_updater_) {
+    auto_updater_->Stop();
+  }
   if (log_service_client_.get())
     log_service_client_->Flush();
 #ifndef GLOG_NO_ABBREVIATED_SEVERITIES
@@ -672,7 +672,9 @@ void CompileService::Wait() {
   if (log_service_client_.get())
     log_service_client_->Flush();
 
-  auto_updater_->Wait();
+  if (auto_updater_) {
+    auto_updater_->Wait();
+  }
   http_client_->Shutdown();
   wm_->Shutdown();
   {
@@ -681,7 +683,7 @@ void CompileService::Wait() {
     while (!pending_tasks_.empty() || !active_tasks_.empty()) {
       LOG(INFO) << "pending_tasks=" << pending_tasks_.size()
                 << "active_tasks=" << active_tasks_.size();
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
   }
   CHECK(active_tasks_.empty());
@@ -1211,8 +1213,7 @@ bool CompileService::FindLocalCompilerPathUnlocked(
     string* local_compiler_path,
     string* no_goma_local_path) const {
   // assert compiler_mu held either exclusive or shared.
-  unordered_map<string, std::pair<string, string> >::const_iterator found =
-      local_compiler_paths_.find(key);
+  auto found = local_compiler_paths_.find(key);
   if (found != local_compiler_paths_.end()) {
     *local_compiler_path = found->second.first;
     *no_goma_local_path = found->second.second;
@@ -1844,7 +1845,7 @@ void CompileService::DumpStatsToFile(const string& filename) {
   stats.mutable_machine_info()->set_memory_size(GetSystemTotalMemory());
 
   string stats_buf;
-  if (strings::EndsWith(filename, ".json")) {
+  if (absl::EndsWith(filename, ".json")) {
     google::protobuf::util::JsonPrintOptions options;
     options.preserve_proto_field_names = true;
     google::protobuf::util::MessageToJsonString(stats, &stats_buf, options);

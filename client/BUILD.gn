@@ -56,11 +56,11 @@ static_library("common") {
   ]
   include_dirs = [ "." ]
   deps = [
+    ":counterz_proto",
     "//base",
     "//lib",
     "//third_party:glog",
     "//third_party/chromium_base:cpu",
-    "//third_party/chromium_base:string",
     "//third_party/jsoncpp",
   ]
   if (os == "win") {
@@ -98,6 +98,12 @@ static_library("common") {
 proto_library("compiler_info_data_proto") {
   sources = [
     "compiler_info_data.proto",
+  ]
+}
+
+proto_library("counterz_proto") {
+  sources = [
+    "counterz.proto",
   ]
 }
 

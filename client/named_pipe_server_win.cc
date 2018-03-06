@@ -4,13 +4,12 @@
 #include "named_pipe_server_win.h"
 
 #include <deque>
-#include <set>
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "config_win.h"
-#include "string_piece.h"
 #include "worker_thread_manager.h"
 
 namespace devtools_goma {
@@ -121,10 +120,10 @@ class NamedPipeServer::Conn {
     Req(const Req&) = delete;
     Req& operator=(const Req&) = delete;
 
-    StringPiece request_message() const override {
+    absl::string_view request_message() const override {
       return conn_->request_message_;
     }
-    void SendReply(StringPiece reply) override {
+    void SendReply(absl::string_view reply) override {
       conn_->SendReply(reply);
     }
     void NotifyWhenClosed(OneshotClosure* callback) override {
@@ -186,8 +185,8 @@ class NamedPipeServer::Conn {
     char eofBuf_[1];
   };
 
-  void SendReply(StringPiece reply) {
-    buf_ = string(reply);
+  void SendReply(absl::string_view reply) {
+    buf_.assign(reply.begin(), reply.end());
     server_->ReadyToReply(this);
   }
 
@@ -221,8 +220,11 @@ class NamedPipeServer::Conn {
   void ReadDone(DWORD err, DWORD num_bytes) {
     DCHECK(BelongsToCurrentThread());
     err_ = err;
-    if (num_bytes >= 0) {
-      request_message_ = StringPiece(buf_.data(), num_bytes);
+    // num_bytes = 0 means some error happens.
+    if (num_bytes > 0) {
+      request_message_ = absl::string_view(buf_.data(), num_bytes);
+    } else {
+      request_message_ = absl::string_view();
     }
     server_->ReadDone(this);
   }
@@ -301,13 +303,13 @@ class NamedPipeServer::Conn {
   ScopedNamedPipe pipe_;
   WorkerThreadManager::ThreadId thread_id_;
   DWORD err_;
-  std::string buf_;
-  StringPiece request_message_;
+  std::vector<char> buf_;
+  absl::string_view request_message_;
   size_t written_;
 
-  Lock mu_;  // protect closed_thread_id_ and closed_callback_
-  WorkerThreadManager::ThreadId closed_thread_id_;
-  std::unique_ptr<OneshotClosure> closed_callback_;
+  mutable Lock mu_;
+  WorkerThreadManager::ThreadId closed_thread_id_ GUARDED_BY(mu_);
+  std::unique_ptr<OneshotClosure> closed_callback_ GUARDED_BY(mu_);
 
   std::unique_ptr<Req> req_;
   std::unique_ptr<CloseWatcher> close_watcher_;
@@ -424,7 +426,7 @@ void NamedPipeServer::Stop() {
   flush_.Close();
   flusher_done_.Close();
 
-  std::set<Conn*> conns;
+  std::unordered_set<Conn*> conns;
   {
     AUTOLOCK(lock, &mu_);
     conns.insert(actives_.begin(), actives_.end());
@@ -600,6 +602,8 @@ bool NamedPipeServer::NewPipe(
     return false;
   }
 
+  // TODO: Make calling ConnectNamedpipe loop as quickly as possible or
+  //               make the loop multi-threaded.
   if (ConnectNamedPipe(pipe_.get(), overlapped)) {
     LOG_SYSRESULT(GetLastError());
     LOG(ERROR) << "Failed to ConnectNamedPipe";
@@ -615,7 +619,7 @@ bool NamedPipeServer::NewPipe(
       if (SetEvent(overlapped->hEvent)) {
         break;
       }
-      // FALLTHROUGH
+      FALLTHROUGH_INTENDED;
     default:
       LOG_SYSRESULT(GetLastError());
       LOG(ERROR) << "Failed to ConnectNamedPipe";
@@ -645,7 +649,7 @@ void NamedPipeServer::ReadDone(Conn* conn) {
 void NamedPipeServer::ProcessWatchClosed() {
   VLOG(1) << "ProcessWatchClosed";
   DCHECK(THREAD_ID_IS_SELF(thread_id_));
-  std::set<Conn*> watches;
+  std::unordered_set<Conn*> watches;
   {
     AUTOLOCK(lock, &mu_);
     watches.swap(watches_);
@@ -739,7 +743,7 @@ void NamedPipeServer::Flusher() {
 
 void NamedPipeServer::ProcessFlushes() {
   VLOG(1) << "ProcessFlushes";
-  std::set<Conn*> flushes;
+  std::unordered_set<Conn*> flushes;
   {
     AUTOLOCK(lock, &mu_);
     flushes.swap(flushes_);

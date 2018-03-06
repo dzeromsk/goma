@@ -7,8 +7,8 @@
 
 #include <cctype>
 
-#include "string_piece.h"
-#include "string_piece_utils.h"
+#include "absl/strings/match.h"
+#include "absl/strings/string_view.h"
 
 namespace devtools_goma {
 
@@ -47,7 +47,7 @@ bool HasPrefixDirWithSep(absl::string_view path, absl::string_view prefix,
   // TODO: do we need to convert path before check on Win path?
   // 1. need to make both lower case?
 
-  if (!strings::StartsWith(path, prefix)) {
+  if (!absl::StartsWith(path, prefix)) {
     return false;
   }
   if (path.size() == prefix.size()) {

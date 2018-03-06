@@ -30,7 +30,6 @@ AutoUpdater::AutoUpdater(const string& goma_ctl)
       idle_counter_(-1),
       server_(nullptr),
       pull_closure_id_(ThreadpoolHttpServer::kInvalidClosureId),
-      cond_(&mu_),
       subproc_(nullptr),
       goma_ctl_(goma_ctl) {
   ReadManifest(file::JoinPath(dir_, "MANIFEST"), &my_version_);
@@ -85,7 +84,7 @@ void AutoUpdater::Stop() {
 void AutoUpdater::Wait() {
   AUTOLOCK(lock, &mu_);
   while (subproc_ != nullptr) {
-    cond_.Wait();
+    cond_.Wait(&mu_);
   }
 }
 

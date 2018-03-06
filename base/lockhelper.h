@@ -6,8 +6,8 @@
 #ifndef DEVTOOLS_GOMA_BASE_LOCKHELPER_H_
 #define DEVTOOLS_GOMA_BASE_LOCKHELPER_H_
 
+#include "absl/base/thread_annotations.h"
 #include "basictypes.h"
-#include "thread_annotations.h"
 
 #ifdef __MACH__
 # include <libkern/OSAtomic.h>
@@ -36,21 +36,21 @@ class LOCKABLE Lock {
 
   // If the lock is not held, take it and return true.  If the lock is already
   // held by something else, immediately return false.
-  bool Try() const EXCLUSIVE_TRYLOCK_FUNCTION(true);
+  bool Try() EXCLUSIVE_TRYLOCK_FUNCTION(true);
 
   // Take the lock, blocking until it is available if necessary.
-  void Acquire() const EXCLUSIVE_LOCK_FUNCTION();
+  void Acquire() EXCLUSIVE_LOCK_FUNCTION();
 
   // Release the lock.  This must only be called by the lock's holder: after
   // a successful call to Try, or a call to Lock.
-  void Release() const UNLOCK_FUNCTION();
+  void Release() UNLOCK_FUNCTION();
 
  private:
   friend class ConditionVariable;
 #ifdef _WIN32
   friend class WinVistaCondVar;
 #endif
-  mutable OSLockType os_lock_;
+  OSLockType os_lock_;
   DISALLOW_COPY_AND_ASSIGN(Lock);
 };
 
@@ -65,17 +65,17 @@ class LOCKABLE FastLock {
 
   FastLock() : lock_(OS_SPINLOCK_INIT) {}
 
-  void Acquire() const EXCLUSIVE_LOCK_FUNCTION() {
+  void Acquire() EXCLUSIVE_LOCK_FUNCTION() {
     OSSpinLockLock(&lock_);
   }
 
-  void Release() const UNLOCK_FUNCTION() {
+  void Release() UNLOCK_FUNCTION() {
     OSSpinLockUnlock(&lock_);
   }
  private:
   // TODO: Use os_unfair_lock if available.
   // OSSpinLock is deprecated in 10.12.
-  mutable OSSpinLock lock_;
+  OSSpinLock lock_;
 };
 
 #else
@@ -90,17 +90,17 @@ class LOCKABLE ReadWriteLock {
   ReadWriteLock();
   ~ReadWriteLock();
 
-  void AcquireShared() const SHARED_LOCK_FUNCTION();
-  void ReleaseShared() const UNLOCK_FUNCTION();
+  void AcquireShared() SHARED_LOCK_FUNCTION();
+  void ReleaseShared() UNLOCK_FUNCTION();
 
-  void AcquireExclusive() const EXCLUSIVE_LOCK_FUNCTION();
-  void ReleaseExclusive() const UNLOCK_FUNCTION();
+  void AcquireExclusive() EXCLUSIVE_LOCK_FUNCTION();
+  void ReleaseExclusive() UNLOCK_FUNCTION();
 
  private:
 #ifdef _WIN32
-  mutable SRWLOCK srw_lock_;
+  SRWLOCK srw_lock_;
 #else
-  mutable OSRWLockType os_rwlock_;
+  OSRWLockType os_rwlock_;
 #endif
   DISALLOW_COPY_AND_ASSIGN(ReadWriteLock);
 };
@@ -109,17 +109,17 @@ class SCOPED_LOCKABLE AutoLock {
  public:
   // Does not take ownership of |lock|, which must refer to a valid Lock
   // that outlives this object.
-  explicit AutoLock(const Lock* lock) EXCLUSIVE_LOCK_FUNCTION(lock)
-      : lock_(*lock) {
-    lock_.Acquire();
+  explicit AutoLock(Lock* lock) EXCLUSIVE_LOCK_FUNCTION(lock)
+      : lock_(lock) {
+    lock_->Acquire();
   }
 
   ~AutoLock() UNLOCK_FUNCTION() {
-    lock_.Release();
+    lock_->Release();
   }
 
  private:
-  const Lock& lock_;
+  Lock* lock_;
   DISALLOW_COPY_AND_ASSIGN(AutoLock);
 };
 
@@ -130,34 +130,34 @@ class SCOPED_LOCKABLE AutoFastLock {
 
   // Does not take ownership of |lock|, which must refer to a valid FastLock
   // that outlives this object.
-  explicit AutoFastLock(const FastLock* lock) EXCLUSIVE_LOCK_FUNCTION(lock)
-      : lock_(*lock) {
-    lock_.Acquire();
+  explicit AutoFastLock(FastLock* lock) EXCLUSIVE_LOCK_FUNCTION(lock)
+      : lock_(lock) {
+    lock_->Acquire();
   }
 
   ~AutoFastLock() UNLOCK_FUNCTION() {
-    lock_.Release();
+    lock_->Release();
   }
 
  private:
-  const FastLock& lock_;
+  FastLock* lock_;
 };
 
 class SCOPED_LOCKABLE AutoExclusiveLock {
  public:
   // Does not take ownership of |lock|, which must refer to a valid
   // ReadWriteLock that outlives this object.
-  explicit AutoExclusiveLock(const ReadWriteLock* lock)
-      EXCLUSIVE_LOCK_FUNCTION(lock) : lock_(*lock) {
-    lock_.AcquireExclusive();
+  explicit AutoExclusiveLock(ReadWriteLock* lock)
+      EXCLUSIVE_LOCK_FUNCTION(lock) : lock_(lock) {
+    lock_->AcquireExclusive();
   }
 
   ~AutoExclusiveLock() UNLOCK_FUNCTION() {
-    lock_.ReleaseExclusive();
+    lock_->ReleaseExclusive();
   }
 
  private:
-  const ReadWriteLock& lock_;
+  ReadWriteLock* lock_;
   DISALLOW_COPY_AND_ASSIGN(AutoExclusiveLock);
 };
 
@@ -165,37 +165,35 @@ class SCOPED_LOCKABLE AutoSharedLock {
  public:
   // Does not take ownership of |lock|, which must refer to a valid
   // ReadWriteLock that outlives this object.
-  explicit AutoSharedLock(const ReadWriteLock* lock) SHARED_LOCK_FUNCTION(lock)
-      : lock_(*lock) {
-    lock_.AcquireShared();
+  explicit AutoSharedLock(ReadWriteLock* lock) SHARED_LOCK_FUNCTION(lock)
+      : lock_(lock) {
+    lock_->AcquireShared();
   }
 
   ~AutoSharedLock() UNLOCK_FUNCTION() {
-    lock_.ReleaseShared();
+    lock_->ReleaseShared();
   }
 
  private:
-  const ReadWriteLock& lock_;
+  ReadWriteLock* lock_;
   DISALLOW_COPY_AND_ASSIGN(AutoSharedLock);
 };
 
 // POSIX conditional variable
 class ConditionVariable {
  public:
-  explicit ConditionVariable(Lock* user_lock);
+  ConditionVariable();
   ~ConditionVariable();
 
-  void Wait();
+  void Wait(Lock* lock);
   void Signal();
   void Broadcast();
 
  private:
 #ifdef _WIN32
-  Lock* user_lock_;
   CONDITION_VARIABLE cv_;
 #else  // Assume POSIX
   pthread_cond_t condition_;
-  pthread_mutex_t* user_mutex_;
 #endif
   DISALLOW_COPY_AND_ASSIGN(ConditionVariable);
 };

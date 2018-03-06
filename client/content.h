@@ -9,8 +9,8 @@
 #include <memory>
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "basictypes.h"
-#include "string_piece.h"
 
 using std::string;
 
@@ -40,7 +40,9 @@ class Content final {
   static std::unique_ptr<Content> CreateFromFileDescriptor(
       const string& filepath, const ScopedFd& fd, size_t filesize);
 
-  StringPiece ToStringPiece() const { return StringPiece(buf_.get(), size()); }
+  absl::string_view ToStringView() const {
+    return absl::string_view(buf_.get(), size());
+  }
   const char* buf() const { return buf_.get(); }
   const char* buf_end() const { return buf_end_; }
   size_t size() const { return buf_end() - buf(); }

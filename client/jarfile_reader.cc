@@ -6,9 +6,9 @@
 
 #include <cstring>
 
+#include "absl/strings/match.h"
 #include "basictypes.h"
 #include "glog/logging.h"
-#include "string_piece_utils.h"
 
 namespace {
 
@@ -45,7 +45,7 @@ std::unique_ptr<FileReader> JarFileReader::Create(const std::string& filename) {
 
 /* static */
 bool JarFileReader::CanHandle(const std::string& filename) {
-  return strings::EndsWith(filename, ".jar");
+  return absl::EndsWith(filename, ".jar");
 }
 
 JarFileReader::JarFileReader(const std::string& filename)
@@ -64,7 +64,7 @@ JarFileReader::JarFileReader(const std::string& filename)
   // Some jar files used by Android build seems not be valid jar file but
   // we allow jarfile reader to normalize it if it looks like zip file.
   // (b/38329025)
-  if (strings::StartsWith(buffer_, "PK\x03\x04")) {
+  if (absl::StartsWith(buffer_, "PK\x03\x04")) {
     is_valid_ = true;
   }
   // Checks the Jar file magic string (0xcafe) existence.

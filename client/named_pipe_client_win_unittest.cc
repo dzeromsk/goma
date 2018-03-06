@@ -15,6 +15,12 @@
 
 namespace devtools_goma {
 
+namespace {
+
+const int kNamedPipeWaitTimeoutMs = 13000;
+
+}  // anonymous namespace
+
 class NamedPipeClientTest : public ::testing::Test {
  public:
   class MockHandler : public NamedPipeServer::Handler {
@@ -62,7 +68,7 @@ TEST(NamedPipeClientTest, Simple) {
   server.Start(kName);
 
   LOG(INFO) << "pipe clients starts";
-  NamedPipeFactory factory(kName);
+  NamedPipeFactory factory(kName, kNamedPipeWaitTimeoutMs);
   ScopedNamedPipe pipe = factory.New();
   if (!pipe.valid()) {
     LOG_SYSRESULT(GetLastError());
@@ -108,7 +114,7 @@ TEST(NamedPipeClientTest, LargeResponse) {
   server.Start(kName);
 
   LOG(INFO) << "pipe clients starts";
-  NamedPipeFactory factory(kName);
+  NamedPipeFactory factory(kName, kNamedPipeWaitTimeoutMs);
   ScopedNamedPipe pipe = factory.New();
   if (!pipe.valid()) {
     LOG_SYSRESULT(GetLastError());
@@ -170,7 +176,7 @@ TEST(NamedPipeClientTest, LargeResponseThanOutputBuffer) {
   server.Start(kName);
 
   LOG(INFO) << "pipe clients starts";
-  NamedPipeFactory factory(kName);
+  NamedPipeFactory factory(kName, kNamedPipeWaitTimeoutMs);
   ScopedNamedPipe pipe = factory.New();
   if (!pipe.valid()) {
     LOG_SYSRESULT(GetLastError());
@@ -233,7 +239,7 @@ TEST(NamedPipeClientTest, Timeout) {
   server.Start(kName);
 
   LOG(INFO) << "pipe clients starts";
-  NamedPipeFactory factory(kName);
+  NamedPipeFactory factory(kName, kNamedPipeWaitTimeoutMs);
   ScopedNamedPipe pipe = factory.New();
   if (!pipe.valid()) {
     LOG_SYSRESULT(GetLastError());

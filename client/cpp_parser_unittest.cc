@@ -856,6 +856,70 @@ TEST_F(CppParserTest, BoolShouldBeOverriddenAndPossibleToUndefOnFalseCase) {
   EXPECT_FALSE(cpp_parser.IsMacroDefined("bar"));
 }
 
+TEST_F(CppParserTest, CharToken) {
+  CppParser cpp_parser;
+
+  // non-ASCII system is not supported.
+  cpp_parser.AddStringInput("#if 'A' == 65\n"
+                            "#define foo_true\n"
+                            "#else\n"
+                            "#define foo_false\n"
+                            "#endif\n"
+
+                            "#if 39 == '\\''\n"
+                            "#define bar_true\n"
+                            "#else\n"
+                            "#define bar_false\n"
+                            "#endif\n"
+
+                            "#if '*' == 42\n"
+                            "#define OPERATOR_OK\n"
+                            "#endif\n"
+
+                            "#if '0' == 48\n"
+                            "#define DIGIT_OK\n"
+                            "#endif\n"
+
+                            "#if ' ' == 32 && ' ' == 0x20 && ' ' == 040\n"
+                            "#define SPACE_OK\n"
+                            "#endif\n"
+
+                            "#if '\\0' == 0\n"
+                            "#define ZERO_OK\n"
+                            "#endif\n"
+
+                            "#if '\\n' == 10\n"
+                            "#define LF_OK\n"
+                            "#endif\n"
+
+                            // macro in lua's lctype.h
+                            "#if 'A' == 65 && '0' == 48\n"
+                            "#define LUA_USE_CTYPE 0\n"
+                            "#else\n"
+                            "#define LUA_USE_CTYPE 1\n"
+                            "#endif\n"
+
+                            "#if !LUA_USE_CTYPE\n"
+                            "#define INCLUDE_LLIMITS\n"
+                            "#endif\n",
+
+                            "baz.cc");
+  cpp_parser.ProcessDirectives();
+
+  EXPECT_TRUE(cpp_parser.IsMacroDefined("foo_true"));
+  EXPECT_FALSE(cpp_parser.IsMacroDefined("foo_false"));
+  EXPECT_TRUE(cpp_parser.IsMacroDefined("bar_true"));
+  EXPECT_FALSE(cpp_parser.IsMacroDefined("bar_false"));
+
+  EXPECT_TRUE(cpp_parser.IsMacroDefined("OPERATOR_OK"));
+  EXPECT_TRUE(cpp_parser.IsMacroDefined("DIGIT_OK"));
+  EXPECT_TRUE(cpp_parser.IsMacroDefined("SPACE_OK"));
+  EXPECT_TRUE(cpp_parser.IsMacroDefined("ZERO_OK"));
+  EXPECT_TRUE(cpp_parser.IsMacroDefined("LF_OK"));
+
+  EXPECT_TRUE(cpp_parser.IsMacroDefined("INCLUDE_LLIMITS"));
+}
+
 TEST_F(CppParserTest, MacroSetChanged) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);

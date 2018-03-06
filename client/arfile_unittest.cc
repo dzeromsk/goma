@@ -12,7 +12,7 @@
 #ifndef _WIN32
 #include <unistd.h>
 #else
-# include "string_piece.h"
+# include "absl/strings/string_view.h"
 # include "config_win.h"
 #endif
 #ifdef __MACH__

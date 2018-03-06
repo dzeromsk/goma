@@ -8,6 +8,9 @@
 
 #ifdef _WIN32
 #pragma once
+
+#include <Winsock2.h>
+
 #include "config_win.h"
 #else
 #include <unistd.h>
@@ -17,8 +20,8 @@
 #include <string>
 
 
+#include "absl/strings/string_view.h"
 #include "basictypes.h"
-#include "string_piece.h"
 using std::string;
 
 namespace devtools_goma {
@@ -134,7 +137,11 @@ class IOChannel {
 
 class ScopedSocket : public IOChannel {
  public:
+#ifdef _WIN32
+  ScopedSocket() : fd_(INVALID_SOCKET) {}
+#else
   ScopedSocket() : fd_(-1) {}
+#endif
   explicit ScopedSocket(int fd) : fd_(fd) {}
   ScopedSocket(ScopedSocket&& other) : fd_(other.release()) {}
   ~ScopedSocket() override;
@@ -165,9 +172,16 @@ class ScopedSocket : public IOChannel {
   bool SetNonBlocking() const;
   bool SetReuseAddr() const;
 
-  bool valid() const { return fd_ >= 0; }
+#ifdef _WIN32
+  SOCKET get() const { return fd_; }
+  bool valid() const { return fd_ != INVALID_SOCKET; }
+  SOCKET release() { SOCKET fd = fd_; fd_ = INVALID_SOCKET; return fd; }
+#else
   int get() const { return fd_; }
+  bool valid() const { return fd_ >= 0; }
   int release() { int fd = fd_; fd_ = -1; return fd; }
+#endif
+
   void reset(int fd);
   // Returns true on success or already closed.
   bool Close();
@@ -177,7 +191,11 @@ class ScopedSocket : public IOChannel {
   }
 
  private:
+#ifdef _WIN32
+  SOCKET fd_;
+#else
   int fd_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(ScopedSocket);
 };

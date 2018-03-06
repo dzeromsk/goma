@@ -15,7 +15,10 @@
 #include <memory>
 #include <set>
 #include <sstream>
+#include <unordered_map>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_split.h"
 #include "autolock_timer.h"
 #include "cmdline_parser.h"
 #include "compiler_flags.h"
@@ -33,8 +36,6 @@
 #include "path_resolver.h"
 #include "path_util.h"
 #include "scoped_tmp_file.h"
-#include "split.h"
-#include "string_piece_utils.h"
 #include "util.h"
 
 #ifdef _WIN32
@@ -83,7 +84,7 @@ void GetFileIdFromData(const CompilerInfoData::FileId& data,
 // Returns false if calculating sha256 hash from |path| failed.
 bool GetHashFromCacheOrFile(const string& path,
                             string* hash,
-                            unordered_map<string, string>* sha256_cache) {
+                            std::unordered_map<string, string>* sha256_cache) {
   auto it = sha256_cache->find(path);
   if (it != sha256_cache->end()) {
     *hash = it->second;
@@ -207,16 +208,16 @@ static bool GetGccTarget(const string& bare_gcc,
 
 static bool ParseDriverArgs(const string& display_output,
                             std::vector<string>* driver_args) {
-  StringPiece buf(display_output);
+  absl::string_view buf(display_output);
   size_t pos;
   do {
     pos = buf.find_first_of("\n");
-    StringPiece line = buf.substr(0, pos);
+    absl::string_view line = buf.substr(0, pos);
     buf.remove_prefix(pos + 1);
     if (line[0] == ' ') {
       return ParsePosixCommandLineToArgv(string(line), driver_args);
     }
-  } while (pos != StringPiece::npos);
+  } while (pos != absl::string_view::npos);
   return false;
 }
 
@@ -614,7 +615,7 @@ bool CompilerInfoBuilder::SplitGccIncludeOutput(
     std::vector<string>* qpaths,
     std::vector<string>* paths,
     std::vector<string>* framework_paths) {
-  // TODO: use StringPiece for gcc_v_output etc.
+  // TODO: use absl::string_view for gcc_v_output etc.
 
   static const string kQStartMarker("#include \"...\" search starts here:");
   static const string kStartMarker("#include <...> search starts here:");
@@ -635,10 +636,10 @@ bool CompilerInfoBuilder::SplitGccIncludeOutput(
             start_pos - qstart_pos - kQStartMarker.size()));
     VLOG(2) << "extracted qsearch paths [" << gcc_v_qsearch_paths << "]";
     qpaths->clear();
-    std::vector<string> split_qpaths;
-    SplitStringUsing(gcc_v_qsearch_paths, "\r\n", &split_qpaths);
-    for (const auto& split_qpath : split_qpaths) {
-      StringPiece qpath = StringStrip(split_qpath);
+    for (auto&& split_qpath : absl::StrSplit(gcc_v_qsearch_paths,
+                                             absl::ByAnyChar("\r\n"),
+                                             absl::SkipEmpty())) {
+      absl::string_view qpath = StringStrip(split_qpath);
       if (!qpath.empty()) {
         qpaths->emplace_back(string(qpath));
       }
@@ -651,13 +652,13 @@ bool CompilerInfoBuilder::SplitGccIncludeOutput(
           end_pos - start_pos - kStartMarker.size()));
   VLOG(2) << "extracted search paths [" << gcc_v_search_paths << "]";
   paths->clear();
-  std::vector<string> split_paths;
-  SplitStringUsing(gcc_v_search_paths, "\r\n", &split_paths);
-  for (const auto& split_path : split_paths) {
-    StringPiece path = StringStrip(split_path);
+  for (auto&& split_path : absl::StrSplit(gcc_v_search_paths,
+                                          absl::ByAnyChar("\r\n"),
+                                          absl::SkipEmpty())) {
+    absl::string_view path = StringStrip(split_path);
     if (!path.empty()) {
       static const char* kFrameworkMarker = "(framework directory)";
-      if (strings::EndsWith(path, kFrameworkMarker)) {
+      if (absl::EndsWith(path, kFrameworkMarker)) {
         if (framework_paths) {
           path.remove_suffix(strlen(kFrameworkMarker));
           path = StringStrip(path);
@@ -688,15 +689,11 @@ bool CompilerInfoBuilder::ParseFeatures(
       features.second + extensions.second + attributes.second +
       cpp_attributes.second + declspec_attributes.second +
       builtins.second;
-  std::vector<string> lines;
-  SplitStringUsing(feature_output, "\n", &lines);
-
+  std::vector<string> lines = ToVector(
+      absl::StrSplit(feature_output, '\n', absl::SkipEmpty()));
   size_t index = 0;
   int expected_index = -1;
   for (const auto& line : lines) {
-    if (line.empty())
-      continue;
-
     if (line[0] == '#' && line.size() > 3) {
       // expects:
       // # <number> "<filename>"
@@ -891,14 +888,18 @@ bool CompilerInfoBuilder::GetPredefinedFeaturesAndExtensions(
     oss << '#' << ++index << '\n';
     oss << string("__has_attribute(") << KNOWN_ATTRIBUTES[i] << ")\n";
   }
-  // Check this only in c++ mode. In c mode, preprocess will fail.
+  // If the attributes has "::", gcc fails in C-mode,
+  // but works on C++ mode. So, when "::" is detected, we ignore it in C mode.
+  // :: can be used like "clang::", "gsl::"
   for (size_t i = 0; i < NUM_KNOWN_CPP_ATTRIBUTES; i++) {
     // Specify the line number to tell pre-processor to output newlines.
     oss << '#' << ++index << '\n';
-    if (lang_flag == "-xc++")
-      oss << string("__has_cpp_attribute(") << KNOWN_CPP_ATTRIBUTES[i] << ")\n";
-    else
+    if (lang_flag == "-xc++" ||
+        strchr(KNOWN_CPP_ATTRIBUTES[i], ':') == nullptr) {
+      oss << "__has_cpp_attribute(" << KNOWN_CPP_ATTRIBUTES[i] << ")\n";
+    } else {
       oss << "0\n";
+    }
   }
   for (size_t i = 0; i < NUM_KNOWN_DECLSPEC_ATTRIBUTES; i++) {
     oss << '#' << ++index << '\n';
@@ -964,6 +965,9 @@ bool CompilerInfoBuilder::GetPredefinedFeaturesAndExtensions(
       << " env=" << env
       << " cwd=" << cwd
       << " out=" << out;
+  if (status != 0) {
+    return false;
+  }
 
   FeatureList object_macros = std::make_pair(
       kPredefinedObjectMacros, kPredefinedObjectMacroSize);
@@ -1104,13 +1108,13 @@ bool CompilerInfoBuilder::GetExtraSubprograms(
   }
   for (const auto& path : subprogram_paths) {
     bool may_register = false;
-    if (no_integrated_as && strings::EndsWith(path, "as")) {
+    if (no_integrated_as && absl::EndsWith(path, "as")) {
       may_register = true;
     } else {
       // List only subprograms under -B path for backward compatibility.
       // See b/63082235
       for (const string& b : B_options) {
-        if (strings::StartsWith(path, b)) {
+        if (absl::StartsWith(path, b)) {
           may_register = true;
           break;
         }
@@ -1188,18 +1192,18 @@ void CompilerInfoBuilder::ParseGetSubprogramsOutput(
     "as", "objcopy", "cc1", "cc1plus", "cpp", "nm"};
   std::set<string> known;
 
-  std::vector<string> lines;
-  SplitStringUsing(gcc_output, "\r\n", &lines);
-  for (const auto& line : lines) {
-    if (line.empty() || line[0] != ' ')
+  for (auto&& line : absl::StrSplit(gcc_output,
+                                    absl::ByAnyChar("\r\n"),
+                                    absl::SkipEmpty())) {
+    if (line[0] != ' ')
       continue;
     std::vector<string> argv;
     // Since clang is not used on Windows now, this won't be the issue.
-    ParsePosixCommandLineToArgv(line, &argv);
+    ParsePosixCommandLineToArgv(string(line), &argv);
     if (argv.size() == 0)
       continue;
     const string& cmd = argv[0];
-    StringPiece basename = file::Basename(cmd);
+    absl::string_view basename = file::Basename(cmd);
     if (basename == cmd) {
       // To keep backword compatibility, we do not add subprogram searched
       // in PATH.
@@ -1212,7 +1216,7 @@ void CompilerInfoBuilder::ParseGetSubprogramsOutput(
     }
     for (const auto& candidate : candidates) {
       if (basename == candidate ||
-          strings::EndsWith(basename, "-" + candidate)) {
+          absl::EndsWith(basename, "-" + candidate)) {
         paths->push_back(cmd);
         break;
       }
@@ -1302,8 +1306,8 @@ bool CompilerInfoBuilder::GetSubprograms(
 bool CompilerInfoBuilder::HasAsPath(
     const std::vector<string>& subprogram_paths) {
   for (const auto& path : subprogram_paths) {
-    StringPiece basename = file::Basename(path);
-    if (basename == "as" || strings::EndsWith(basename, "-as")) {
+    absl::string_view basename = file::Basename(path);
+    if (basename == "as" || absl::EndsWith(basename, "-as")) {
       return true;
     }
   }
@@ -1311,13 +1315,13 @@ bool CompilerInfoBuilder::HasAsPath(
 }
 
 /* static */
-string CompilerInfoBuilder::ParseRealClangPath(StringPiece v_out) {
-  StringPiece::size_type pos = v_out.find_first_of('"');
-  if (pos == StringPiece::npos)
+string CompilerInfoBuilder::ParseRealClangPath(absl::string_view v_out) {
+  absl::string_view::size_type pos = v_out.find_first_of('"');
+  if (pos == absl::string_view::npos)
     return "";
   v_out.remove_prefix(pos + 1);
   pos = v_out.find_first_of('"');
-  if (pos == StringPiece::npos)
+  if (pos == absl::string_view::npos)
     return "";
   v_out = v_out.substr(0, pos);
   if (!CompilerFlags::IsClangCommand(v_out))
@@ -1483,9 +1487,9 @@ string CompilerInfoBuilder::GetRealSubprogramPath(
       file::Dirname(file::Dirname(subprog_path))) != "binutils-bin") {
     return subprog_path;
   }
-  StringPiece dirname = file::Dirname(subprog_path);
+  absl::string_view dirname = file::Dirname(subprog_path);
   static const char kGoldSuffix[] = "-gold";
-  if (strings::EndsWith(dirname, kGoldSuffix)) {
+  if (absl::EndsWith(dirname, kGoldSuffix)) {
     dirname.remove_suffix(sizeof(kGoldSuffix) - 1);
   }
   const string new_subprog_path = file::JoinPath(dirname, "objcopy.elf");
@@ -1509,7 +1513,7 @@ bool CompilerInfoBuilder::ParseJavacVersion(const string& version_info,
   version->assign(string(StringRstrip(version_info)));
   static const char kJavac[] = "javac ";
   static const size_t kJavacLength = sizeof(kJavac) - 1;  // Removed '\0'.
-  if (!strings::StartsWith(*version, kJavac)) {
+  if (!absl::StartsWith(*version, kJavac)) {
     LOG(ERROR) << "Unable to parse javac -version output:"
                << *version;
     return false;
@@ -1643,11 +1647,11 @@ bool CompilerInfoBuilder::ParseClangVersionTarget(
     const string& sharp_output,
     string* version, string* target) {
   static const char* kTarget = "Target: ";
-  std::vector<string> lines;
-  SplitStringUsing(sharp_output, "\r\n", &lines);
+  std::vector<string> lines = ToVector(
+      absl::StrSplit(sharp_output, absl::ByAnyChar("\r\n"), absl::SkipEmpty()));
   if (lines.size() < 2)
     return false;
-  if (!strings::StartsWith(lines[1], kTarget))
+  if (!absl::StartsWith(lines[1], kTarget))
     return false;
   version->assign(lines[0]);
   target->assign(lines[1].substr(strlen(kTarget)));
@@ -1693,14 +1697,13 @@ bool CompilerInfoBuilder::ParseClangTidyVersionTarget(const string& output,
   static const char kVersion[] = "  LLVM version ";
   static const char kTarget[] = "  Default target: ";
 
-  std::vector<string> lines;
-  SplitStringUsing(output, "\r\n", &lines);
-
+  std::vector<string> lines = ToVector(
+      absl::StrSplit(output, absl::ByAnyChar("\r\n"), absl::SkipEmpty()));
   if (lines.size() < 4)
     return false;
-  if (!strings::StartsWith(lines[1], kVersion))
+  if (!absl::StartsWith(lines[1], kVersion))
     return false;
-  if (!strings::StartsWith(lines[3], kTarget))
+  if (!absl::StartsWith(lines[3], kTarget))
     return false;
 
   *version = lines[1].substr(strlen(kVersion));
@@ -1927,6 +1930,10 @@ bool CompilerInfoBuilder::SetBasicCompilerInfo(
                                           compiler_info_envs,
                                           cwd,
                                           compiler_info)) {
+    AddErrorMessage(
+        "failed to get predefined features and extensions for "
+            + local_compiler_path,
+        compiler_info);
     LOG(ERROR) << "Failed to get predefined features and extensions."
                << " local_compiler_path=" << local_compiler_path
                << " lang_flag=" << lang_flag;
@@ -2250,7 +2257,7 @@ bool CompilerInfoBuilder::RewriteHashUnlocked(
 }
 
 std::string CompilerInfoBuilder::GetCompilerName(const CompilerInfoData& data) {
-  StringPiece base = file::Basename(data.local_compiler_path());
+  absl::string_view base = file::Basename(data.local_compiler_path());
   if (base != "cc" && base != "c++") {
     // We can simply use local_compiler_path for judging compiler name
     // if basename is not "cc" or "c++".
@@ -2359,7 +2366,7 @@ bool CompilerInfo::IsUpToDate(const string& local_compiler_path) const {
 }
 
 bool CompilerInfo::UpdateFileIdIfHashMatch(
-    unordered_map<string, string>* sha256_cache) {
+    std::unordered_map<string, string>* sha256_cache) {
   // Checks real compiler hash and subprogram hash.
   // If they are all matched, we update FileId.
 
@@ -2703,7 +2710,7 @@ void CompilerInfoState::Use(const string& local_compiler_path,
   // (key: value), so I gave it up to make a neat Printer with
   // TextFormat::Printer.
   string info = compiler_info_.DebugString();
-  StringPiece piece(info);
+  absl::string_view piece(info);
 
   LOG(INFO) << "compiler_info_state=" << this
             << " path=" << local_compiler_path

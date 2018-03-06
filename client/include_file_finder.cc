@@ -4,13 +4,14 @@
 
 #include "include_file_finder.h"
 
+#include "absl/strings/match.h"
+#include "counterz.h"
 #include "cpp_parser.h"
 #include "file_dir.h"
 #include "file_id_cache.h"
 #include "include_file_utils.h"
 #include "path.h"
 #include "path_resolver.h"
-#include "string_piece_utils.h"
 
 namespace devtools_goma {
 
@@ -46,6 +47,7 @@ IncludeFileFinder::IncludeFileFinder(
     FileIdCache* file_id_cache)
     : cwd_(cwd), ignore_case_(ignore_case), include_dirs_(include_dirs),
       framework_dirs_(framework_dirs), file_id_cache_(file_id_cache) {
+  GOMA_COUNTERZ("IncludeFileFinder");
 
   files_in_include_dirs_.resize(include_dirs_->size());
 
@@ -55,7 +57,7 @@ IncludeFileFinder::IncludeFileFinder(
        i < include_dirs_->size(); ++i) {
     const std::string& abs_include_dir = file::JoinPathRespectAbsolute(
         cwd_, (*include_dirs)[i]);
-    if (strings::EndsWith(abs_include_dir, ".hmap")) {
+    if (absl::EndsWith(abs_include_dir, ".hmap")) {
       std::vector<std::pair<std::string, std::string>> entries;
       if (!ReadHeaderMapContent(abs_include_dir, &entries)) {
         LOG(WARNING) << "failed to load header map:" << abs_include_dir;
@@ -66,14 +68,11 @@ IncludeFileFinder::IncludeFileFinder(
         const string& key = entry.first;
         const string& filename = entry.second;
 
-        const string top = TopPathComponent(key, ignore_case_);
+        string top = TopPathComponent(key, ignore_case_);
 
         files_in_include_dirs_[i].insert(top);
 
-        if (include_dir_index_lowerbound_.find(top) ==
-            include_dir_index_lowerbound_.end()) {
-          include_dir_index_lowerbound_.insert(std::make_pair(top, i));
-        }
+        include_dir_index_lowerbound_.emplace(std::move(top), i);
 
         hmap_map_.insert(std::make_pair(
             std::make_pair(i, key), filename));
@@ -82,8 +81,11 @@ IncludeFileFinder::IncludeFileFinder(
     }
 
     std::vector<DirEntry> entries;
-    if (!ListDirectory(abs_include_dir, &entries)) {
-      continue;
+    {
+      GOMA_COUNTERZ("ListDirectory");
+      if (!ListDirectory(abs_include_dir, &entries)) {
+        continue;
+      }
     }
 
     for (const auto& entry : entries) {
@@ -94,10 +96,8 @@ IncludeFileFinder::IncludeFileFinder(
       }
 
       files_in_include_dirs_[i].insert(name);
-      if (include_dir_index_lowerbound_.find(name) ==
-          include_dir_index_lowerbound_.end()) {
-        include_dir_index_lowerbound_.insert(std::make_pair(name, i));
-      }
+
+      include_dir_index_lowerbound_.emplace(std::move(name), i);
     }
   }
 }
@@ -127,6 +127,7 @@ bool IncludeFileFinder::Lookup(
     const string& path_in_directive,
     string* filepath,
     int* include_dir_index) {
+  GOMA_COUNTERZ("Lookup");
 
   {
     // Check cache.
@@ -156,7 +157,7 @@ bool IncludeFileFinder::Lookup(
     if (iter != include_dir_index_lowerbound_.end()) {
       search_start_index = std::max(search_start_index, iter->second);
     } else if (!gch_hack_enabled() &&
-               !strings::StartsWith(path_in_directive, ".")) {
+               !absl::StartsWith(path_in_directive, ".")) {
       // Do not search entry that is not in include_dirs.
       // If |top| is not in |ininclude_dir_index_lowerbound_|,
       // it means that |path_in_directive| is not in include directories.
@@ -175,7 +176,7 @@ bool IncludeFileFinder::Lookup(
     // If |top| starts from "." or "..", cannot skip include directory check
     // because it may point to some sibling directory
     // that not in |files_in_include_dirs_|.
-    if (!strings::StartsWith(top, ".") &&
+    if (!absl::StartsWith(top, ".") &&
         files_in_include_dirs_[i].find(top) ==
         files_in_include_dirs_[i].end()) {
       continue;

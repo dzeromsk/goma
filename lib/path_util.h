@@ -6,7 +6,7 @@
 #define DEVTOOLS_GOMA_LIB_PATH_UTIL_H_
 
 
-#include "string_piece.h"
+#include "absl/strings/string_view.h"
 
 namespace devtools_goma {
 

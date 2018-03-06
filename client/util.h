@@ -186,4 +186,19 @@ void UnorderedMapReserve(size_t size, UnorderedMap* m) {
   m->rehash(std::ceil(size / m->max_load_factor()));
 }
 
+// Convert absl::StrSplit result to std::vector<string>
+// Because of clang-cl.exe bug, we cannot write
+// std::vector<string> vs = absl::StrSplit(...);
+// This function provides an wrapper to avoid this bug.
+// After clang-cl.exe or absl has been fixed, this function be removed.
+// See b/73514249 for more detail.
+template<typename SplitResult>
+std::vector<string> ToVector(SplitResult split_result) {
+  std::vector<string> result;
+  for (auto&& s : split_result) {
+    result.push_back(string(s));
+  }
+  return result;
+}
+
 #endif  // DEVTOOLS_GOMA_CLIENT_UTIL_H_

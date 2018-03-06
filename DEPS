@@ -43,7 +43,7 @@ deps = {
 
      # chrome's deps/third_party/boringssl
      "client/third_party/boringssl/src":
-     "https://boringssl.googlesource.com/boringssl@650d8c393e132669dc55462d70e801e06104e99e",
+     "https://boringssl.googlesource.com/boringssl@f8058d41147543d6ad9a5ae5d70e7d19198bbe33",
 
      # google-breakpad
      "client/third_party/breakpad/breakpad":
@@ -74,6 +74,14 @@ deps = {
      "client/third_party/libFuzzer/src":
      Var("chromium_git") + "/chromium/llvm-project/llvm/lib/Fuzzer.git@" +
          "9aa0bddeb6820f6e5d897da410e1e8a3f7fd4b8e",
+
+     # abseil
+     "client/third_party/abseil/src":
+     "https://github.com/abseil/abseil-cpp.git@055cc7dce10aa6bd7cc2ef64e0fe453fb792da62",
+
+     # cctz (abseil needs this)
+     "client/third_party/cctz/src":
+     "https://github.com/google/cctz.git@e19879df3a14791b7d483c359c4acd6b2a1cd96b",
 }
 
 hooks = [

@@ -218,6 +218,13 @@ message ExecResp {
     OK = 0;
     BAD_REQUEST = -1;  // Non retryable error.
   };
+  // Specifies the reason of ExecError::BAD_REQUEST.
+  enum BadRequestReasonCode {
+    // The reason is unknown (or not BAD_REQUEST)
+    UNKNOWN = 0;
+    // The request contains unsupported (e.g. blacklisted) compiler flags.
+    UNSUPPORTED_COMPILER_FLAGS = 1;
+  };
   enum CacheSource {
     NO_CACHE = 0;
     MEM_CACHE = 1;
@@ -225,6 +232,7 @@ message ExecResp {
   };
   optional ExecResult result = 1;
   optional ExecError error = 2 [default=OK];
+  optional BadRequestReasonCode bad_request_reason_code = 3 [default=UNKNOWN];
 
   repeated string missing_input = 11;  // filename
   repeated string missing_reason = 15;  // reasons of missing_input.

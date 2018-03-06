@@ -9,15 +9,15 @@
 
 #include <deque>
 #include <memory>
-#include <set>
 #include <string>
+#include <unordered_set>
 
 #include <AccCtrl.h>
 #include <Aclapi.h>
 
+#include "absl/strings/string_view.h"
 #include "lockhelper.h"
 #include "named_pipe_win.h"
-#include "string_piece.h"
 #include "worker_thread_manager.h"
 
 namespace devtools_goma {
@@ -31,8 +31,8 @@ class NamedPipeServer {
   class Request {
    public:
     virtual ~Request() {}
-    virtual StringPiece request_message() const = 0;
-    virtual void SendReply(StringPiece reply) = 0;
+    virtual absl::string_view request_message() const = 0;
+    virtual void SendReply(absl::string_view reply) = 0;
     virtual void NotifyWhenClosed(OneshotClosure* callback) = 0;
   };
   class Handler {
@@ -90,13 +90,13 @@ class NamedPipeServer {
   ScopedFd flush_;
   ScopedFd flusher_done_;
 
-  Lock mu_;
-  std::set<Conn*> actives_;
-  std::set<Conn*> watches_;
-  std::deque<Conn*> replies_;
-  std::set<Conn*> finished_;
-  std::set<Conn*> flushes_;
-  bool shutting_down_;
+  mutable Lock mu_;
+  std::unordered_set<Conn*> actives_ GUARDED_BY(mu_);
+  std::unordered_set<Conn*> watches_ GUARDED_BY(mu_);
+  std::deque<Conn*> replies_ GUARDED_BY(mu_);
+  std::unordered_set<Conn*> finished_ GUARDED_BY(mu_);
+  std::unordered_set<Conn*> flushes_ GUARDED_BY(mu_);
+  bool shutting_down_ GUARDED_BY(mu_);
 };
 
 }  // namespace devtools_goma

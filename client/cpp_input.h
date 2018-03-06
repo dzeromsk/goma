@@ -21,7 +21,7 @@ class CppInput {
            int include_dir_index)
       : filepath_(filepath),
         directory_(directory), include_dir_index_(include_dir_index),
-        stream_(std::move(content), fileid) {
+        stream_(std::move(content), fileid, filepath) {
   }
 
   const string& filepath() const { return filepath_; }

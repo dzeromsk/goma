@@ -10,7 +10,7 @@
 
 #include "glog/logging.h"
 
-#include "string_piece.h"
+#include "absl/strings/string_view.h"
 
 namespace devtools_goma {
 
@@ -18,7 +18,7 @@ struct CppToken {
   enum Type {
     IDENTIFIER, STRING, NUMBER, SHARP, DOUBLESHARP, TRIPLEDOT,
     SPACE, NEWLINE, ESCAPED, PUNCTUATOR, END, MACRO_PARAM,
-    MACRO_PARAM_VA_ARGS,
+    MACRO_PARAM_VA_ARGS, CHAR_LITERAL,
 
     // Operators
     OP_BEGIN,
@@ -41,7 +41,7 @@ struct CppToken {
   CppToken(Type type, int i) : type(type) {
     v.int_value = i;
   }
-  CppToken(Type type, StringPiece s) : type(type), string_value(s) {}
+  CppToken(Type type, absl::string_view s) : type(type), string_value(s) {}
 
   bool operator==(const CppToken& other) const {
     if (type != other.type) {

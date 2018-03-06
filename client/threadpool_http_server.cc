@@ -32,6 +32,7 @@
 #include <sstream>
 #include <vector>
 
+#include "absl/strings/str_split.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_proxy_info.h"
@@ -49,9 +50,8 @@
 #include "platform_thread.h"
 #include "scoped_fd.h"
 #include "simple_timer.h"
-#include "split.h"
-#include "strutil.h"
 #include "trustedipsmanager.h"
+#include "util.h"
 #include "worker_thread_manager.h"
 
 #define BACKLOG 128
@@ -74,7 +74,7 @@ ThreadpoolHttpServer::ThreadpoolHttpServer(const string& listen_addr,
       num_http_threads_(num_threads),
       http_handler_(http_handler), monitor_(nullptr),
       trustedipsmanager_(nullptr),
-      max_num_sockets_(max_num_sockets), cond_(&mu_),
+      max_num_sockets_(max_num_sockets),
       idle_counting_(true),
       last_closure_id_(kInvalidClosureId) {
   for (int i = 0; i < NUM_SOCKET_TYPES; ++i) {
@@ -235,16 +235,17 @@ void ThreadpoolHttpServer::SetAcceptLimit(int n, SocketType socket_type) {
 
 /* static */
 bool ThreadpoolHttpServer::ParseRequestLine(
-    StringPiece request, string* method, string* req_path, string* query) {
+    absl::string_view request, string* method,
+    string* req_path, string* query) {
   // Find the first request string which would look like
   // 'GET / HTTP/1.1\r\n'
-  StringPiece::size_type pos = request.find("\r\n");
-  if (pos == StringPiece::npos) {
+  absl::string_view::size_type pos = request.find("\r\n");
+  if (pos == absl::string_view::npos) {
     return false;
   }
   const string firstline = string(request.substr(0, pos));
-  std::vector<string> method_path_protocol;
-  SplitStringUsing(firstline, " ", &method_path_protocol);
+  std::vector<string> method_path_protocol = ToVector(
+      absl::StrSplit(firstline, ' ', absl::SkipEmpty()));
   if (method_path_protocol.size() != 3) {
     return false;
   }
@@ -586,7 +587,7 @@ void ThreadpoolHttpServer::RequestFromSocket::DoRead() {
     return;
   }
   request_len_ += r;
-  StringPiece req(request_.data(), request_len_);
+  absl::string_view req(request_.data(), request_len_);
   if (found_header ||
       FindContentLengthAndBodyOffset(
           req, &request_content_length_, &request_offset_,
@@ -938,7 +939,7 @@ int ThreadpoolHttpServer::Loop() {
       return 0;
     }
     fd_set read_fd;
-    int max_fd = incoming_socket.get();
+    auto max_fd = incoming_socket.get();
     FD_ZERO(&read_fd);
     MSVC_PUSH_DISABLE_WARNING_FOR_FD_SET();
     FD_SET(incoming_socket.get(), &read_fd);
@@ -1039,7 +1040,7 @@ void ThreadpoolHttpServer::Wait() {
       }
     }
     if (busy) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
       continue;
     }
     LOG(INFO) << "All http requests done.";
@@ -1082,7 +1083,7 @@ void ThreadpoolHttpServer::AddAccept(SocketType socket_type) {
                  << " tcp:" << num_sockets_[SOCKET_TCP]
                  << " ipc:" << num_sockets_[SOCKET_IPC];
     // Wait some request finishes and release socket by RemoveAccept().
-    cond_.Wait();
+    cond_.Wait(&mu_);
   }
 }
 
@@ -1097,7 +1098,7 @@ void ThreadpoolHttpServer::WaitPortReady() {
   AUTOLOCK(lock, &mu_);
   while (!port_ready_) {
     LOG(INFO) << "http server is not yet ready";
-    cond_.Wait();
+    cond_.Wait(&mu_);
   }
 }
 

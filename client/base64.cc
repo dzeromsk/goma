@@ -6,8 +6,8 @@
 
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "basictypes.h"
-#include "string_piece.h"
 
 namespace devtools_goma {
 
@@ -16,7 +16,7 @@ static const char* kEncodeURL =
     "abcdefghijklmnopqrstuvwxyz"
     "0123456789-_";
 
-std::string Base64UrlEncode(StringPiece str, bool padding) {
+std::string Base64UrlEncode(absl::string_view str, bool padding) {
   if (str.empty()) {
     return "";
   }

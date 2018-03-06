@@ -15,7 +15,7 @@ namespace {
 
 // Appends |path2| to |path1|.
 // Assuming |path1| and |path2| are not empty.
-void AppendPath(string* path1, StringPiece path2) {
+void AppendPath(string* path1, absl::string_view path2) {
   DCHECK(!path1->empty());
   DCHECK(!path2.empty());
 
@@ -44,7 +44,7 @@ namespace file {
 
 namespace internal {
 
-string JoinPathImpl(std::initializer_list<StringPiece> paths) {
+string JoinPathImpl(std::initializer_list<absl::string_view> paths) {
   size_t cap = 0;
   for (const auto& path : paths) {
     cap += path.size() + 1;
@@ -66,7 +66,8 @@ string JoinPathImpl(std::initializer_list<StringPiece> paths) {
   return result;
 }
 
-string JoinPathRespectAbsoluteImpl(std::initializer_list<StringPiece> paths) {
+string JoinPathRespectAbsoluteImpl(
+    std::initializer_list<absl::string_view> paths) {
   string result;
   for (const auto& path : paths) {
     if (path.empty()) {
@@ -87,11 +88,11 @@ string JoinPathRespectAbsoluteImpl(std::initializer_list<StringPiece> paths) {
 
 }  // namespace internal
 
-StringPiece Basename(StringPiece fname) {
+absl::string_view Basename(absl::string_view fname) {
 #ifndef _WIN32
-  StringPiece::size_type pos = fname.find_last_of('/');
+  absl::string_view::size_type pos = fname.find_last_of('/');
   // Handle the case with no '/' in |fname|.
-  if (pos == StringPiece::npos)
+  if (pos == absl::string_view::npos)
     return fname;
   return fname.substr(pos + 1);
 #else
@@ -108,12 +109,12 @@ StringPiece Basename(StringPiece fname) {
 #endif
 }
 
-StringPiece Dirname(StringPiece fname) {
+absl::string_view Dirname(absl::string_view fname) {
 #ifndef _WIN32
-  StringPiece::size_type pos = fname.find_last_of('/');
+  absl::string_view::size_type pos = fname.find_last_of('/');
 
   // Handle the case with no '/' in 'path'.
-  if (pos == StringPiece::npos)
+  if (pos == absl::string_view::npos)
     return fname.substr(0, 0);
 
   // Handle the case with a single leading '/' in 'path'.
@@ -137,23 +138,23 @@ StringPiece Dirname(StringPiece fname) {
 #endif
 }
 
-StringPiece Stem(StringPiece fname) {
-  StringPiece path = Basename(fname);
-  StringPiece::size_type pos = path.find_last_of('.');
-  if (pos == StringPiece::npos)
+absl::string_view Stem(absl::string_view fname) {
+  absl::string_view path = Basename(fname);
+  absl::string_view::size_type pos = path.find_last_of('.');
+  if (pos == absl::string_view::npos)
     return path;
   return path.substr(0, pos);
 }
 
-StringPiece Extension(StringPiece fname) {
-  StringPiece path = Basename(fname);
-  StringPiece::size_type pos = path.find_last_of('.');
-  if (pos == StringPiece::npos)
+absl::string_view Extension(absl::string_view fname) {
+  absl::string_view path = Basename(fname);
+  absl::string_view::size_type pos = path.find_last_of('.');
+  if (pos == absl::string_view::npos)
     return fname.substr(fname.size());
   return path.substr(pos + 1);
 }
 
-bool IsAbsolutePath(StringPiece path) {
+bool IsAbsolutePath(absl::string_view path) {
 #ifndef _WIN32
   return !path.empty() && path[0] == '/';
 #else

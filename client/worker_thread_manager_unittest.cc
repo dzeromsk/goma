@@ -32,8 +32,7 @@ namespace devtools_goma {
 class WorkerThreadManagerTest : public ::testing::Test {
  public:
   WorkerThreadManagerTest()
-      : cond_(&mu_),
-        test_threadid_(0),
+      : test_threadid_(0),
         num_test_threadid_(0),
         periodic_counter_(0) {
   }
@@ -109,7 +108,7 @@ class WorkerThreadManagerTest : public ::testing::Test {
   void WaitTestRun() {
     AutoLock lock(&mu_);
     while (test_threadid_ == 0) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
   }
 
@@ -150,7 +149,7 @@ class WorkerThreadManagerTest : public ::testing::Test {
   void WaitTestThreadHandle(int num) {
     AutoLock lock(&mu_);
     while (num_test_threadid_ < num) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
   }
 
@@ -172,7 +171,7 @@ class WorkerThreadManagerTest : public ::testing::Test {
   void WaitTestPeriodicRun(int n) {
     AutoLock lock(&mu_);
     while (periodic_counter_ < n) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
   }
 
@@ -245,7 +244,7 @@ class WorkerThreadManagerTest : public ::testing::Test {
   void WaitTestRead(TestReadContext* tc, int n) {
     AutoLock lock(&mu_);
     while (tc->num_read_ != n) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
   }
 
@@ -294,7 +293,7 @@ class WorkerThreadManagerTest : public ::testing::Test {
   void WaitTestReadFinish(TestReadContext* tc) {
     AutoLock lock(&mu_);
     while (tc->d_ != nullptr) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
   }
 
@@ -366,7 +365,7 @@ class WorkerThreadManagerTest : public ::testing::Test {
   void WaitTestWrite(TestWriteContext* tc, int n) {
     AutoLock lock(&mu_);
     while (tc->num_write_ < n) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
   }
 
@@ -392,7 +391,7 @@ class WorkerThreadManagerTest : public ::testing::Test {
   void WaitTestWriteFinish(TestWriteContext* tc) {
     AutoLock lock(&mu_);
     while (tc->d_ != nullptr) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
   }
 
@@ -412,7 +411,7 @@ class WorkerThreadManagerTest : public ::testing::Test {
   }
 
   std::unique_ptr<WorkerThreadManager> wm_;
-  Lock mu_;
+  mutable Lock mu_;
 
  private:
   ConditionVariable cond_;

@@ -14,7 +14,12 @@
 #include <iterator>
 #include <memory>
 #include <set>
+#include <unordered_map>
 
+#include "absl/strings/ascii.h"
+#include "absl/strings/match.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "compiler_info.h"
 #include "compiler_specific.h"
 #include "content.h"
@@ -29,9 +34,6 @@
 #include "path.h"
 #include "path_resolver.h"
 #include "static_darray.h"
-#include "string_piece.h"
-#include "string_piece_utils.h"
-#include "string_util.h"
 #include "util.h"
 
 namespace {
@@ -126,6 +128,7 @@ class CppParser::IntegerConstantEvaluator {
           }
           break;
         case Token::NUMBER:
+        case Token::CHAR_LITERAL:
           result = token.v.int_value;
           break;
         case Token::SUB:
@@ -172,7 +175,7 @@ class CppParser::IntegerConstantEvaluator {
 #ifndef _WIN32
 pthread_once_t CppParser::key_once_ = PTHREAD_ONCE_INIT;
 #else
-INIT_ONCE CppParser::key_once_;
+INIT_ONCE CppParser::key_once_ = INIT_ONCE_STATIC_INIT;
 #endif
 
 bool CppParser::global_initialized_ = false;
@@ -277,6 +280,7 @@ void CppParser::SetCompilerInfo(const CompilerInfo* compiler_info) {
 }
 
 bool CppParser::ProcessDirectives() {
+  GOMA_COUNTERZ("ProcessDirectives");
   if (disabled_)
     return false;
   for (;;) {
@@ -327,7 +331,7 @@ int CppParser::NextDirective() {
         value = helper.GetValue();
         break;
       }
-      if (!IsAsciiAlphaDigit(c) && c != '_') {
+      if (!absl::ascii_isalnum(c) && c != '_') {
         current->stream()->UngetChar(c);
         value = helper.GetValue();
         break;
@@ -356,7 +360,7 @@ void CppParser::DeleteMacro(const string& name) {
     return;
   }
   VLOG(2) << "#UNDEF Macro " << name;
-  unordered_map<string, Macro>::iterator found = macros_->find(name);
+  std::unordered_map<string, Macro>::iterator found = macros_->find(name);
 
   if (found == macros_->end() || found->second.type == Macro::UNUSED ||
       found->second.type == Macro::UNDEFINED) {
@@ -449,13 +453,13 @@ string CppParser::DebugStringPrefix() {
   return str;
 }
 
-void CppParser::Error(StringPiece error) {
+void CppParser::Error(absl::string_view error) {
   if (!error_observer_)
     return;
   Error(error, "");
 }
 
-void CppParser::Error(StringPiece error, StringPiece arg) {
+void CppParser::Error(absl::string_view error, absl::string_view arg) {
   if (!error_observer_)
     return;
   string str;
@@ -463,8 +467,7 @@ void CppParser::Error(StringPiece error, StringPiece arg) {
   str.append("CppParser");
   str.append(DebugStringPrefix());
   str.append(" ");
-  error.AppendToString(&str);
-  arg.AppendToString(&str);
+  absl::StrAppend(&str, error, arg);
   error_observer_->HandleError(str);
 }
 
@@ -505,6 +508,7 @@ void CppParser::ProcessIncludeNext() {
 }
 
 void CppParser::ProcessDefine() {
+  GOMA_COUNTERZ("define");
   input()->include_guard_detector()->OnProcessOther();
   Token name = NextToken(true);
   if (name.type != Token::IDENTIFIER) {
@@ -532,6 +536,7 @@ void CppParser::ProcessDefine() {
 }
 
 void CppParser::ProcessUndef() {
+  GOMA_COUNTERZ("undef");
   input()->include_guard_detector()->OnProcessOther();
   Token name = NextToken(true);
   if (name.type != Token::IDENTIFIER) {
@@ -547,6 +552,7 @@ void CppParser::ProcessConditionInFalse() {
 }
 
 void CppParser::ProcessIfdef() {
+  GOMA_COUNTERZ("ifdef");
   input()->include_guard_detector()->OnProcessCondition();
   bool v = IsMacroDefined(ReadDefined());
   VLOG(2) << DebugStringPrefix() << " #IFDEF " << v;
@@ -554,6 +560,7 @@ void CppParser::ProcessIfdef() {
 }
 
 void CppParser::ProcessIfndef() {
+  GOMA_COUNTERZ("ifndef");
   string ident = ReadDefined();
   input()->include_guard_detector()->OnProcessIfndef(ident);
   bool v = !IsMacroDefined(ident);
@@ -562,6 +569,7 @@ void CppParser::ProcessIfndef() {
 }
 
 void CppParser::ProcessIf() {
+  GOMA_COUNTERZ("if");
   string ident;
   int v = ReadConditionWithCheckingIncludeGuard(&ident);
   input()->include_guard_detector()->OnProcessIf(ident);
@@ -570,6 +578,7 @@ void CppParser::ProcessIf() {
 }
 
 void CppParser::ProcessElse() {
+  GOMA_COUNTERZ("else");
   input()->include_guard_detector()->OnProcessOther();
   if (condition_in_false_depth_ > 0) {
     return;
@@ -583,6 +592,7 @@ void CppParser::ProcessElse() {
 }
 
 void CppParser::ProcessEndif() {
+  GOMA_COUNTERZ("endif");
   input()->include_guard_detector()->OnProcessEndif();
   if (condition_in_false_depth_) {
     --condition_in_false_depth_;
@@ -596,6 +606,7 @@ void CppParser::ProcessEndif() {
 }
 
 void CppParser::ProcessElif() {
+  GOMA_COUNTERZ("elif");
   input()->include_guard_detector()->OnProcessOther();
   if (condition_in_false_depth_ > 0) {
     return;
@@ -615,6 +626,7 @@ void CppParser::ProcessElif() {
 }
 
 void CppParser::ProcessPragma() {
+  GOMA_COUNTERZ("pragma");
   input()->include_guard_detector()->OnProcessOther();
   Token token(NextToken(true));
   if (token.type == Token::IDENTIFIER && token.string_value == "once") {
@@ -817,6 +829,7 @@ void CppParser::ProcessIncludeInternal(IncludeType include_type) {
 }
 
 void CppParser::ReadObjectMacro(const string& name) {
+  GOMA_COUNTERZ("ReadObjectMacro");
   const auto pos = input()->stream()->pos();
   const auto& fileid = input()->fileid();
 
@@ -855,10 +868,11 @@ void CppParser::ReadObjectMacro(const string& name) {
 }
 
 void CppParser::ReadFunctionMacro(const string& name) {
+  GOMA_COUNTERZ("ReadFunctionMacro");
   const auto pos = input()->stream()->pos();
   const auto& fileid = input()->fileid();
 
-  unordered_map<string, size_t> params;
+  std::unordered_map<string, size_t> params;
   size_t param_index = 0;
   bool is_vararg = false;
   for (;;) {
@@ -915,7 +929,7 @@ void CppParser::ReadFunctionMacro(const string& name) {
   Token token = NextToken(true);
   while (token.type != Token::NEWLINE && token.type != Token::END) {
     if (token.type == Token::IDENTIFIER) {
-      unordered_map<string, size_t>::iterator iter = params.find(
+      std::unordered_map<string, size_t>::iterator iter = params.find(
           token.string_value);
       if (iter != params.end()) {
         token.MakeMacroParam(iter->second);
@@ -1830,6 +1844,7 @@ std::pair<Macro*, bool> CppParser::AddMacro(
 std::pair<Macro*, bool> CppParser::AddMacroInternal(
     const string& name, Macro::Type type,
     const FileId& fileid, size_t macro_pos) {
+  GOMA_COUNTERZ("AddMacroInternal");
   DCHECK(!name.empty()) << "Adding a macro that does not have a name.";
 
   {
@@ -1855,7 +1870,8 @@ std::pair<Macro*, bool> CppParser::AddMacroInternal(
     }
   }
 
-  std::pair<unordered_map<string, Macro>::iterator, bool> result =
+  GOMA_COUNTERZ("insert macro");
+  std::pair<std::unordered_map<string, Macro>::iterator, bool> result =
       macros_->emplace(name, Macro(next_macro_id_++, type));
   result.first->second.fileid = fileid;
   result.first->second.macro_pos = macro_pos;
@@ -1865,7 +1881,9 @@ std::pair<Macro*, bool> CppParser::AddMacroInternal(
 
 
 Macro* CppParser::GetMacro(const string& name, bool add_undefined) {
-  unordered_map<string, Macro>::iterator found = macros_->find(name);
+  GOMA_COUNTERZ("GetMacro");
+
+  std::unordered_map<string, Macro>::iterator found = macros_->find(name);
   if (found == macros_->end() || found->second.type == Macro::UNUSED) {
     // Check predefined macros.
     {
@@ -1996,6 +2014,7 @@ CppParser::Token CppParser::ProcessHasIncludeNext(
 
 bool CppParser::ProcessHasIncludeInternal(const ArrayTokenList& tokens,
                                           bool is_include_next) {
+  GOMA_COUNTERZ("ProcessHasIncludeInternal");
   if (tokens.empty()) {
     Error("__has_include expects \"filename\" or <filename>");
     return false;
@@ -2046,7 +2065,9 @@ bool CppParser::ProcessHasIncludeInternal(const ArrayTokenList& tokens,
 CppParser::Token CppParser::ProcessHasCheckMacro(
     const string& name,
     const ArrayTokenList& tokens,
-    const unordered_map<string, int>& has_check_macro) {
+    const std::unordered_map<string, int>& has_check_macro) {
+  GOMA_COUNTERZ("ProcessHasCheckMacro");
+
   if (tokens.empty()) {
     Error(name + " expects an identifier");
     return Token(0);
@@ -2093,8 +2114,8 @@ CppParser::Token CppParser::ProcessHasCheckMacro(
 
   // Normalize the extension identifier.
   // '__feature__' is normalized to 'feature' in clang.
-  if (ident.size() >= 4 && strings::StartsWith(ident, "__")
-      && strings::EndsWith(ident, "__")) {
+  if (ident.size() >= 4 && absl::StartsWith(ident, "__")
+      && absl::EndsWith(ident, "__")) {
     ident.resize(ident.size() - 2);
     ident = ident.substr(2);
   }

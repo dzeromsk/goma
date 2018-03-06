@@ -33,6 +33,7 @@ int inet_aton(const char* input, struct in_addr* output) {
 // Original version:
 // https://github.com/ncm/selectable-socketpair/blob/master/socketpair.c
 // This implementation can only be blocking and is not select-able.
+// TODO: Use type SOCKET for socks[2] instead of type int.
 int socketpair(sa_family_t domain, int type, int protocol, int socks[2]) {
   union {
     struct sockaddr_in inaddr;
@@ -55,8 +56,8 @@ int socketpair(sa_family_t domain, int type, int protocol, int socks[2]) {
   addr.inaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.inaddr.sin_port = 0;
 
-  socks[0] = INVALID_SOCKET;
-  socks[1] = INVALID_SOCKET;
+  socks[0] = static_cast<int>(INVALID_SOCKET);
+  socks[1] = static_cast<int>(INVALID_SOCKET);
 
   int reuse = 1;
   for (;;) {
@@ -79,7 +80,7 @@ int socketpair(sa_family_t domain, int type, int protocol, int socks[2]) {
 
     socks[0] = static_cast<int>(WSASocket(
         domain, type, protocol, nullptr, 0, 0));
-    if (socks[0] == INVALID_SOCKET) {
+    if (socks[0] == static_cast<int>(INVALID_SOCKET)) {
       break;
     }
     if (connect(socks[0], &addr.addr, sizeof(addr.inaddr)) == SOCKET_ERROR) {
@@ -87,7 +88,7 @@ int socketpair(sa_family_t domain, int type, int protocol, int socks[2]) {
     }
 
     socks[1] = static_cast<int>(accept(listener, nullptr, nullptr));
-    if (socks[1] == INVALID_SOCKET) {
+    if (socks[1] == static_cast<int>(INVALID_SOCKET)) {
       break;
     }
     closesocket(listener);
@@ -115,7 +116,7 @@ class ServerThread : public devtools_goma::PlatformThread::Delegate {
     DCHECK(port != nullptr);
     *listener = INVALID_SOCKET;
     *port = 0;
-    sockaddr_in inaddr = {0};
+    sockaddr_in inaddr = {};
 
     while (*port == 0) {
       *listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -204,7 +205,7 @@ class ServerThread : public devtools_goma::PlatformThread::Delegate {
         sockaddr_in client_addr;
         socklen_t addr_len = sizeof(client_addr);
         s = accept(listener_, (sockaddr*)&client_addr, &addr_len);
-        if (s < 0) {
+        if (s == INVALID_SOCKET) {
           result_ = WSAGetLastError();
           if (result_ == WSAEWOULDBLOCK) {
             continue;
@@ -309,6 +310,7 @@ class ClientThread : public devtools_goma::PlatformThread::Delegate {
 
 }  // namespace
 
+// TODO: Use type SOCKET for socks[2].
 int async_socketpair(int socks[2]) {
   if (socks == nullptr) {
     WSASetLastError(WSA_INVALID_PARAMETER);
@@ -346,7 +348,7 @@ int async_socketpair(int socks[2]) {
       LOG(ERROR) << "client thread result=" << client.result();
     }
   } else {
-    socks[1] = INVALID_SOCKET;
+    socks[1] = static_cast<int>(INVALID_SOCKET);
     LOG(ERROR) << "client wait error: result=" << result;
   }
   result = WaitForSingleObject(server_thread_handle, INFINITE);
@@ -356,17 +358,18 @@ int async_socketpair(int socks[2]) {
       LOG(ERROR) << "server thread result=" << server.result();
     }
   } else {
-    socks[0] = INVALID_SOCKET;
+    socks[0] = static_cast<int>(INVALID_SOCKET);
     LOG(ERROR) << "server wait error: result=" << result;
   }
-  if (socks[0] != INVALID_SOCKET && socks[1] != INVALID_SOCKET) {
+  if (socks[0] != static_cast<int>(INVALID_SOCKET) &&
+      socks[1] != static_cast<int>(INVALID_SOCKET)) {
     return 0;
   }
   return SOCKET_ERROR;
 }
 
 WinsockHelper::WinsockHelper() : initialized_(false) {
-  WSADATA WSAData = { 0 };
+  WSADATA WSAData = {};
   if (WSAStartup(WSA_VERSION, &WSAData) != 0) {
     // Tell the user that we could not find a usable WinSock DLL.
     if (LOBYTE(WSAData.wVersion) != LOBYTE(WSA_VERSION) ||

@@ -65,7 +65,7 @@ class GomaIPCTest : public ::testing::Test {
 #ifdef _WIN32
   class NamedPipeChanFactory : public GomaIPC::ChanFactory {
    public:
-    NamedPipeChanFactory() : factory_(kNamedPipeName) {
+    NamedPipeChanFactory() : factory_(kNamedPipeName, 13000) {
     }
     ~NamedPipeChanFactory() override {}
 

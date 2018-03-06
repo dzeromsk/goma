@@ -38,7 +38,7 @@ namespace devtools_goma {
 
 class SubProcessTaskTest : public ::testing::Test {
  public:
-  SubProcessTaskTest() : cond_(&mu_) {}
+  SubProcessTaskTest() {}
 
  protected:
   class SubProcessContext {
@@ -96,7 +96,7 @@ class SubProcessTaskTest : public ::testing::Test {
   void WaitDone(bool* done) {
     AutoLock lock(&mu_);
     while (!*done) {
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
   }
 
@@ -224,7 +224,7 @@ class SubProcessTaskTest : public ::testing::Test {
     c->s_ = new SubProcessTask(c->trace_id_, c->prog_,
                                const_cast<char* const *>(c->argv_));
     c->s_->mutable_req()->set_cwd(
-        SubProcessControllerClient::Get()->tmp_dir());
+        SubProcessControllerClient::Get()->TmpDir());
     EXPECT_EQ(SubProcessState::SETUP, c->s_->state());
 #ifdef _WIN32
     // TODO: remove env after I revise redirector_win.cc.
@@ -260,7 +260,7 @@ class SubProcessTaskTest : public ::testing::Test {
   }
 
   std::unique_ptr<WorkerThreadManager> wm_;
-  Lock mu_;
+  mutable Lock mu_;
   ConditionVariable cond_;
 };
 

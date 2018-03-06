@@ -29,6 +29,8 @@
 #include <set>
 #include <sstream>
 
+#include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
 #include "compiler_flags.h"
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
@@ -39,7 +41,6 @@
 #include "goma_ipc_addr.h"
 #include "gomacc_argv.h"
 #include "ioutil.h"
-#include "join.h"
 #include "mypath.h"
 #ifdef _WIN32
 #include "named_pipe_client_win.h"
@@ -52,8 +53,6 @@ MSVC_POP_WARNING()
 #include "scoped_fd.h"
 #include "simple_timer.h"
 #include "socket_factory.h"
-#include "split.h"
-#include "strutil.h"
 #include "subprocess.h"
 #include "util.h"
 
@@ -70,8 +69,8 @@ namespace devtools_goma {
 // TODO: move it into goma_ipc, and use it in goma_ipc_unittest.cc?
 class GomaIPCNamedPipeFactory : public GomaIPC::ChanFactory {
  public:
-  explicit GomaIPCNamedPipeFactory(const string& name)
-      : factory_(name) {
+  GomaIPCNamedPipeFactory(const string& name, int timeout_ms)
+      : factory_(name, timeout_ms) {
   }
   ~GomaIPCNamedPipeFactory() override {}
 
@@ -140,7 +139,8 @@ int GetCompilerProxyPort(GomaIPC::Status* status) {
                                         FLAGS_COMPILER_PROXY_SOCKET_NAME))));
 #else
   GomaIPC goma_ipc(std::unique_ptr<GomaIPC::ChanFactory>(
-      new GomaIPCNamedPipeFactory(FLAGS_COMPILER_PROXY_SOCKET_NAME)));
+      new GomaIPCNamedPipeFactory(FLAGS_COMPILER_PROXY_SOCKET_NAME,
+                                  FLAGS_NAMEDPIPE_WAIT_TIMEOUT_MS)));
 #endif
   devtools_goma::EmptyMessage req;
   devtools_goma::HttpPortResponse resp;
@@ -157,12 +157,14 @@ int GetCompilerProxyPort(GomaIPC::Status* status) {
 
 bool StartCompilerProxy() {
   if (!FLAGS_START_COMPILER_PROXY) {
-    fprintf(stderr,
 #if defined(_WIN32)
-            "Compiler proxy isn't running. Run 'goma_ctl.bat ensure_start'.");
+    static const char kMsg[] =
+        "compiler_proxy isn't running. Run 'goma_ctl.bat ensure_start'.";
 #else
-            "Compiler proxy isn't running. Run 'goma_ctl.py ensure_start'.");
+    static const char kMsg[] =
+        "compiler_proxy isn't running. Run 'goma_ctl.py ensure_start'.";
 #endif
+    fputs(kMsg, stderr);
     exit(1);
   }
 
@@ -351,7 +353,8 @@ GomaClient::GomaClient(int id, std::unique_ptr<CompilerFlags> flags,
                                         FLAGS_COMPILER_PROXY_SOCKET_NAME)))),
 #else
     : goma_ipc_(std::unique_ptr<GomaIPC::ChanFactory>(
-            new GomaIPCNamedPipeFactory(FLAGS_COMPILER_PROXY_SOCKET_NAME))),
+          new GomaIPCNamedPipeFactory(FLAGS_COMPILER_PROXY_SOCKET_NAME,
+                                      FLAGS_NAMEDPIPE_WAIT_TIMEOUT_MS))),
 #endif
       id_(id),
       flags_(std::move(flags)),
@@ -393,7 +396,8 @@ GomaClient::GomaClient(int id, std::unique_ptr<CompilerFlags> flags,
     if (flags_->input_filenames().size() > 0)
       info.push_back(flags_->input_filenames()[0]);
   }
-  JoinStrings(info, " ", &name_);
+
+  name_ = absl::StrJoin(info, " ");
 }
 
 GomaClient::~GomaClient() {
@@ -743,10 +747,10 @@ bool GomaClient::PrepareExecRequest(const CompilerFlags& flags, ExecReq* req) {
       requester_env->set_fallback(true);
   }
   if (!FLAGS_FALLBACK_INPUT_FILES.empty()) {
-    std::vector<string> files;
-    SplitStringUsing(FLAGS_FALLBACK_INPUT_FILES, ",", &files);
-    for (size_t i = 0; i < files.size(); ++i) {
-      requester_env->add_fallback_input_file(files[i]);
+    for (auto&& f : absl::StrSplit(FLAGS_FALLBACK_INPUT_FILES,
+                                   ',',
+                                   absl::SkipEmpty())) {
+      requester_env->add_fallback_input_file(string(f));
     }
   }
 
@@ -754,11 +758,11 @@ bool GomaClient::PrepareExecRequest(const CompilerFlags& flags, ExecReq* req) {
     // Set these file in ExecReq.
     // We don't need hash_key for these files here.
     // Compiler proxy picks them as required_files and computes hash_key.
-    std::vector<string> files;
-    SplitStringUsing(FLAGS_IMPLICIT_INPUT_FILES, ",", &files);
-    for (size_t i = 0; i < files.size(); ++i) {
+    for (auto&& f : absl::StrSplit(FLAGS_IMPLICIT_INPUT_FILES,
+                                   ',',
+                                   absl::SkipEmpty())) {
       ExecReq_Input* input = req->add_input();
-      input->set_filename(file::JoinPathRespectAbsolute(cwd_, files[i]));
+      input->set_filename(file::JoinPathRespectAbsolute(cwd_, f));
       input->set_hash_key("");
     }
   }

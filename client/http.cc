@@ -25,6 +25,7 @@
 #include <sstream>
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_proxy_info.h"
@@ -54,7 +55,6 @@ MSVC_POP_WARNING()
 #include "socket_descriptor.h"
 #include "socket_factory.h"
 #include "socket_pool.h"
-#include "string_piece.h"
 #include "tls_descriptor.h"
 #include "worker_thread_manager.h"
 
@@ -139,12 +139,12 @@ HttpClient::Options::Options()
       force_connect_errorneous_address(false) {
 }
 
-bool HttpClient::Options::InitFromURL(StringPiece url) {
+bool HttpClient::Options::InitFromURL(absl::string_view url) {
   size_t pos = url.find("://");
   if (pos == string::npos) {
     return false;
   }
-  StringPiece scheme = url.substr(0, pos);
+  absl::string_view scheme = url.substr(0, pos);
   if (scheme == "http") {
     use_ssl = false;
     dest_port = 80;
@@ -154,7 +154,7 @@ bool HttpClient::Options::InitFromURL(StringPiece url) {
   } else {
     return false;
   }
-  StringPiece hostport = url.substr(pos + 3);
+  absl::string_view hostport = url.substr(pos + 3);
   pos = hostport.find("/");
   if (pos != string::npos) {
     url_path_prefix = string(hostport.substr(pos));
@@ -186,7 +186,7 @@ int HttpClient::Options::SocketPort() const {
   return dest_port;
 }
 
-string HttpClient::Options::RequestURL(StringPiece path) const {
+string HttpClient::Options::RequestURL(absl::string_view path) const {
   std::ostringstream url;
   if ((dest_host_name != SocketHost()
        || dest_port != SocketPort())
@@ -807,7 +807,6 @@ HttpClient::HttpClient(std::unique_ptr<SocketFactory> socket_factory,
       tls_engine_factory_(std::move(tls_engine_factory)),
       socket_pool_(std::move(socket_factory)),
       wm_(wm),
-      cond_(&mu_),
       health_status_("initializing"),
       shutting_down_(false),
       bad_status_num_in_recent_http_(0),
@@ -878,7 +877,7 @@ HttpClient::~HttpClient() {
     shutting_down_ = true;
     LOG(INFO) << "wait all tasks num_active=" << num_active_;
     while (num_active_ > 0)
-      cond_.Wait();
+      cond_.Wait(&mu_);
   }
   if (oauth_refresh_task_.get()) {
     oauth_refresh_task_->Shutdown();
@@ -1508,7 +1507,7 @@ void HttpClient::DecNumActive() {
 void HttpClient::WaitNoActive() {
   AUTOLOCK(lock, &mu_);
   while (num_active_ > 0)
-    cond_.Wait();
+    cond_.Wait(&mu_);
 }
 
 void HttpClient::IncNumPending() {
@@ -1716,7 +1715,7 @@ string HttpClient::Request::CreateHeader(
 
 string HttpClient::Request::BuildMessage(
     const std::vector<string>& headers,
-    StringPiece body) const {
+    absl::string_view body) const {
   std::ostringstream msg;
   msg << method_ << " " << request_path_ << " HTTP/1.1\r\n";
   if (host_ != "") {
@@ -1760,17 +1759,18 @@ string HttpRequest::CreateMessage() const {
 // GetConentEncoding rerpots EncodingType specified in header.
 // If it has X-Goma-Length: header, the value number will be stored in
 // dest_size.
-static EncodingType GetContentEncoding(StringPiece header, size_t* dest_size) {
+static EncodingType GetContentEncoding(absl::string_view header,
+                                       size_t* dest_size) {
   EncodingType encoding = NO_ENCODING;
   // TODO: Might be better to migrate to lib/compress_util
-  StringPiece::size_type content_encoding_header =
+  absl::string_view::size_type content_encoding_header =
       header.find("Content-Encoding: deflate\r\n");
-  if (content_encoding_header != StringPiece::npos) {
+  if (content_encoding_header != absl::string_view::npos) {
     encoding = ENCODING_DEFLATE;
   } else {
 #ifdef ENABLE_LZMA
     content_encoding_header = header.find("Content-Encoding: lzma2\r\n");
-    if (content_encoding_header != StringPiece::npos) {
+    if (content_encoding_header != absl::string_view::npos) {
       encoding = ENCODING_LZMA2;
     } else {
       return NO_ENCODING;
@@ -1779,9 +1779,9 @@ static EncodingType GetContentEncoding(StringPiece header, size_t* dest_size) {
     return NO_ENCODING;
 #endif
   }
-  StringPiece::size_type goma_content_length_header =
+  absl::string_view::size_type goma_content_length_header =
       header.find(HttpClient::kGomaLength);
-  if (goma_content_length_header != StringPiece::npos) {
+  if (goma_content_length_header != absl::string_view::npos) {
     *dest_size =
         atoi(header.data() + goma_content_length_header +
              strlen(HttpClient::kGomaLength));
@@ -1824,15 +1824,15 @@ bool HttpClient::Response::HasHeader() const {
   return body_offset_ > 0 && (is_chunked_ || content_length_ != string::npos);
 }
 
-StringPiece HttpClient::Response::Header() const {
+absl::string_view HttpClient::Response::Header() const {
   if (body_offset_ > 4) {
-    return StringPiece(buffer_.data(), body_offset_ - 4);
+    return absl::string_view(buffer_.data(), body_offset_ - 4);
   }
-  StringPiece::size_type header_size = buffer_.find("\r\n\r\n");
+  absl::string_view::size_type header_size = buffer_.find("\r\n\r\n");
   if (header_size == string::npos) {
     header_size = len_;
   }
-  return StringPiece(buffer_.data(), header_size);
+  return absl::string_view(buffer_.data(), header_size);
 }
 
 void HttpClient::Response::Buffer(char** buf, int* buf_size) {
@@ -1857,7 +1857,7 @@ void HttpClient::Response::Buffer(char** buf, int* buf_size) {
 bool HttpClient::Response::Recv(int r) {
   bool has_header = HasHeader();
   len_ += r;
-  StringPiece resp(buffer_.data(), len_);
+  absl::string_view resp(buffer_.data(), len_);
   if (!has_header && !ParseHttpResponse(resp, &status_code_, &body_offset_,
                                         &content_length_,
                                         &is_chunked_)) {
@@ -1900,8 +1900,8 @@ bool HttpClient::Response::Recv(int r) {
     if (r == 0) {
       VLOG(2) << trace_id_ << " ok r == 0, can finish.";
       chunks_.clear();
-      chunks_.push_back(
-          StringPiece(buffer_.data() + body_offset_, len_ - body_offset_));
+      chunks_.push_back(absl::string_view(buffer_.data() + body_offset_,
+                                          len_ - body_offset_));
       return true;
     }
     return false;
@@ -1954,17 +1954,17 @@ bool HttpClient::Response::Recv(int r) {
                         << " content_length_=" << content_length_;
   chunks_.clear();
   chunks_.push_back(
-      StringPiece(buffer_.data() + body_offset_, content_length_));
+      absl::string_view(buffer_.data() + body_offset_, content_length_));
   return true;
 }
 
 bool HttpClient::Response::HasConnectionClose() const {
-  return Header().find("Connection: close\r\n") != StringPiece::npos;
+  return Header().find("Connection: close\r\n") != absl::string_view::npos;
 }
 
 class ChunkedInputStream {
  public:
-  explicit ChunkedInputStream(const std::vector<StringPiece>& chunks)
+  explicit ChunkedInputStream(const std::vector<absl::string_view>& chunks)
       : size_(0) {
     for (const auto& chunk : chunks) {
       inputs_.push_back(
@@ -2079,7 +2079,7 @@ void HttpResponse::ParseBody(google::protobuf::io::ZeroCopyInputStream* input) {
   result_ = OK;
 }
 
-StringPiece HttpResponse::Body() const {
+absl::string_view HttpResponse::Body() const {
   return parsed_body_;
 }
 

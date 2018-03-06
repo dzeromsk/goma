@@ -18,6 +18,7 @@
 #include "filetime_win.h"
 #endif
 
+#include "absl/strings/match.h"
 #include "file.h"
 #include "file_id.h"
 #include "file_dir.h"
@@ -25,7 +26,6 @@
 #include "glog/stl_logging.h"
 #include "path.h"
 #include "scoped_fd.h"
-#include "string_piece_utils.h"
 
 namespace devtools_goma {
 
@@ -102,7 +102,7 @@ bool LogCleaner::IsMyLogFile(const string& name) const {
     "INFO", "WARNING", "ERROR", "FATAL"
   };
   for (const auto& basename : basenames_) {
-    if (strings::StartsWith(name, basename) &&
+    if (absl::StartsWith(name, basename) &&
         name.size() > basename.size() &&
         name[basename.size()] == '.') {
       for (const auto& level : kLogLevel) {

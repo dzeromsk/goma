@@ -98,7 +98,7 @@ class WorkerThreadManager {
     }
 
    private:
-    Lock mu_;
+    mutable Lock mu_;
     bool done_;
     const char* location_;
 
@@ -199,7 +199,7 @@ class WorkerThreadManager {
   PeriodicClosureId NextPeriodicClosureId();
 
   // |mu_| protects |workers_|, |next_worker_index_| and |next_pool_|.
-  ReadWriteLock mu_;
+  mutable ReadWriteLock mu_;
   std::vector<WorkerThread*> workers_;
   WorkerThread* alarm_worker_;
   size_t next_worker_index_;
@@ -226,7 +226,7 @@ class WorkerThreadRunner {
  private:
   void Run(OneshotClosure* closure);
 
-  Lock mu_;
+  mutable Lock mu_;
   ConditionVariable cond_;
   bool done_;
 

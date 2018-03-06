@@ -14,6 +14,7 @@
 
 #include <deque>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -22,7 +23,6 @@
 #include "simple_timer.h"
 #include "socket_factory.h"
 #include "scoped_fd.h"
-#include "unordered.h"
 
 using std::string;
 
@@ -98,10 +98,10 @@ class SocketPool : public SocketFactory {
   string host_name_;
   int port_;
 
-  Lock mu_;
+  mutable Lock mu_;
   std::vector<AddrData> addrs_;
   AddrData* current_addr_;  // point in addrs_, or NULL.
-  unordered_map<int, string> fd_addrs_;
+  std::unordered_map<int, string> fd_addrs_;
   // TODO: use ScopedSocket. std::pair doesn't support movable yet?
   std::deque<std::pair<int, SimpleTimer>> socket_pool_;
 

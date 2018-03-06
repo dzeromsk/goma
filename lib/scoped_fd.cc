@@ -6,9 +6,9 @@
 
 #include "scoped_fd.h"
 
+#include "absl/strings/string_view.h"
 #include "compiler_specific.h"
 #include "glog/logging.h"
-#include "string_piece.h"
 
 #ifdef _WIN32
 #include "path_resolver.h"
@@ -386,7 +386,7 @@ ssize_t ScopedSocket::ReadWithTimeout(char *buf, size_t bufsize,
     fd_set fdset;
     FD_ZERO(&fdset);
     MSVC_PUSH_DISABLE_WARNING_FOR_FD_SET();
-    FD_SET(fd_, &fdset);
+    FD_SET(static_cast<SOCKET>(fd_), &fdset);
     MSVC_POP_WARNING();
     TIMEVAL timeout;
     timeout.tv_sec = timeout_sec;

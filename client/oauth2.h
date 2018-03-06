@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "string_piece.h"
+#include "absl/strings/string_view.h"
 
 namespace devtools_goma {
 

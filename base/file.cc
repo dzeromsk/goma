@@ -94,19 +94,29 @@ bool CreateDir(const std::string& path, int mode) {
   return true;
 }
 
-bool IsDirectory(const char* path) {
+}  // namespace File
+
+namespace file {
+
+Options Defaults() {
+  return Options();
+}
+
+util::Status IsDirectory(absl::string_view path, const file::Options&) {
+  std::string str = std::string(path);
 #ifndef _WIN32
   struct stat st;
-  if (stat(path, &st) == 0) {
-    return S_ISDIR(st.st_mode);
+  if (stat(str.c_str(), &st) == 0) {
+    return util::Status(S_ISDIR(st.st_mode));
   }
-  return false;
+  return util::Status(false);
 #else
-  DWORD attr = GetFileAttributesA(path);
+  DWORD attr = GetFileAttributesA(str.c_str());
   if (attr == INVALID_FILE_ATTRIBUTES)
-    return false;
-  return (attr & FILE_ATTRIBUTE_DIRECTORY) == FILE_ATTRIBUTE_DIRECTORY;
+    return util::Status(false);
+  return util::Status(
+      (attr & FILE_ATTRIBUTE_DIRECTORY) == FILE_ATTRIBUTE_DIRECTORY);
 #endif
 }
 
-}  // namespace File
+}  // namespace file

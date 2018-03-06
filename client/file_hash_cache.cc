@@ -11,6 +11,8 @@
 
 #include <sstream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "atomic_stats_counter.h"
 #include "autolock_timer.h"
@@ -18,7 +20,6 @@
 #include "file_hash_cache.h"
 #include "glog/logging.h"
 #include "path.h"
-#include "unordered.h"
 
 using std::string;
 
@@ -43,7 +44,7 @@ bool FileHashCache::GetFileCacheKey(const string& filename,
   FileInfo info;
   {
     AUTO_SHARED_LOCK(lock, &file_cache_mutex_);
-    unordered_map<string, struct FileInfo>::iterator it =
+    std::unordered_map<string, struct FileInfo>::iterator it =
         file_cache_.find(filename);
     if (it == file_cache_.end()) {
       num_cache_miss_.Add(1);
@@ -109,7 +110,7 @@ bool FileHashCache::StoreFileCacheKey(
 
     AUTO_EXCLUSIVE_LOCK(lock, &file_cache_mutex_);
 
-    std::pair<unordered_map<string, struct FileInfo>::iterator, bool> p =
+    std::pair<std::unordered_map<string, struct FileInfo>::iterator, bool> p =
         file_cache_.insert(make_pair(filename, info));
     if (!p.second) {
       if (info.last_uploaded_timestamp_ms == 0) {
@@ -122,7 +123,7 @@ bool FileHashCache::StoreFileCacheKey(
   }
 
   AUTO_EXCLUSIVE_LOCK(lock, &known_cache_keys_mutex_);
-  std::pair<unordered_set<string>::iterator, bool> p2 =
+  std::pair<std::unordered_set<string>::iterator, bool> p2 =
       known_cache_keys_.insert(cache_key);
   return p2.second;
 }

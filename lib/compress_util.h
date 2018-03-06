@@ -10,7 +10,7 @@
 #include <string>
 
 
-#include "string_piece.h"
+#include "absl/strings/string_view.h"
 #ifdef ENABLE_LZMA
 # ifdef _WIN32
 #  define LZMA_API_STATIC

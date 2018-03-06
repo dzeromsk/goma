@@ -15,7 +15,7 @@
 # include "config_win.h"
 # include <wincrypt.h>
 # pragma comment(lib, "advapi32.lib")
-# include "string_piece.h"
+# include "absl/strings/string_view.h"
 # define SHA256_DIGEST_LENGTH 32
 #else
 # include <openssl/sha.h>  // BoringSSL
@@ -102,7 +102,6 @@ void ComputeDataHashKeyForSHA256HashValue(absl::string_view data,
 #elif defined _WIN32
   HCRYPTPROV provider;
   HCRYPTHASH hash;
-  BYTE md[SHA256_DIGEST_LENGTH] = {0};
 
   if (!CryptAcquireContext(&provider, nullptr, nullptr, PROV_RSA_AES,
                            CRYPT_VERIFYCONTEXT)) {

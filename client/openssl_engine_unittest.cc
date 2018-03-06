@@ -12,9 +12,9 @@
 #include <memory>
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "glog/logging.h"
 #include "gtest/gtest.h"
-#include "string_piece.h"
 #include "unittest_util.h"
 
 using std::string;
@@ -166,7 +166,7 @@ class OpenSSLServerEngine {
     return BIO_ctrl_get_read_request(network_bio_);
   }
 
-  int SetDataFromTransport(StringPiece data) {
+  int SetDataFromTransport(absl::string_view data) {
     int r = BIO_write(network_bio_, data.data(), data.size());
     if (state_ == IN_ACCEPT) {
       Accept();
@@ -184,7 +184,7 @@ class OpenSSLServerEngine {
     return r;
   }
 
-  int Write(StringPiece message) {
+  int Write(absl::string_view message) {
     int r = SSL_write(ssl_, message.data(), message.size());
     UpdateStatus(r);
     return r;

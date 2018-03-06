@@ -8,11 +8,10 @@
 #include <set>
 #include <string>
 
-#include <gtest/gtest.h>
-
+#include "absl/strings/ascii.h"
 #include "compiler_flags.h"
+#include "gtest/gtest.h"
 #include "path.h"
-#include "string_util.h"
 
 namespace devtools_goma {
 
@@ -223,13 +222,13 @@ TEST_F(CompileTaskTest, RemoveDuplicateFiles) {
     // different filepath if case is not same.
     std::set<std::string> filenames {
       file::JoinPath(kRootDir, "Foo"),
-      file::JoinPath(ToLower(kRootDir), "fOO"),
+      file::JoinPath(absl::AsciiStrToLower(kRootDir), "fOO"),
     };
     RemoveDuplicateFiles("", &filenames);
 
     std::set<std::string> expected {
       file::JoinPath(kRootDir, "Foo"),
-      file::JoinPath(ToLower(kRootDir), "fOO"),
+      file::JoinPath(absl::AsciiStrToLower(kRootDir), "fOO"),
     };
     EXPECT_EQ(filenames, expected);
   }

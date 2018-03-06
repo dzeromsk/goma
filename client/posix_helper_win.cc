@@ -8,9 +8,9 @@
 #include <cstring>
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "path.h"
 #include "rand_util.h"
-#include "string_piece.h"
 
 namespace {
 
@@ -45,7 +45,7 @@ int access(const char* path, int amode) {
             attr & FILE_ATTRIBUTE_DIRECTORY) {
           return -1;
         }
-        StringPiece extension = file::Extension(path);
+        absl::string_view extension = file::Extension(path);
         // TODO: use PATHEXT env. instead.
         if (extension == "exe" || extension == "cmd" || extension == "bat") {
           return 0;
@@ -60,9 +60,9 @@ int access(const char* path, int amode) {
 }
 
 char *mkdtemp(char *tmpl) {
-  StringPiece t(tmpl);
-  StringPiece::size_type pos = t.find_last_not_of('X');
-  if (pos == StringPiece::npos) {
+  absl::string_view t(tmpl);
+  absl::string_view::size_type pos = t.find_last_not_of('X');
+  if (pos == absl::string_view::npos) {
     return nullptr;
   }
   ++pos;  // to point the beginning of Xs.

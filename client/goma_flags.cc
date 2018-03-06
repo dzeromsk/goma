@@ -168,6 +168,12 @@ GOMA_DEFINE_int32(MAX_SLEEP_TIME, 60,
                   "Will not wait if the value <= 0.");
 #endif
 
+#ifdef _WIN32
+// 30 seconds default timeout is mitigation for b/36493466, b/70640154.
+GOMA_DEFINE_int32(NAMEDPIPE_WAIT_TIMEOUT_MS, 30000,
+                  "Timeout(in milliseconds) to wait in ConnectNamedpipe.");
+#endif
+
 GOMA_DEFINE_bool(GOMACC_ENABLE_CRASH_DUMP, false,
                  "True to store breakpad crash dump on gomacc.");
 GOMA_DEFINE_bool(GOMACC_WRITE_LOG_FOR_TESTING, false,
@@ -234,7 +240,7 @@ GOMA_DEFINE_int32(MAX_OVERCOMMIT_INCOMING_SOCKETS,
                   "Number of overcommitted incoming sockets per threads on "
                   "select.");
 #if defined(__LP64__) || defined(_WIN64)
-# define DEFAULT_MAX_ACTIVE_TASKS 1024
+# define DEFAULT_MAX_ACTIVE_TASKS 2048
 #else  // 32bit system would not have enough memory
 # define DEFAULT_MAX_ACTIVE_TASKS 200
 #endif
@@ -437,6 +443,15 @@ GOMA_DEFINE_int32(COMPILER_INFO_CACHE_HOLDING_TIME_SEC, 60 * 60 * 24 * 30,
 GOMA_DEFINE_string(DUMP_STATS_FILE, "",
                    "Filename to dump stats at the end of compiler_proxy."
                    "If empty, nothing will be dumped.");
+#ifdef HAVE_COUNTERZ
+GOMA_DEFINE_string(DUMP_COUNTERZ_FILE, "",
+                   "Filename to dump counterz stat at the end of "
+                   "compiler_proxy. If empty, nothing will be dumped. "
+                   "If it endswith \".json\", stats is exported in json "
+                   "format, otherwise exported in binary protobuf.");
+GOMA_DEFINE_bool(ENABLE_COUNTERZ, false,
+                 "Flag for profiling using counterz.");
+#endif
 GOMA_DEFINE_string(HASH_REWRITE_RULE_FILE, "",
                    "Filename to represent rewrite rule for sha256 hashes "
                    "of subprograms. Each line of a file should be "
@@ -509,6 +524,15 @@ GOMA_DEFINE_string(COMPILER_PROXY_DAEMON_STDERR, "goma_compiler_proxy.stderr",
                    "Where to write stderr output when running in daemon mode. "
                    "Used only when COMPILER_PROXY_DAEMON_MODE is true.");
 #endif
+
+// On Windows, auto updater won't work well yet. b/73747988
+#ifdef _WIN32
+# define DEFAULT_ENABLE_AUTO_UPDATE false
+#else
+# define DEFAULT_ENABLE_AUTO_UPDATE true
+#endif
+GOMA_DEFINE_bool(ENABLE_AUTO_UPDATE, DEFAULT_ENABLE_AUTO_UPDATE,
+                 "Enable auto updater.");
 GOMA_DEFINE_int32(AUTO_UPDATE_IDLE_COUNT, 4 * 60 * 60,
                   "Try to update to the latest version if compiler_proxy "
                   "has been idle for approx this number of seconds.");
@@ -550,6 +574,11 @@ GOMA_DEFINE_int32(NETWORK_ERROR_THRESHOLD_PERCENT, -1,
 
 GOMA_DEFINE_bool(FAIL_FAST, false,
                  "fail fast mode of compiler proxy.");
+
+GOMA_DEFINE_bool(FAIL_FOR_UNSUPPORTED_COMPILER_FLAGS, true,
+                 "compile fails if a compile request is rejected by goma "
+                 "server and the rejection reason is the compile request "
+                 "contains unsupoprted compiler flags.");
 
 GOMA_DEFINE_int32(MAX_ACTIVE_FAIL_FALLBACK_TASKS, -1,
                   "Compiler_proxy will make compile error without trying local "

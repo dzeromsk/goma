@@ -24,9 +24,6 @@ std::ostream& operator<<(std::ostream& out, const wchar_t* str) {
   return out;
 }
 
-std::ostream& operator<<(std::ostream& out, const std::wstring& str) {
-  return operator<<(out, str.c_str());
-}
 
 bool DumpCallback(const wchar_t* dump_dir,
                   const wchar_t* minidump_id,

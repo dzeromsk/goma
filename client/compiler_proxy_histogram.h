@@ -101,7 +101,7 @@ class CompilerProxyHistogram {
   void Reset();
 
  private:
-  Lock mu_;
+  mutable Lock mu_;
   std::vector<Histogram> histogram_;
 
   DISALLOW_COPY_AND_ASSIGN(CompilerProxyHistogram);

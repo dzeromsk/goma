@@ -34,26 +34,62 @@ using std::string;
 
 namespace devtools_goma {
 
-SubProcessControllerClient *gSubProcessController;
+namespace {
+
+// g_mu is initialized in Create().
+// SubProcessControllerClient is created in Create(), which is called
+// from SubProcessController::Initialize. So, Create is called first.
+//
+// TODO: We cannot call IsRunning() or Get() unless Create()
+// is called with this implementation.
+Lock* g_mu;
+SubProcessControllerClient* g_client_instance GUARDED_BY(*g_mu);
+
+#ifndef _WIN32
+pthread_once_t g_init_once = PTHREAD_ONCE_INIT;
+void InitializePthreadOnce() {
+  g_mu = new Lock();
+}
+#else
+INIT_ONCE g_init_once = INIT_ONCE_STATIC_INIT;
+BOOL WINAPI InitializeWinOnce(PINIT_ONCE, PVOID, PVOID*) {
+  g_mu = new Lock();
+  return TRUE;
+}
+#endif  // _WIN32
+
+}  // anonymous namespace
 
 /* static */
 SubProcessControllerClient* SubProcessControllerClient::Create(
     int fd, pid_t pid, const Options& options) {
   // Must be called before starting threads.
-  gSubProcessController = new SubProcessControllerClient(fd, pid, options);
-  CHECK(gSubProcessController != nullptr);
-  return gSubProcessController;
+
+#ifndef _WIN32
+  pthread_once(&g_init_once, InitializePthreadOnce);
+#else
+  InitOnceExecuteOnce(&g_init_once, InitializeWinOnce, nullptr, nullptr);
+#endif  // _WIN32
+
+  AUTOLOCK(lock, g_mu);
+
+  CHECK(g_client_instance == nullptr);
+  g_client_instance = new SubProcessControllerClient(fd, pid, options);
+  CHECK(g_client_instance != nullptr);
+  return g_client_instance;
 }
 
 /* static */
 bool SubProcessControllerClient::IsRunning() {
-  return gSubProcessController != nullptr;
+  AUTOLOCK(lock, g_mu);
+  return g_client_instance != nullptr;
 }
 
 /* static */
 SubProcessControllerClient* SubProcessControllerClient::Get() {
-  CHECK(gSubProcessController != nullptr);
-  return gSubProcessController;
+  AUTOLOCK(lock, g_mu);
+  CHECK(g_client_instance != nullptr);
+  return g_client_instance;
 }
 
 /* static */
@@ -73,7 +109,6 @@ SubProcessControllerClient::SubProcessControllerClient(int fd,
       d_(nullptr),
       fd_(fd),
       server_pid_(pid),
-      cond_(&mu_),
       next_id_(0),
       current_options_(options),
       periodic_closure_id_(kInvalidPeriodicClosureId),
@@ -90,7 +125,6 @@ SubProcessControllerClient::~SubProcessControllerClient() {
   d_ = nullptr;
   thread_id_ = 0;
   wm_ = nullptr;
-  gSubProcessController = nullptr;
 }
 
 void SubProcessControllerClient::Setup(
@@ -102,7 +136,7 @@ void SubProcessControllerClient::Setup(
   SetInitialized();
   d_->NotifyWhenReadable(
       NewPermanentCallback(this, &SubProcessControllerClient::DoRead));
-  tmp_dir_ = tmp_dir;
+  SetTmpDir(tmp_dir);
   {
     AUTOLOCK(lock, &mu_);
     CHECK_EQ(periodic_closure_id_, kInvalidPeriodicClosureId);
@@ -158,7 +192,7 @@ void SubProcessControllerClient::Shutdown() {
     CHECK_EQ(periodic_closure_id_, kInvalidPeriodicClosureId);
     while (!subproc_tasks_.empty()) {
       LOG(INFO) << "wait for subproc_tasks_ become empty";
-      cond_.Wait();
+      cond_.Wait(&mu_);
     }
   }
   // Not to pass SubProcessControllerClient::SendRequest to send Kill,
@@ -397,7 +431,12 @@ bool SubProcessControllerClient::BelongsToCurrentThread() const {
 void SubProcessControllerClient::Delete() {
   DCHECK(BelongsToCurrentThread());
   d_->ClearReadable();
+
+  // Maybe not good to accessing g_client_instance which is being
+  // deleted. So, guard `delete this`, too.
+  AUTOLOCK(lock, g_mu);
   delete this;
+  g_client_instance = nullptr;
 }
 
 void SubProcessControllerClient::SendRequest(
@@ -516,10 +555,10 @@ void SubProcessControllerClient::DoRead() {
 }
 
 void SubProcessControllerClient::RunCheckSignaled() {
-  if (gSubProcessController == nullptr) {
-    // RunCheckSignaled is periodic closure managed by gSubProcessController,
-    // it should never be called when gSubProcessController == nullptr.
-    LOG(FATAL) << "gSubProcessController is nullptr";
+  if (!IsRunning()) {
+    // RunCheckSignaled is periodic closure managed by g_client_instance
+    // it should never be called when not running.
+    LOG(FATAL) << "SubProcessControllerClient is not running";
     return;
   }
   // Switch from alarm worker to client thread.
@@ -532,8 +571,8 @@ void SubProcessControllerClient::RunCheckSignaled() {
 }
 
 void SubProcessControllerClient::CheckSignaled() {
-  if (gSubProcessController == nullptr) {
-    // gSubProcessController (and this pointer) may be nullptr because Delete is
+  if (!IsRunning()) {
+    // g_client_instnace (and this pointer) may be nullptr because Delete is
     // higher priority (put in WorkerThreadManager in Shutdown).
     // Should not access any member fields here.
     return;

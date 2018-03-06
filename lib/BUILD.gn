@@ -45,7 +45,6 @@ static_library("lib") {
     "path_util.h",
     "scoped_fd.cc",
     "scoped_fd.h",
-    "unordered.h",
   ]
 
   public_configs = [ ":lib_config" ]

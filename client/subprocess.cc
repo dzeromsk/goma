@@ -19,13 +19,14 @@
 #include <iostream>
 #include <memory>
 
+#include "absl/strings/str_join.h"
+#include "absl/strings/string_view.h"
 #include "env_flags.h"
 #include "compiler_flags.h"
 #include "compiler_specific.h"
 #include "file_id.h"
 #include "glog/logging.h"
 #include "ioutil.h"
-#include "join.h"
 #include "path.h"
 #include "scoped_fd.h"
 #ifndef _WIN32
@@ -33,7 +34,6 @@
 #else
 #include "spawner_win.h"
 #endif
-#include "string_piece.h"
 
 using std::string;
 
@@ -202,7 +202,7 @@ string ReadCommandOutputByPopen(
         << "If the caller expects the non-zero exit status, "
         << "the caller must set non-nullptr status in the argument."
         << " prog=" << prog
-        << " args=" << strings::Join(argv, " ")
+        << " args=" << absl::StrJoin(argv, " ")
         << " cwd=" << cwd
         << " exit_status=" << exit_status
         << " output=" << strbuf.str();

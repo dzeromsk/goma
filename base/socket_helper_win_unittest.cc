@@ -29,8 +29,8 @@ class SocketPairTestThread : public PlatformThread::Delegate {
   } State;
 
   explicit SocketPairTestThread(int fd)
-      : signal_(::CreateEvent(nullptr, TRUE, FALSE, nullptr)),
-        socket_(fd), state_(kInitial) {
+      : state_(kInitial), signal_(::CreateEvent(nullptr, TRUE, FALSE, nullptr)),
+        socket_(fd) {
     CHECK_NE(signal_, INVALID_HANDLE_VALUE);
   }
 
@@ -59,7 +59,7 @@ class SocketPairTestThread : public PlatformThread::Delegate {
                  static_cast<int>(strlen(TEST_STRING)), 0);
             FD_ZERO(&r_set);
             MSVC_PUSH_DISABLE_WARNING_FOR_FD_SET();
-            FD_SET(socket_, &r_set);
+            FD_SET(static_cast<SOCKET>(socket_), &r_set);
             MSVC_POP_WARNING();
             while (!r_done) {
               int result = select(socket_ + 1, &r_set, 0, 0, &tv);

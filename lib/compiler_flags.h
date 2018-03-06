@@ -14,8 +14,8 @@
 #include <vector>
 
 
+#include "absl/strings/string_view.h"
 #include "flag_parser.h"
-#include "string_piece.h"
 using std::string;
 
 namespace devtools_goma {
@@ -185,6 +185,7 @@ class GCCFlags : public CompilerFlags {
   bool has_fsyntax_only() const { return has_fsyntax_only_; }
   bool has_resource_dir() const { return !resource_dir_.empty(); }
   bool has_wrapper() const { return has_wrapper_; }
+  bool has_fplugin() const { return has_fplugin_; }
   bool is_precompiling_header() const { return is_precompiling_header_; }
   bool is_stdin_input() const { return is_stdin_input_; }
 
@@ -230,6 +231,7 @@ class GCCFlags : public CompilerFlags {
   bool has_fno_sanitize_blacklist_;
   bool has_fsyntax_only_;
   bool has_wrapper_;
+  bool has_fplugin_;
   bool is_precompiling_header_;
   bool is_stdin_input_;
 };
@@ -274,6 +276,7 @@ class VCFlags : public CompilerFlags {
   bool is_cplusplus() const { return is_cplusplus_; }
   bool ignore_stdinc() const { return ignore_stdinc_; }
   bool require_mspdbserv() const { return require_mspdbserv_; }
+  bool has_Brepro() const { return has_Brepro_; }
 
   string compiler_name() const override;
 
@@ -308,6 +311,7 @@ class VCFlags : public CompilerFlags {
   std::vector<std::pair<string, bool>> commandline_macros_;
   bool is_cplusplus_;
   bool ignore_stdinc_;
+  bool has_Brepro_;
   string creating_pch_;
   string using_pch_;
   // The filename of .pch, if specified.

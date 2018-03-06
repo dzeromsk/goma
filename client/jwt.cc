@@ -15,10 +15,10 @@
 #include <sstream>
 #include <vector>
 
+#include "absl/strings/str_join.h"
 #include "base64.h"
 #include "glog/logging.h"
 #include "ioutil.h"
-#include "join.h"
 
 namespace devtools_goma {
 
@@ -109,7 +109,7 @@ std::string JsonWebToken::CreateClaimSetJson(const ClaimSet& cs, time_t now) {
   if (!cs.sub.empty()) {
     ss << ",\"sub\":" << EscapeString(cs.sub);
   }
-  ss << ",\"scope\":" << EscapeString(strings::Join(cs.scopes, " "));
+  ss << ",\"scope\":" << EscapeString(absl::StrJoin(cs.scopes, " "));
   ss << ",\"aud\":" << EscapeString(kAssertionTarget);
   ss << ",\"exp\":" << now + cs.expires_in_sec;
   ss << ",\"iat\":" << now;

@@ -111,9 +111,9 @@ bool ReadHeaderMapContent(
     return false;
   }
 
-  const auto last_nullpos = file->ToStringPiece().rfind('\0');
+  const auto last_nullpos = file->ToStringView().rfind('\0');
 
-  if (last_nullpos == StringPiece::npos &&
+  if (last_nullpos == absl::string_view::npos &&
       hmap->hash_capacity != 0) {
     LOG(WARNING) << "hmap file does not contain null character"
                  << " in expected place:" << hmap_filename;

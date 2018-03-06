@@ -6,8 +6,6 @@
 
 #include <glog/logging.h>
 
-#include "string_util.h"
-
 namespace devtools_goma {
 
 void CppInputStream::ConsumeChar() {

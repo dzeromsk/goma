@@ -7,12 +7,12 @@
 #define DEVTOOLS_GOMA_CLIENT_MULTI_HTTP_RPC_H_
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "basictypes.h"
 #include "http_rpc.h"
 #include "lockhelper.h"
-#include "unordered.h"
 
 using std::string;
 
@@ -92,12 +92,12 @@ class MultiHttpRPC {
 
   PeriodicClosureId periodic_callback_id_;
 
-  Lock mu_;
+  mutable Lock mu_;
   // Condition to check num_multi_job_ becomes 0.
   ConditionVariable cond_;
   int num_multi_job_;  // number of jobs on-the-fly.
 
-  unordered_map<string, MultiJob*> pending_multi_jobs_;
+  std::unordered_map<string, MultiJob*> pending_multi_jobs_;
   bool available_;
   std::vector<int> num_call_by_multi_;
   int num_call_by_req_num_;

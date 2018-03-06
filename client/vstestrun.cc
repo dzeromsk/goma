@@ -17,12 +17,13 @@
 #ifndef _WIN32
 #error This module is Windows only
 #endif
+
+#include "absl/strings/match.h"
 #include "config_win.h"
 #include "file.h"
 #include "file_dir.h"
 #include "mypath.h"
 #include "path.h"
-#include "string_piece_utils.h"
 #include "vsvars.h"
 
 
@@ -77,7 +78,7 @@ int main(int argc, char** argv) {
   std::vector<std::string> vsvers;
   int argv0 = -1;
   for (int i = 1; i < argc; i++) {
-    if (strings::StartsWith(argv[i], "--vsver=")) {
+    if (absl::StartsWith(argv[i], "--vsver=")) {
       vsvers.push_back(argv[i] + strlen("--vsver="));
       continue;
     }

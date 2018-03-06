@@ -25,13 +25,10 @@
 #include <glog/logging.h>
 #include <glog/stl_logging.h>
 
+#include "absl/strings/match.h"
+#include "absl/strings/string_view.h"
 #include "arfile.h"
 #include "cmdline_parser.h"
-#ifdef __linux
-// TODO: port elf.h in MacOSX and eliminate this ifdef.
-// we want to run android cross compile (which uses ELF) on MacOSX.
-#include "elf_parser.h"
-#endif
 #include "compiler_flags.h"
 #include "compiler_info.h"
 #include "compiler_specific.h"
@@ -41,18 +38,24 @@
 #include "ioutil.h"
 #include "library_path_resolver.h"
 #include "linker_script_parser.h"
-#ifdef __MACH__
-#include "mach_o_parser.h"
-#include <mach-o/fat.h>
-#include <mach-o/loader.h>
-#endif
 #include "path.h"
+#include "util.h"
+
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_data.pb.h"
 MSVC_POP_WARNING()
-#include "string_piece.h"
-#include "string_piece_utils.h"
-#include "util.h"
+
+#ifdef __linux
+// TODO: port elf.h in MacOSX and eliminate this ifdef.
+// we want to run android cross compile (which uses ELF) on MacOSX.
+# include "elf_parser.h"
+#endif
+
+#ifdef __MACH__
+# include "mach_o_parser.h"
+# include <mach-o/fat.h>
+# include <mach-o/loader.h>
+#endif
 
 #ifndef ELFMAG
 # define ELFMAG "\177ELF"
@@ -195,18 +198,18 @@ bool LinkerInputProcessor::ParseDumpOutput(
   // gcc's specs, important envs (COMPILER_PATH, LIBRARY_PATH, etc) and
   // command to be executed, starting SPACE, following command arguments
   // in double quotes.
-  StringPiece buf(dump_output);
+  absl::string_view buf(dump_output);
   size_t pos;
   std::vector<string> envs;
 
   do {
     pos = buf.find_first_of("\n");
-    StringPiece line = buf.substr(0, pos);
+    absl::string_view line = buf.substr(0, pos);
     VLOG(3) << "ParseDumpOutput: " << line;
     buf.remove_prefix(pos + 1);
 
-    if (strings::StartsWith(line, "LIBRARY_PATH=") ||
-        strings::StartsWith(line, "COMPILER_PATH=")) {
+    if (absl::StartsWith(line, "LIBRARY_PATH=") ||
+        absl::StartsWith(line, "COMPILER_PATH=")) {
       driver_envs->push_back(string(line));
     }
     if (line[0] == ' ') {
@@ -214,7 +217,7 @@ bool LinkerInputProcessor::ParseDumpOutput(
       if (!ParsePosixCommandLineToArgv(string(line), driver_args))
         return false;
     }
-  } while (pos != StringPiece::npos);
+  } while (pos != absl::string_view::npos);
 
   if (driver_args->empty())
     return false;
@@ -316,11 +319,11 @@ void LinkerInputProcessor::ParseDriverCommandLine(
 void LinkerInputProcessor::GetLibraryPath(
     const std::vector<string>& envs,
     std::vector<string>* library_paths) {
-  StringPiece libpath_string;
+  absl::string_view libpath_string;
   static const char* kPathPrefix = "LIBRARY_PATH=";
   for (const auto& env : envs) {
-    if (strings::StartsWith(env, kPathPrefix)) {
-      libpath_string.set(env.c_str(), env.size());
+    if (absl::StartsWith(env, kPathPrefix)) {
+      libpath_string = absl::string_view(env.c_str(), env.size());
       libpath_string.remove_prefix(strlen(kPathPrefix));
       break;
     }
@@ -339,16 +342,16 @@ void LinkerInputProcessor::GetLibraryPath(
   const string& cwd = library_path_resolver_->cwd();
   do {
     pos = libpath_string.find_first_of(":");
-    StringPiece entry = libpath_string.substr(0, pos);
+    absl::string_view entry = libpath_string.substr(0, pos);
     // some/thing/ and some/thing should be the same path.
-    if (strings::EndsWith(entry, "/")) {
+    if (absl::EndsWith(entry, "/")) {
       entry.remove_suffix(1);
     }
     // Consider relative path, which might not be needed.
     library_paths->push_back(
         file::JoinPathRespectAbsolute(cwd, string(entry)));
     libpath_string.remove_prefix(pos + 1);
-  } while (pos != StringPiece::npos);
+  } while (pos != absl::string_view::npos);
 }
 
 /* static */
@@ -377,7 +380,7 @@ LinkerInputProcessor::FileType LinkerInputProcessor::CheckFileType(
 #ifdef __MACH__
   uint32_t* header = reinterpret_cast<uint32_t*>(buf);
   if (*header == FAT_MAGIC || *header == FAT_CIGAM) {
-    if (strings::EndsWith(path, ".a"))
+    if (absl::EndsWith(path, ".a"))
       return ARCHIVE_FILE;
     else
       return MACHO_FAT_FILE;

@@ -8,9 +8,10 @@
 
 #include <set>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "autolock_timer.h"
-#include "unordered.h"
 
 namespace devtools_goma {
 
@@ -35,7 +36,7 @@ class FilenameIdTable {
   // entry etc.), false will be returned.
   // |valid_ids| will contain all the valid ids if not null.
   bool LoadFrom(const GomaFilenameIdTable& table,
-                unordered_set<FilenameIdTable::Id>* valid_ids);
+                std::unordered_set<FilenameIdTable::Id>* valid_ids);
   // Saves the data to |table|. Only entry that has |ids| will be saved.
   void SaveTo(const std::set<Id>& ids, GomaFilenameIdTable* table) const;
 
@@ -63,10 +64,10 @@ class FilenameIdTable {
   Id LookupIdUnlocked(const std::string& filename) const
       SHARED_LOCKS_REQUIRED(mu_);
 
-  ReadWriteLock mu_;
+  mutable ReadWriteLock mu_;
   Id next_available_id_ GUARDED_BY(mu_);
-  unordered_map<Id, std::string> map_to_filename_ GUARDED_BY(mu_);
-  unordered_map<std::string, Id> map_to_id_ GUARDED_BY(mu_);
+  std::unordered_map<Id, std::string> map_to_filename_ GUARDED_BY(mu_);
+  std::unordered_map<std::string, Id> map_to_id_ GUARDED_BY(mu_);
 
   DISALLOW_COPY_AND_ASSIGN(FilenameIdTable);
 };

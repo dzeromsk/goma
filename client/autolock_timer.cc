@@ -29,32 +29,49 @@ AutoLockStats::~AutoLockStats() {
 }
 
 void AutoLockStats::TextReport(std::ostringstream* ss) {
+  struct Stat {
+    const char* name;
+    int count;
 
-  AutoLock lock(&mu_);
-  for (size_t i = 0; i < stats_.size(); ++i) {
-    AutoLockStat* stat = stats_[i];
+    // nanoseconds
+    int64_t total_wait, max_wait, total_hold, max_hold;
+  };
 
-    int count = 0;
-    int64_t total_wait_time_ns = 0;
-    int64_t max_wait_time_ns = 0;
-    int64_t total_hold_time_ns = 0;
-    int64_t max_hold_time_ns = 0;
-    stat->GetStats(&count, &total_wait_time_ns, &max_wait_time_ns,
-                   &total_hold_time_ns, &max_hold_time_ns);
-    (*ss) << stat->name
-          << " count: " << count
+  std::vector<Stat> stats;
+
+  {
+    AutoLock lock(&mu_);
+    for (size_t i = 0; i < stats_.size(); ++i) {
+      AutoLockStat* stat = stats_[i];
+
+      Stat s;
+      stat->GetStats(&s.count, &s.total_wait, &s.max_wait,
+                     &s.total_hold, &s.max_hold);
+      s.name = stat->name;
+      stats.push_back(s);
+    }
+  }
+
+  std::sort(stats.begin(), stats.end(),
+            [](const Stat& l, const Stat& r) {
+              return l.total_wait > r.total_wait;
+            });
+
+  for (const auto& s : stats) {
+    (*ss) << s.name
+          << " count: " << s.count
           << " total-wait: "
-          << total_wait_time_ns / kNanosecondsPerSecond
-          << " max-wait:"
-          << max_wait_time_ns / kNanosecondsPerSecond
-          << " ave-wait:"
-          << total_wait_time_ns / std::max(count, 1) / kNanosecondsPerSecond
-          << " total-hold:"
-          << total_hold_time_ns / kNanosecondsPerSecond
-          << " max-hold:"
-          << max_hold_time_ns / kNanosecondsPerSecond
-          << " ave-hold:"
-          << total_hold_time_ns / std::max(count, 1) / kNanosecondsPerSecond
+          << s.total_wait / kNanosecondsPerSecond
+          << " max-wait: "
+          << s.max_wait / kNanosecondsPerSecond
+          << " ave-wait: "
+          << s.total_wait / kNanosecondsPerSecond / std::max(s.count, 1)
+          << " total-hold: "
+          << s.total_hold / kNanosecondsPerSecond
+          << " max-hold: "
+          << s.max_hold / kNanosecondsPerSecond
+          << " ave-hold: "
+          << s.total_hold / kNanosecondsPerSecond / std::max(s.count, 1)
           << "\n";
   }
 }
