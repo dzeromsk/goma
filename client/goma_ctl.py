@@ -1029,7 +1029,7 @@ class GomaDriver(object):
   def _CreateGomaTmpDirectory(self):
     tmp_dir = self._env.GetGomaTmpDir()
     self._CreateDirectory(tmp_dir, 'temp')
-    sys.stdout.write('using %s as tmpdir\n' % tmp_dir)
+    sys.stderr.write('using %s as tmpdir\n' % tmp_dir)
     os.environ['GOMA_TMP_DIR'] = tmp_dir
 
   def _CreateCrashDumpDirectory(self):
