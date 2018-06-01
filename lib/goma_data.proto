@@ -310,6 +310,8 @@ message LookupFileReq {
 }
 
 message LookupFileResp {
+  // The goma client assumes blob_type=FILE_CHUNK or possibly
+  // blob_type=FILE here.
   repeated FileBlob blob = 2;
 }
 
