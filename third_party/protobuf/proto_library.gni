@@ -229,6 +229,9 @@ template("proto_library") {
       configs += invoker.extra_configs
     }
 
+    configs -= [ "//build/config/compiler:goma_code" ]
+    configs += [ "//build/config/compiler:no_goma_code" ]
+
     public_configs = [ "//third_party/protobuf:using_proto" ]
 
     # If using built-in cc generator the resulting headers reference headers

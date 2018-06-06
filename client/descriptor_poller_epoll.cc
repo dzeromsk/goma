@@ -17,29 +17,30 @@
 #include <sys/epoll.h>
 #define EPOLL_SIZE_HINT FD_SETSIZE  // Any value but not 0 should be ok.
 
+#include "absl/memory/memory.h"
 #include "compiler_specific.h"
-#include "socket_descriptor.h"
 #include "glog/logging.h"
 #include "scoped_fd.h"
+#include "socket_descriptor.h"
 
 namespace devtools_goma {
 
 class EpollDescriptorPoller : public DescriptorPollerBase {
  public:
-  EpollDescriptorPoller(SocketDescriptor* poll_breaker,
+  EpollDescriptorPoller(std::unique_ptr<SocketDescriptor> breaker,
                         ScopedSocket&& poll_signaler)
-      : DescriptorPollerBase(poll_breaker, std::move(poll_signaler)),
+      : DescriptorPollerBase(std::move(breaker), std::move(poll_signaler)),
         epoll_fd_(-1),
         nevents_(0),
         last_nevents_(0) {
     epoll_fd_.reset(epoll_create(EPOLL_SIZE_HINT));
     CHECK(epoll_fd_.valid());
-    CHECK(poll_breaker);
+    CHECK(poll_breaker());
     struct epoll_event ev = {};
     ev.events = EPOLLIN;
-    ev.data.ptr = poll_breaker;
-    PCHECK(epoll_ctl(
-        epoll_fd_.fd(), EPOLL_CTL_ADD, poll_breaker->fd(), &ev) != -1);
+    ev.data.ptr = poll_breaker();
+    PCHECK(epoll_ctl(epoll_fd_.fd(), EPOLL_CTL_ADD, poll_breaker()->fd(),
+                     &ev) != -1);
   }
 
   void RegisterPollEvent(SocketDescriptor* d, EventType type) override {
@@ -98,7 +99,7 @@ class EpollDescriptorPoller : public DescriptorPollerBase {
   void PreparePollEvents(const DescriptorMap& descriptors) override {
     nevents_ = descriptors.size() + 1;
     if (last_nevents_ < nevents_) {
-      events_.reset(new struct epoll_event[nevents_]);
+      events_ = absl::make_unique<struct epoll_event[]>(nevents_);
     }
     last_nevents_ = nevents_;
   }
@@ -153,9 +154,9 @@ class EpollDescriptorPoller : public DescriptorPollerBase {
     DISALLOW_COPY_AND_ASSIGN(EpollEventEnumerator);
   };
 
-  EventEnumerator* GetEventEnumerator(
+  std::unique_ptr<EventEnumerator> GetEventEnumerator(
       const DescriptorMap& descriptors ALLOW_UNUSED) override {
-    return new EpollEventEnumerator(this);
+    return absl::make_unique<EpollEventEnumerator>(this);
   }
 
  private:
@@ -170,9 +171,11 @@ class EpollDescriptorPoller : public DescriptorPollerBase {
 };
 
 // static
-DescriptorPoller* DescriptorPoller::NewDescriptorPoller(
-    SocketDescriptor* breaker, ScopedSocket&& signaler) {
-  return new EpollDescriptorPoller(breaker, std::move(signaler));
+std::unique_ptr<DescriptorPoller> DescriptorPoller::NewDescriptorPoller(
+    std::unique_ptr<SocketDescriptor> breaker,
+    ScopedSocket&& signaler) {
+  return absl::make_unique<EpollDescriptorPoller>(std::move(breaker),
+                                                  std::move(signaler));
 }
 
 }  // namespace devtools_goma

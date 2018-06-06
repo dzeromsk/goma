@@ -30,9 +30,9 @@ class LinkerScriptParser {
   // Constructs a parser to read content.
   // It takes ownership of |content|.
   LinkerScriptParser(std::unique_ptr<Content> content,
-                     const string& current_directory,
-                     const std::vector<string>& searchdirs,
-                     const string& sysroot);
+                     string current_directory,
+                     std::vector<string> searchdirs,
+                     string sysroot);
   ~LinkerScriptParser();
 
   const std::vector<string>& searchdirs() const {

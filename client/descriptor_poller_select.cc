@@ -20,22 +20,24 @@
 # include "socket_helper_win.h"
 #endif
 
-#include "socket_descriptor.h"
+#include "absl/memory/memory.h"
+#include "counterz.h"
 #include "glog/logging.h"
+#include "socket_descriptor.h"
 
 namespace devtools_goma {
 
 class SelectDescriptorPoller : public DescriptorPollerBase {
  public:
-  SelectDescriptorPoller(SocketDescriptor* poll_breaker,
+  SelectDescriptorPoller(std::unique_ptr<SocketDescriptor> breaker,
                          ScopedSocket&& poll_signaler)
-      : DescriptorPollerBase(poll_breaker, std::move(poll_signaler)),
+      : DescriptorPollerBase(std::move(breaker), std::move(poll_signaler)),
         max_fd_(-1) {
     // Socket number ranges from 1 to 32767 on Windows, where the FD_SETSIZE is
     // 64. There's no guarantee on Windows that the value of socket fd is
     // smaller than FD_SETSIZE.
 #ifndef _WIN32
-    CHECK_LT(poll_breaker->fd(), FD_SETSIZE);
+    CHECK_LT(poll_breaker()->fd(), FD_SETSIZE);
 #endif
   }
 
@@ -74,6 +76,7 @@ class SelectDescriptorPoller : public DescriptorPollerBase {
     // Following is a workaround. i.e. randomly drops descriptors.
     int number_of_fd = 1;
     if (waiting_descriptors.size() >= FD_SETSIZE) {
+      GOMA_COUNTERZ("descriptors overcommit");
       std::random_shuffle(waiting_descriptors.begin(),
                           waiting_descriptors.end());
       LOG(INFO) << "#waiting_descriptors is larger than FD_SETSIZE."
@@ -165,9 +168,9 @@ class SelectDescriptorPoller : public DescriptorPollerBase {
     DISALLOW_COPY_AND_ASSIGN(SelectEventEnumerator);
   };
 
-  EventEnumerator* GetEventEnumerator(
+  std::unique_ptr<EventEnumerator> GetEventEnumerator(
       const DescriptorMap& descriptors) override {
-    return new SelectEventEnumerator(this, descriptors);
+    return absl::make_unique<SelectEventEnumerator>(this, descriptors);
   }
 
  private:
@@ -179,9 +182,11 @@ class SelectDescriptorPoller : public DescriptorPollerBase {
 };
 
 // static
-DescriptorPoller* DescriptorPoller::NewDescriptorPoller(
-    SocketDescriptor* breaker, ScopedSocket&& signaler) {
-  return new SelectDescriptorPoller(breaker, std::move(signaler));
+std::unique_ptr<DescriptorPoller> DescriptorPoller::NewDescriptorPoller(
+    std::unique_ptr<SocketDescriptor> breaker,
+    ScopedSocket&& signaler) {
+  return absl::make_unique<SelectDescriptorPoller>(std::move(breaker),
+                                                   std::move(signaler));
 }
 
 }  // namespace devtools_goma

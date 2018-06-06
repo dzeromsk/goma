@@ -23,7 +23,7 @@ namespace devtools_goma {
 // corruption. it checks sha256 matches with cache file when loading.
 class CacheFile {
  public:
-  explicit CacheFile(const std::string& filename);
+  explicit CacheFile(std::string filename);
   ~CacheFile();
 
   bool Load(google::protobuf::Message* data) const;

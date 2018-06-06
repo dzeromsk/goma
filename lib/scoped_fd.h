@@ -56,7 +56,6 @@ class ScopedFd {
     return *this;
   }
 
-  static FileDescriptor OpenForStat(const string& filename);
   static FileDescriptor OpenForRead(const string& filename);
   static FileDescriptor OpenForAppend(const string& filename, int mode);
   static FileDescriptor OpenForRewrite(const string& filename);

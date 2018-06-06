@@ -10,6 +10,8 @@
 #include "autolock_timer.h"
 #include "callback.h"
 #include "config_win.h"
+#include "counterz.h"
+#include "glog/logging.h"
 #include "worker_thread_manager.h"
 
 namespace devtools_goma {
@@ -508,6 +510,7 @@ void NamedPipeServer::Run(std::string name) {
         FALSE,  // wait all
         INFINITE,
         TRUE);
+    GOMA_COUNTERZ("After WaitForMultipleObjectsEx");
     switch (w) {
       case WAIT_OBJECT_0:  // connected
         if (is_pending) {
@@ -524,6 +527,7 @@ void NamedPipeServer::Run(std::string name) {
           }
         }
         if (pipe_.valid()) {
+          GOMA_COUNTERZ("new Conn and etc.");
           VLOG(1) << "connected";
           Conn* conn = new Conn(this, std::move(pipe_));
           {
@@ -581,6 +585,7 @@ void NamedPipeServer::Run(std::string name) {
 
 bool NamedPipeServer::NewPipe(
     const std::string& pipename, OVERLAPPED* overlapped) {
+  GOMA_COUNTERZ("");
   DCHECK(THREAD_ID_IS_SELF(thread_id_));
 
   pipe_ = ScopedNamedPipe(
@@ -719,6 +724,7 @@ void NamedPipeServer::Flusher() {
         FALSE,  // wait all
         INFINITE,
         TRUE);
+    GOMA_COUNTERZ("After WaitForMultipleObjectsEx");
     switch (w) {
       case WAIT_OBJECT_0:  // flush
         ProcessFlushes();
@@ -742,6 +748,8 @@ void NamedPipeServer::Flusher() {
 }
 
 void NamedPipeServer::ProcessFlushes() {
+  GOMA_COUNTERZ("");
+
   VLOG(1) << "ProcessFlushes";
   std::unordered_set<Conn*> flushes;
   {

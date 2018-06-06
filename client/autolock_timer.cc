@@ -16,16 +16,10 @@ static const double kNanosecondsPerSecond = 1000000000;
 
 AutoLockStat* AutoLockStats::NewStat(const char* name) {
   AutoLock lock(&mu_);
-  AutoLockStat* statp = new AutoLockStat(name);
-  stats_.push_back(statp);
-  return statp;
-}
-
-AutoLockStats::~AutoLockStats() {
-  for (size_t i = 0; i < stats_.size(); ++i) {
-    delete stats_[i];
-  }
-  stats_.clear();
+  std::unique_ptr<AutoLockStat> statp(new AutoLockStat(name));
+  AutoLockStat* statp_ptr = statp.get();
+  stats_.push_back(std::move(statp));
+  return statp_ptr;
 }
 
 void AutoLockStats::TextReport(std::ostringstream* ss) {
@@ -42,7 +36,7 @@ void AutoLockStats::TextReport(std::ostringstream* ss) {
   {
     AutoLock lock(&mu_);
     for (size_t i = 0; i < stats_.size(); ++i) {
-      AutoLockStat* stat = stats_[i];
+      AutoLockStat* stat = stats_[i].get();
 
       Stat s;
       stat->GetStats(&s.count, &s.total_wait, &s.max_wait,
@@ -102,7 +96,7 @@ void AutoLockStats::Report(std::ostringstream* ss,
   {
     AutoLock lock(&mu_);
     for (size_t i = 0; i < stats_.size(); ++i) {
-      AutoLockStat* stat = stats_[i];
+      AutoLockStat* stat = stats_[i].get();
       if (skip_names.find(stat->name) != skip_names.end()) {
         continue;
       }

@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include <glog/logging.h>
 #include <gtest/gtest.h>
 
 #include "compiler_specific.h"
@@ -67,11 +66,6 @@ TEST(CallbackTest, PermanentCallback) {
       devtools_goma::NewPermanentCallback(&obj, &TestObject::TestMethod2, 1, 2),
   };
 
-  // Should be repeatable
-  for (const auto& cl : closures) {
-    EXPECT_TRUE(cl->IsRepeatable());
-  }
-
   // Should OK to run multiple times.
   for (auto& cl : closures) {
     cl->Run();
@@ -90,11 +84,6 @@ TEST(CallbackTest, OneshotCallback) {
       devtools_goma::NewCallback(&obj, &TestObject::TestMethod1, 1),
       devtools_goma::NewCallback(&obj, &TestObject::TestMethod2, 1, 2),
   };
-
-  // Should not be repeatable
-  for (const auto& cl : closures) {
-    EXPECT_FALSE(cl->IsRepeatable());
-  }
 
   for (auto& cl : closures) {
     cl->Run();

@@ -20,8 +20,8 @@
 
 #include "absl/strings/match.h"
 #include "file.h"
-#include "file_id.h"
 #include "file_dir.h"
+#include "file_stat.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "path.h"
@@ -85,10 +85,10 @@ void LogCleaner::FindOldLogsInDir(const string& log_dir, time_t t,
     string log_filename = fullname;
 #endif
 
-    FileId fi(log_filename);
-    if (!fi.IsValid()) {
+    FileStat file_stat(log_filename);
+    if (!file_stat.IsValid()) {
       LOG(ERROR) << "Failed to get file id:" << log_filename;
-    } else if (fi.mtime < t) {
+    } else if (file_stat.mtime < t) {
       VLOG(1) << "old log:" << log_filename;
       old_logs->insert(log_filename);
     } else {

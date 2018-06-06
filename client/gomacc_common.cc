@@ -28,7 +28,9 @@
 #include <memory>
 #include <set>
 #include <sstream>
+#include <utility>
 
+#include "absl/memory/memory.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "compiler_flags.h"
@@ -36,7 +38,8 @@
 #include "compiler_specific.h"
 #include "env_flags.h"
 #include "file_helper.h"
-#include "file_id.h"
+#include "file_stat.h"
+#include "gcc_flags.h"
 #include "glog/logging.h"
 #include "goma_ipc_addr.h"
 #include "gomacc_argv.h"
@@ -96,8 +99,8 @@ class GomaIPCNamedPipeFactory : public GomaIPC::ChanFactory {
 #else
 class GomaIPCSocketFactory : public GomaIPC::ChanFactory {
  public:
-  explicit GomaIPCSocketFactory(const string& socket_path)
-      : socket_path_(socket_path), addr_(nullptr), addr_len_(0) {
+  explicit GomaIPCSocketFactory(string socket_path)
+      : socket_path_(std::move(socket_path)), addr_(nullptr), addr_len_(0) {
     addr_len_ = InitializeGomaIPCAddress(socket_path_, &un_addr_);
     addr_ = reinterpret_cast<const sockaddr*>(&un_addr_);
   }
@@ -345,8 +348,10 @@ bool StartCompilerProxy() {
   return true;
 }
 
-GomaClient::GomaClient(int id, std::unique_ptr<CompilerFlags> flags,
-                       const char** envp, const string& local_compiler_path)
+GomaClient::GomaClient(int id,
+                       std::unique_ptr<CompilerFlags> flags,
+                       const char** envp,
+                       string local_compiler_path)
 #ifndef _WIN32
     : goma_ipc_(std::unique_ptr<GomaIPC::ChanFactory>(new GomaIPCSocketFactory(
           file::JoinPathRespectAbsolute(GetGomaTmpDir(),
@@ -358,11 +363,11 @@ GomaClient::GomaClient(int id, std::unique_ptr<CompilerFlags> flags,
 #endif
       id_(id),
       flags_(std::move(flags)),
-      local_compiler_path_(local_compiler_path) {
+      local_compiler_path_(std::move(local_compiler_path)) {
   flags_->GetClientImportantEnvs(envp, &envs_);
 
 #ifdef _WIN32
-  if (flags_->is_vc()) {
+  if (flags_->type() == CompilerType::Clexe) {
     for (const auto& file : flags_->optional_input_filenames()) {
       // Open the file while gomacc running to prevent from removal.
       optional_files_.push_back(new ScopedFd(ScopedFd::OpenForRead(file)));
@@ -373,7 +378,7 @@ GomaClient::GomaClient(int id, std::unique_ptr<CompilerFlags> flags,
   string buf;
   std::vector<string> info;
   info.push_back(flags_->compiler_name());
-  if (flags_->is_gcc()) {
+  if (flags_->type() == CompilerType::Gcc) {
     const GCCFlags& gcc_flags = static_cast<const GCCFlags&>(*flags_);
     switch (gcc_flags.mode()) {
       case GCCFlags::PREPROCESS:
@@ -459,7 +464,7 @@ GomaClient::Result GomaClient::CallIPCAsync() {
     request_path = "/e";
     PrepareExecRequest(*flags_, exec_req.get());
     req = std::move(exec_req);
-    exec_resp_.reset(new ExecResp);
+    exec_resp_ = absl::make_unique<ExecResp>();
 #ifdef _WIN32
   }
 #endif
@@ -480,34 +485,35 @@ GomaClient::Result GomaClient::CallIPCAsync() {
       }
 
       return IPC_REJECTED;
-    } else {
-      // If the failure reason was failure to connect, try starting
-      // compiler proxy and retry the request.
-      if (StartCompilerProxy()) {
-        status_ = GomaIPC::Status();
-        ipc_chan_ = goma_ipc_.CallAsync(request_path, req.get(), &status_);
-        if (ipc_chan_ != nullptr) {
-          // retry after starting compiler_proxy was successful
-          if (FLAGS_DUMP) {
-            std::cerr << "GOMA: Retry after starting compiler_proxy success"
-                      << std::endl;
-          }
-        } else {
-          // Even if we retried, we weren't successful, give up.
-          if (FLAGS_DUMP) {
-            std::cerr << "GOMA: Retry after starting compiler_proxy was "
-                "unsuccessful" << std::endl;
-          }
-          return IPC_FAIL;
+    }
+    // If the failure reason was failure to connect, try starting
+    // compiler proxy and retry the request.
+    if (StartCompilerProxy()) {
+      status_ = GomaIPC::Status();
+      ipc_chan_ = goma_ipc_.CallAsync(request_path, req.get(), &status_);
+      if (ipc_chan_ != nullptr) {
+        // retry after starting compiler_proxy was successful
+        if (FLAGS_DUMP) {
+          std::cerr << "GOMA: Retry after starting compiler_proxy success"
+                    << std::endl;
         }
       } else {
-        // Starting compiler proxy was unsuccessful
+        // Even if we retried, we weren't successful, give up.
         if (FLAGS_DUMP) {
-          std::cerr << "GOMA: Could not connect to compiler_proxy and "
-              "starting it failed." << std::endl;
+          std::cerr << "GOMA: Retry after starting compiler_proxy was "
+                       "unsuccessful"
+                    << std::endl;
         }
         return IPC_FAIL;
       }
+    } else {
+      // Starting compiler proxy was unsuccessful
+      if (FLAGS_DUMP) {
+        std::cerr << "GOMA: Could not connect to compiler_proxy and "
+                     "starting it failed."
+                  << std::endl;
+      }
+      return IPC_FAIL;
     }
   }
   return IPC_OK;
@@ -565,7 +571,8 @@ string GomaClient::CreateStdinFile() {
       if (errno == EINTR) continue;
       PLOG(ERROR) << "read";
       break;
-    } else if (r == 0) {
+    }
+    if (r == 0) {
       break;
     }
     PCHECK(write(stdin_file_.fd(), buf, r) == r);
@@ -650,7 +657,7 @@ bool GomaClient::PrepareExecRequest(const CompilerFlags& flags, ExecReq* req) {
 
   bool use_color_diagnostics = false;
 #ifndef _WIN32
-  if (CompilerFlags::IsClangCommand(flags.compiler_name()) &&
+  if (GCCFlags::IsClangCommand(flags.compiler_name()) &&
       isatty(STDERR_FILENO)) {
     const char* term = getenv("TERM");
     if (term != nullptr && strcmp(term, "dump") != 0)
@@ -658,7 +665,7 @@ bool GomaClient::PrepareExecRequest(const CompilerFlags& flags, ExecReq* req) {
   }
 #endif
 
-  if (flags.is_gcc()) {
+  if (flags.type() == CompilerType::Gcc) {
     const GCCFlags& gcc_flags = static_cast<const GCCFlags&>(flags);
     if (gcc_flags.is_stdin_input()) {
       CHECK(!isatty(STDIN_FILENO)) << "goma doesn't support tty input."
@@ -674,9 +681,9 @@ bool GomaClient::PrepareExecRequest(const CompilerFlags& flags, ExecReq* req) {
       devtools_goma::RequesterEnv* requester_env = req->mutable_requester_env();
       for (const auto& input : gcc_flags.input_filenames()) {
         if (file::Stem(input) == "conftest") {
-          FileId fid(input);
+          FileStat file_stat(input);
           time_t now = time(nullptr);
-          if (!fid.IsValid() || fid.mtime + 10 > now) {
+          if (!file_stat.IsValid() || file_stat.mtime + 10 > now) {
             // probably conftest.c, force fallback.
             requester_env->add_fallback_input_file(input);
           }

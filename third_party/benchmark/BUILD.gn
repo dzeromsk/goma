@@ -1,0 +1,53 @@
+config("benchmark_config") {
+  include_dirs = [ "src/include" ]
+  defines = [ "HAVE_STD_REGEX" ]
+  if (os == "win" && !is_clang) {
+    # 'inline' used more than once for benchmark.h
+    cflags = [ "/wd4141" ]
+  }
+}
+
+static_library("benchmark") {
+  sources = [
+    "src/src/arraysize.h",
+    "src/src/benchmark.cc",
+    "src/src/benchmark_api_internal.h",
+    "src/src/benchmark_register.cc",
+    "src/src/check.h",
+    "src/src/colorprint.cc",
+    "src/src/colorprint.h",
+    "src/src/commandlineflags.cc",
+    "src/src/commandlineflags.h",
+    "src/src/complexity.cc",
+    "src/src/complexity.h",
+    "src/src/console_reporter.cc",
+    "src/src/counter.cc",
+    "src/src/counter.h",
+    "src/src/csv_reporter.cc",
+    "src/src/cycleclock.h",
+    "src/src/internal_macros.h",
+    "src/src/json_reporter.cc",
+    "src/src/log.h",
+    "src/src/mutex.h",
+    "src/src/re.h",
+    "src/src/reporter.cc",
+    "src/src/sleep.cc",
+    "src/src/sleep.h",
+    "src/src/statistics.cc",
+    "src/src/statistics.h",
+    "src/src/string_util.cc",
+    "src/src/string_util.h",
+    "src/src/sysinfo.cc",
+    "src/src/sysinfo.h",
+    "src/src/timers.cc",
+    "src/src/timers.h",
+  ]
+
+  if (os == "win") {
+    libs = [ "shlwapi.lib" ]
+  }
+
+  configs -= [ "//build/config/compiler:goma_code" ]
+  configs += [ "//build/config/compiler:no_goma_code" ]
+  public_configs = [ ":benchmark_config" ]
+}

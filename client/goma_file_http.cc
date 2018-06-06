@@ -6,7 +6,9 @@
 #include "goma_file_http.h"
 
 #include <sstream>
+#include <utility>
 
+#include "absl/memory/memory.h"
 #include "compiler_specific.h"
 #include "glog/logging.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
@@ -22,10 +24,11 @@ template<typename Req, typename Resp>
 class HttpTask : public devtools_goma::FileServiceClient::AsyncTask<Req, Resp> {
  public:
   HttpTask(devtools_goma::FileServiceHttpClient* file_service,
-           const string& path, const string& trace_id)
+           string path,
+           const string& trace_id)
       : file_service_(file_service),
         http_(file_service->http()),
-        path_(path) {
+        path_(std::move(path)) {
     std::ostringstream ss;
     if (!trace_id.empty()) {
       ss << trace_id << " ";
@@ -68,17 +71,15 @@ class HttpTask : public devtools_goma::FileServiceClient::AsyncTask<Req, Resp> {
 
 namespace devtools_goma {
 
-FileServiceHttpClient::FileServiceHttpClient(
-    HttpRPC* http,
-    const string& store_path,
-    const string& lookup_path,
-    MultiFileStore* multi_file_store)
+FileServiceHttpClient::FileServiceHttpClient(HttpRPC* http,
+                                             string store_path,
+                                             string lookup_path,
+                                             MultiFileStore* multi_file_store)
     : http_(http),
-      store_path_(store_path),
-      lookup_path_(lookup_path),
+      store_path_(std::move(store_path)),
+      lookup_path_(std::move(lookup_path)),
       num_rpc_(0),
-      multi_file_store_(multi_file_store) {
-}
+      multi_file_store_(multi_file_store) {}
 
 FileServiceHttpClient::~FileServiceHttpClient() {
 }
@@ -90,7 +91,7 @@ FileServiceHttpClient::WithRequesterInfoAndTraceId(
   std::unique_ptr<FileServiceHttpClient> cloned(
       new FileServiceHttpClient(http_, store_path_, lookup_path_,
                                 multi_file_store_));
-  cloned->requester_info_.reset(new RequesterInfo);
+  cloned->requester_info_ = absl::make_unique<RequesterInfo>();
   *cloned->requester_info_ = requester_info;
   cloned->trace_id_ = trace_id;
   return cloned;

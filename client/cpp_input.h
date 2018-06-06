@@ -10,29 +10,39 @@
 
 #include "content.h"
 #include "cpp_input_stream.h"
-#include "include_guard_detector.h"
+#include "include_item.h"
 
 namespace devtools_goma {
 
 class CppInput {
  public:
-  CppInput(std::unique_ptr<Content> content, const FileId& fileid,
-           const string& filepath, const string& directory,
+  CppInput(const CppDirectiveList* directives,
+           const string& include_guard_ident,
+           const string& filepath,
+           const string& directory,
            int include_dir_index)
       : filepath_(filepath),
-        directory_(directory), include_dir_index_(include_dir_index),
-        stream_(std::move(content), fileid, filepath) {
-  }
+        directory_(directory),
+        include_dir_index_(include_dir_index),
+        directive_pos_(0),
+        directives_(directives),
+        include_guard_ident_(include_guard_ident) {}
 
   const string& filepath() const { return filepath_; }
   const string& directory() const { return directory_; }
-  const FileId& fileid() const { return stream_.fileid(); }
   int include_dir_index() const { return include_dir_index_; }
 
-  CppInputStream* stream() { return &stream_; }
+  size_t directive_pos() const { return directive_pos_; }
 
-  IncludeGuardDetector* include_guard_detector() {
-    return &include_guard_detector_;
+  const string& include_guard_ident() const { return include_guard_ident_; }
+
+  const CppDirective* NextDirective() {
+    const CppDirectiveList& directives = *directives_;
+    if (directive_pos_ < directives.size()) {
+      return directives[directive_pos_++].get();
+    }
+
+    return nullptr;
   }
 
  private:
@@ -40,8 +50,9 @@ class CppInput {
   const string directory_;
   const int include_dir_index_;
 
-  CppInputStream stream_;
-  IncludeGuardDetector include_guard_detector_;
+  size_t directive_pos_;
+  const CppDirectiveList* directives_;
+  const string include_guard_ident_;
 
   DISALLOW_COPY_AND_ASSIGN(CppInput);
 };

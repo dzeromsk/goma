@@ -5,6 +5,7 @@
 
 #include "spawner_win.h"
 
+#include <process.h>
 #include <psapi.h>
 #pragma comment(lib, "psapi.lib")
 
@@ -13,14 +14,14 @@
 #include <memory>
 #include <sstream>
 
-#include <glog/logging.h>
-
-#include "absl/strings/string_view.h"
 #include "absl/strings/match.h"
+#include "absl/strings/string_view.h"
 #include "cmdline_parser.h"
 #include "compiler_specific.h"
 #include "file.h"
 #include "file_dir.h"
+#include "filesystem.h"
+#include "glog/logging.h"
 #include "mypath.h"
 #include "path.h"
 #include "util.h"
@@ -195,6 +196,12 @@ namespace devtools_goma {
 
 static const DWORD kInvalidProcessStatus = 0xffffffff;
 
+// On Windows, the common convention of invalid PID is 0 (see
+// http://blogs.msdn.com/b/oldnewthing/archive/2004/02/23/78395.aspx for
+// discussions, another common invalid pid value is DWORD(-1), which is
+// 0xffffffff and not 64-bit friendly).
+const int Spawner::kInvalidPid = 0;
+
 string* SpawnerWin::temp_dir_;
 
 /* static */
@@ -203,8 +210,9 @@ void SpawnerWin::Setup() {
     delete temp_dir_;
   }
   temp_dir_ = new string(GetSubprocTempDirectory());
-  RecursivelyDelete(*temp_dir_);
-  CHECK(File::CreateDir(temp_dir_->c_str(), 0755)) << temp_dir_->c_str();
+  file::RecursivelyDelete(*temp_dir_, file::Defaults());
+  CHECK(file::CreateDir(temp_dir_->c_str(), file::CreationMode(0755)).ok())
+      << temp_dir_->c_str();
   LOG(INFO) << "Create temp dir: " << *temp_dir_;
 }
 
@@ -213,7 +221,7 @@ void SpawnerWin::TearDown() {
   if (temp_dir_ == nullptr) {
     return;
   }
-  if (RecursivelyDelete(*temp_dir_)) {
+  if (file::RecursivelyDelete(*temp_dir_, file::Defaults()).ok()) {
     LOG(INFO) << "Remove temp dir: " << *temp_dir_;
   } else {
     LOG(ERROR) << "Remove temp dir failed?: " << *temp_dir_;
@@ -238,18 +246,24 @@ int SpawnerWin::Run(const string& cmd, const std::vector<string>& args,
   DCHECK(!child_process_.valid());
 
   std::vector<string> environs;
-  for (const auto& e : envs) {
-    if (temp_dir_ != nullptr) {
-      if (IsEnvVar(e, "TEMP=")) {
-        environs.push_back("TEMP=" + *temp_dir_);
-        continue;
+  if (keep_env_) {
+    environs = envs;
+  } else {
+    // Use own temp dir for subprocess to make it easy to clean up temp file.
+    // See b/21312000
+    for (const auto& e : envs) {
+      if (temp_dir_ != nullptr) {
+        if (IsEnvVar(e, "TEMP=")) {
+          environs.push_back("TEMP=" + *temp_dir_);
+          continue;
+        }
+        if (IsEnvVar(e, "TMP=")) {
+          environs.push_back("TMP=" + *temp_dir_);
+          continue;
+        }
       }
-      if (IsEnvVar(e, "TMP=")) {
-        environs.push_back("TMP=" + *temp_dir_);
-        continue;
-      }
+      environs.push_back(e);
     }
-    environs.push_back(e);
   }
 
   // Having files to redirect or console output should be gathered.
@@ -312,8 +326,14 @@ int SpawnerWin::Run(const string& cmd, const std::vector<string>& args,
     child_process_.reset(pi.hProcess);
     job_name_ = CreateJobName(pi.dwProcessId, command_line);
     VLOG(1) << "Job name:" << job_name_;
-    child_job_ = AssignProcessToNewJobObject(
-        child_process_.handle(), job_name_);
+
+    // We don't assign the process to a new job, otherwise it's killed when
+    // compiler_proxy ends. (e.g. auto updater should be alive after
+    // compiler_proxy.exe is killed.)
+    if (!detach_) {
+      child_job_ = AssignProcessToNewJobObject(
+          child_process_.handle(), job_name_);
+    }
 
     process_status_ = STILL_ACTIVE;
     ResumeThread(pi.hThread);
@@ -618,15 +638,26 @@ int SpawnerWin::RunRedirected(const string& command_line,
   VLOG(1) << "Job name:" << job_name_;
   child_job_ = AssignProcessToNewJobObject(child_process_.handle(), job_name_);
 
-  output_thread_.reset(
-      CreateThread(nullptr, 0, OutputThread, this, 0, &output_thread_id_));
+  uintptr_t r_output =
+      _beginthreadex(nullptr, 0, OutputThread, this, 0, &output_thread_id_);
+  if (r_output == 0) {
+    LOG(ERROR) << "failed to start spawner output thread";
+    return kInvalidPid;
+  }
+
+  output_thread_.reset(reinterpret_cast<HANDLE>(r_output));
   ResumeThread(pi.hThread);
   CloseHandle(pi.hThread);
 
   if (!in_file.empty()) {
     input_file_ = in_file;
-    input_thread_.reset(
-        CreateThread(nullptr, 0, InputThread, this, 0, &input_thread_id_));
+    uintptr_t r_input =
+        _beginthreadex(nullptr, 0, InputThread, this, 0, &input_thread_id_);
+    if (r_input == 0) {
+      LOG(ERROR) << "failed to start spawner input thread";
+      return kInvalidPid;
+    }
+    input_thread_.reset(reinterpret_cast<HANDLE>(r_input));
   }
 
   VLOG(1) << "Run: pid=" << pi.dwProcessId;
@@ -876,7 +907,7 @@ void SpawnerWin::Flush() {
 }
 
 /* static */
-DWORD WINAPI SpawnerWin::InputThread(LPVOID thread_params) {
+unsigned __stdcall SpawnerWin::InputThread(void* thread_params) {
   SpawnerWin* self = reinterpret_cast<SpawnerWin*>(thread_params);
   DCHECK(self);
 
@@ -886,7 +917,7 @@ DWORD WINAPI SpawnerWin::InputThread(LPVOID thread_params) {
 }
 
 /* static */
-DWORD WINAPI SpawnerWin::OutputThread(LPVOID thread_params) {
+unsigned __stdcall SpawnerWin::OutputThread(void* thread_params) {
   SpawnerWin* self = reinterpret_cast<SpawnerWin*>(thread_params);
   DCHECK(self);
 

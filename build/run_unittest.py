@@ -23,19 +23,28 @@ is_mac = sys.platform == 'darwin'
 
 TEST_CASES = [
   ("lib", [
+    "clang_tidy_execreq_normalizer_unittest",
+    "clang_tidy_flags_unittest",
     "cmdline_parser_unittest",
-    "compress_util_unittest",
     "compiler_flags_test",
+    "compiler_type_specific_unittest",
+    "compress_util_unittest",
     "execreq_normalizer_unittest",
     "execreq_verifier_unittest",
     "file_reader_unittest",
     "flag_parser_unittest",
+    "gcc_execreq_normalizer_unittest",
+    "gcc_flags_unittest",
     "goma_file_unittest",
     "goma_hash_unittest",
+    "java_execreq_normalizer_unittest",
+    "java_flags_unittest",
     "lockhelper_unittest",
     "path_resolver_unittest",
     "path_unittest",
     "path_util_unittest",
+    "vc_execreq_normalizer_unittest",
+    "vc_flags_unittest",
     ]
   ),
   ("client", [
@@ -48,6 +57,13 @@ TEST_CASES = [
     "compiler_info_cache_unittest",
     "compiler_info_unittest",
     "content_cursor_unittest",
+    "cpp_directive_parser_unittest",
+    "cpp_include_processor_unittest",
+    "cpp_macro_expander_cbv_unittest",
+    "cpp_macro_expander_naive_unittest",
+    "cpp_macro_expander_unittest",
+    "cpp_macro_set_unittest",
+    "cpp_macro_unittest",
     "cpp_parser_unittest",
     "cpp_tokenizer_unittest",
     "cpu_unittest",
@@ -55,6 +71,8 @@ TEST_CASES = [
     "directive_filter_unittest",
     "env_flags_unittest",
     "filename_id_table_unittest",
+    "flat_map_unittest",
+    "flat_set_unittest",
     "goma_ipc_unittest",
     "gomacc_argv_unittest",
     "hash_rewrite_parser_unittest",
@@ -63,13 +81,14 @@ TEST_CASES = [
     "http_unittest",
     "include_cache_unittest",
     "include_file_utils_unittest",
-    "include_processor_unittest",
+    "include_guard_detector_unittest",
     "ioutil_unittest",
     "jar_parser_unittest",
     "jarfile_reader_unittest",
     "jwt_unittest",
     "linked_unordered_map_unittest",
     "linker_script_parser_unittest",
+    "list_dir_cache_unittest",
     "local_output_cache_unittest",
     "log_cleaner_unittest",
     "luci_context_unittest",
@@ -78,6 +97,7 @@ TEST_CASES = [
     "oauth2_unittest",
     "openssl_engine_unittest",
     "rand_util_unittest",
+    "sha256_hash_cache_unittest",
     "simple_timer_unittest",
     "static_darray_unittest",
     "subprocess_task_unittest",
@@ -103,6 +123,7 @@ else:
   TEST_CASES[1][1].append('arfile_unittest')
   TEST_CASES[1][1].append('compiler_flags_util_unittest')
   TEST_CASES[1][1].append('linker_input_processor_unittest')
+  TEST_CASES[1][1].append('spawner_posix_unittest')
   if sys.platform.startswith('linux'):
     TEST_CASES[1][1].append('elf_parser_unittest')
     TEST_CASES[1][1].append('library_path_resolver_unittest')

@@ -160,10 +160,13 @@ class ThreadpoolHttpServer {
   };
   static const RegisteredClosureID kInvalidClosureId = 0;
 
-  ThreadpoolHttpServer(const string& listen_addr,
-                       int port, int num_find_ports,
-                       WorkerThreadManager* wm, int num_threads,
-                       HttpHandler* http_handler, int max_num_sockets);
+  ThreadpoolHttpServer(string listen_addr,
+                       int port,
+                       int num_find_ports,
+                       WorkerThreadManager* wm,
+                       int num_threads,
+                       HttpHandler* http_handler,
+                       int max_num_sockets);
   ~ThreadpoolHttpServer();
 
   void HandleIncoming(HttpServerRequest* request);
@@ -239,11 +242,12 @@ class ThreadpoolHttpServer {
   void SendNamedPipeJobToWorkerThread(NamedPipeServer::Request* req);
 #endif
   void SendJobToWorkerThread(ScopedSocket&& socket, SocketType socket_type);
-  void UpdateSocketIdleUnlocked(SocketType socket_type);
+  void UpdateSocketIdleUnlocked(SocketType socket_type)
+      EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   const string listen_addr_;
   int port_;
-  int port_ready_;  // guarded by mu_
+  int port_ready_ GUARDED_BY(mu_);
   int num_find_ports_;
   WorkerThreadManager* wm_;
   int pool_;
@@ -258,12 +262,12 @@ class ThreadpoolHttpServer {
 
   mutable Lock mu_;
   ConditionVariable cond_;
-  int max_sockets_[NUM_SOCKET_TYPES];
-  int num_sockets_[NUM_SOCKET_TYPES];
-  int idle_counter_[NUM_SOCKET_TYPES];
-  bool idle_counting_;
-  std::vector<IdleClosure*> idle_closures_;
-  RegisteredClosureID last_closure_id_;
+  int max_sockets_[NUM_SOCKET_TYPES] GUARDED_BY(mu_);
+  int num_sockets_[NUM_SOCKET_TYPES] GUARDED_BY(mu_);
+  int idle_counter_[NUM_SOCKET_TYPES] GUARDED_BY(mu_);
+  bool idle_counting_ GUARDED_BY(mu_);
+  std::vector<IdleClosure*> idle_closures_ GUARDED_BY(mu_);
+  RegisteredClosureID last_closure_id_ GUARDED_BY(mu_);
 
 #ifdef _WIN32
   std::unique_ptr<PipeHandler> pipe_handler_;

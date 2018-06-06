@@ -5,13 +5,19 @@
 
 #include "include_cache.h"
 
+#include "absl/memory/memory.h"
 #include "compiler_specific.h"
 #include "content.h"
 #include "counterz.h"
+#include "cpp_directive_optimizer.h"
+#include "cpp_directive_parser.h"
+#include "cpp_parser.h"
 #include "directive_filter.h"
-#include "file_id.h"
+#include "file_stat.h"
 #include "goma_hash.h"
 #include "histogram.h"
+#include "include_guard_detector.h"
+
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_stats.pb.h"
 MSVC_POP_WARNING()
@@ -21,45 +27,78 @@ namespace devtools_goma {
 // IncludeCache::Item owns |content|.
 class IncludeCache::Item {
  public:
-  Item(std::unique_ptr<Content> content, const FileId& content_file_id,
-       const SHA256HashValue& directive_hash,
-       size_t original_content_size, size_t updated_count)
+  Item(std::unique_ptr<Content> content,
+       IncludeItem include_item,
+       absl::optional<SHA256HashValue> directive_hash,
+       const FileStat& content_file_stat,
+       size_t original_content_size)
       : content_(std::move(content)),
-        content_file_id_(content_file_id),
-        directive_hash_(directive_hash),
+        include_item_(std::move(include_item)),
+        directive_hash_(std::move(directive_hash)),
         original_content_size_(original_content_size),
-        updated_count_(updated_count) {
-  }
+        content_file_stat_(content_file_stat),
+        updated_count_(0) {}
 
   ~Item() {}
 
-  const Content* content() const {
-    return content_.get();
+  static std::unique_ptr<Item> CreateFromFile(const string& filepath,
+                                              const FileStat& file_stat,
+                                              bool needs_directive_hash) {
+    std::unique_ptr<Content> content(Content::CreateFromFile(filepath));
+    if (!content) {
+      return nullptr;
+    }
+
+    size_t original_content_size = content->size();
+    std::unique_ptr<Content> filtered_content(
+        DirectiveFilter::MakeFilteredContent(*content));
+
+    CppDirectiveParser parser;
+    CppDirectiveList directives;
+    if (!parser.Parse(*filtered_content, &directives)) {
+      return nullptr;
+    }
+
+    CppDirectiveOptimizer::Optimize(&directives);
+
+    string include_guard_ident = IncludeGuardDetector::Detect(directives);
+
+    absl::optional<SHA256HashValue> directive_hash;
+    if (needs_directive_hash) {
+      SHA256HashValue h;
+      ComputeDataHashKeyForSHA256HashValue(filtered_content->ToStringView(),
+                                           &h);
+      directive_hash = std::move(h);
+    }
+
+    return absl::make_unique<Item>(
+        std::move(filtered_content),
+        IncludeItem(std::make_shared<CppDirectiveList>(std::move(directives)),
+                    std::move(include_guard_ident)),
+        directive_hash, file_stat, original_content_size);
   }
 
-  const FileId& content_file_id() const {
-    return content_file_id_;
+  const Content& content() const { return *content_; }
+  const IncludeItem& include_item() const { return include_item_; }
+  const absl::optional<SHA256HashValue>& directive_hash() const {
+    return directive_hash_;
   }
+  const FileStat& content_file_stat() const { return content_file_stat_; }
 
-  const SHA256HashValue& directive_hash() const { return directive_hash_; }
-  void set_directive_hash(const SHA256HashValue& hash) {
-    directive_hash_ = hash;
-  }
+  size_t original_content_size() const { return original_content_size_; }
 
-  size_t original_content_size() const {
-    return original_content_size_;
-  }
-
-  size_t updated_count() const {
-    return updated_count_;
-  }
+  size_t updated_count() const { return updated_count_; }
+  void set_updated_count(size_t c) { updated_count_ = c; }
 
  private:
   const std::unique_ptr<Content> content_;
-  const FileId content_file_id_;
-  SHA256HashValue directive_hash_;
+  const IncludeItem include_item_;
+  const absl::optional<SHA256HashValue> directive_hash_;
+
   const size_t original_content_size_;
-  const size_t updated_count_;
+
+  const FileStat content_file_stat_;
+  size_t updated_count_;
 
   DISALLOW_COPY_AND_ASSIGN(Item);
 };
@@ -69,11 +108,9 @@ IncludeCache* IncludeCache::instance_;
 // static
 void IncludeCache::Init(int max_cache_size_in_mb,
                         bool calculates_directive_hash) {
-  if (max_cache_size_in_mb == 0)
-    return;
-
   size_t max_cache_size = max_cache_size_in_mb * 1024LL * 1024LL;
   instance_ = new IncludeCache(max_cache_size, calculates_directive_hash);
+  CppParser::EnsureInitialize();
 }
 
 // static
@@ -94,119 +131,105 @@ IncludeCache::IncludeCache(size_t max_cache_size,
 IncludeCache::~IncludeCache() {
 }
 
+IncludeItem IncludeCache::GetIncludeItem(const string& filepath,
+                                         const FileStat& file_stat) {
+  GOMA_COUNTERZ("GetDirectiveList");
+
+  {
+    AUTO_SHARED_LOCK(lock, &rwlock_);
+    if (const Item* item = GetItemIfNotModifiedUnlocked(filepath, file_stat)) {
+      hit_count_.Add(1);
+      return item->include_item();
+    }
+  }
+
+  missed_count_.Add(1);
+
+  std::unique_ptr<Item> item(
+      Item::CreateFromFile(filepath, file_stat, calculates_directive_hash()));
+  if (!item) {
+    return IncludeItem();
+  }
+
+  IncludeItem include_item = item->include_item();
+
+  {
+    AUTO_EXCLUSIVE_LOCK(lock, &rwlock_);
+    InsertUnlocked(filepath, std::move(item), file_stat);
+  }
+
+  return include_item;
+}
+
+absl::optional<SHA256HashValue> IncludeCache::GetDirectiveHash(
+    const string& filepath,
+    const FileStat& file_stat) {
+  DCHECK(calculates_directive_hash_);
+
+  {
+    AUTO_SHARED_LOCK(lock, &rwlock_);
+    if (const Item* item = GetItemIfNotModifiedUnlocked(filepath, file_stat)) {
+      return item->directive_hash();
+    }
+  }
+
+  std::unique_ptr<Item> item(
+      Item::CreateFromFile(filepath, file_stat, calculates_directive_hash()));
+  if (!item) {
+    return absl::nullopt;
+  }
+  absl::optional<SHA256HashValue> directive_hash = item->directive_hash();
+
+  {
+    AUTO_EXCLUSIVE_LOCK(lock, &rwlock_);
+    InsertUnlocked(filepath, std::move(item), file_stat);
+  }
+  return directive_hash;
+}
+
 const IncludeCache::Item* IncludeCache::GetItemIfNotModifiedUnlocked(
-    const string& key, const FileId& file_id) const {
+    const string& key,
+    const FileStat& file_stat) const {
   auto it = cache_items_.find(key);
   if (it == cache_items_.end())
     return nullptr;
 
   const Item* item = it->second.get();
-  if (file_id != item->content_file_id())
+  if (file_stat != item->content_file_stat())
     return nullptr;
 
   return item;
 }
 
-std::unique_ptr<Content> IncludeCache::GetCopyIfNotModified(
-    const string& filepath, const FileId& file_id) {
-  GOMA_COUNTERZ("GetCopyIfNotModified");
+void IncludeCache::InsertUnlocked(const string& key,
+                                  std::unique_ptr<Item> item,
+                                  const FileStat& file_stat) {
+  size_t filtered_content_size = item->content().size();
 
-  std::unique_ptr<Content> result;
-  {
-    // Since CreateFromContent might be heavy, we don't want to take
-    // exclusive lock here.
-    AUTO_SHARED_LOCK(lock, &rwlock_);
-    const Item* item = GetItemIfNotModifiedUnlocked(filepath, file_id);
-    if (item != nullptr) {
-      GOMA_COUNTERZ("CreateFromContent");
-      result = Content::CreateFromContent(*item->content());
-    }
-  }
-
-  if (result != nullptr) {
-    hit_count_.Add(1);
-  } else {
-    missed_count_.Add(1);
-  }
-
-  return result;
-}
-
-OptionalSHA256HashValue IncludeCache::GetDirectiveHash(const string& filepath,
-                                                       const FileId& file_id) {
-  DCHECK(calculates_directive_hash_);
-
-  {
-    AUTO_SHARED_LOCK(lock, &rwlock_);
-    const Item* item = GetItemIfNotModifiedUnlocked(filepath, file_id);
-    if (item != nullptr) {
-      return OptionalSHA256HashValue(item->directive_hash());
-    }
-  }
-
-  std::unique_ptr<Content> content(Content::CreateFromFile(filepath));
-  if (content.get() == nullptr) {
-    return OptionalSHA256HashValue();
-  }
-
-  SHA256HashValue hash_value;
-  InsertInternal(filepath, *content, file_id, &hash_value);
-  return OptionalSHA256HashValue(hash_value);
-}
-
-std::unique_ptr<Content> IncludeCache::Insert(
-    const string& key, const Content& content, const FileId& content_file_id) {
-  SHA256HashValue hash_value;
-  return InsertInternal(key, content, content_file_id, &hash_value);
-}
-
-std::unique_ptr<Content> IncludeCache::InsertInternal(
-    const string& key, const Content& content, const FileId& content_file_id,
-    SHA256HashValue* directive_hash) {
-  std::unique_ptr<Content> filtered_content =
-      DirectiveFilter::MakeFilteredContent(content);
-  std::unique_ptr<Content> returned_content(
-      Content::CreateFromContent(*filtered_content));
-  size_t original_size = content.size();
-
-  if (calculates_directive_hash_) {
-    DCHECK(directive_hash);
-    ComputeDataHashKeyForSHA256HashValue(filtered_content->ToStringView(),
-                                         directive_hash);
-  }
-
-  AUTO_EXCLUSIVE_LOCK(lock, &rwlock_);
   auto it = cache_items_.find(key);
-
-  const size_t filtered_content_size = filtered_content->size();
   if (it == cache_items_.end()) {
-    std::unique_ptr<Item> item(
-        new Item(std::move(filtered_content), content_file_id,
-                 *directive_hash, original_size, 0));
     cache_items_.emplace_back(key, std::move(item));
   } else {
-    size_t original_updated_count = it->second->updated_count();
-    ++count_item_updated_;
-    current_cache_size_ -= it->second->content()->size();
-    it->second.reset(new Item(std::move(filtered_content), content_file_id,
-                              *directive_hash,
-                              original_size, original_updated_count + 1));
+    current_cache_size_ -= item->content().size();
+    item->set_updated_count(it->second->updated_count() + 1);
+    it->second = std::move(item);
   }
 
   current_cache_size_ += filtered_content_size;
 
+  EvictCacheUnlocked();
+}
+
+void IncludeCache::EvictCacheUnlocked() {
   // Evicts older cache.
-  CHECK_GT(max_cache_size_, 0U);
   while (max_cache_size_ < current_cache_size_) {
     DCHECK(!cache_items_.empty());
 
-    current_cache_size_ -= cache_items_.front().second->content()->size();
+    current_cache_size_ -= cache_items_.front().second->content().size();
     cache_items_.pop_front();
 
     count_item_evicted_++;
   }
-
-  return returned_content;
 }
 
 void IncludeCache::Dump(std::ostringstream* ss) {
@@ -230,15 +253,14 @@ void IncludeCache::Dump(std::ostringstream* ss) {
     max_original_size_in_bytes = std::max(max_original_size_in_bytes,
                                           item->original_content_size());
 
-    total_filtered_size_in_bytes += item->content()->size();
-    max_filtered_size_in_bytes = std::max(max_filtered_size_in_bytes,
-                                          item->content()->size());
+    total_filtered_size_in_bytes += item->content().size();
+    max_filtered_size_in_bytes =
+        std::max(max_filtered_size_in_bytes, item->content().size());
 
     double compaction_ratio = 0;
     if (item->original_content_size() > 0) {
-      compaction_ratio =
-          static_cast<double>(item->content()->size()) /
-          item->original_content_size();
+      compaction_ratio = static_cast<double>(item->content().size()) /
+                         item->original_content_size();
     }
     compaction_ratio_histogram.Add(compaction_ratio * 100);
 
@@ -262,6 +284,7 @@ void IncludeCache::Dump(std::ostringstream* ss) {
 
   if (num_cache_item > 0) {
     (*ss) << std::endl;
+
     (*ss) << "Original Headers: " << std::endl;
     (*ss) << "  Total   size = "
           << total_original_size_in_bytes << " bytes" << std::endl;
@@ -330,9 +353,9 @@ void IncludeCache::DumpStatsToProto(IncludeCacheStats* stats) {
       max_original_size_in_bytes = std::max(max_original_size_in_bytes,
                                             item->original_content_size());
 
-      total_filtered_size_in_bytes += item->content()->size();
-      max_filtered_size_in_bytes = std::max(max_filtered_size_in_bytes,
-                                            item->content()->size());
+      total_filtered_size_in_bytes += item->content().size();
+      max_filtered_size_in_bytes =
+          std::max(max_filtered_size_in_bytes, item->content().size());
     }
 
     stats->set_original_total_size(total_original_size_in_bytes);

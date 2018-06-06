@@ -6,15 +6,17 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_DEPS_CACHE_H_
 #define DEVTOOLS_GOMA_CLIENT_DEPS_CACHE_H_
 
+#include <atomic>
 #include <set>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
 
+#include "absl/types/optional.h"
 #include "autolock_timer.h"
 #include "cache_file.h"
-#include "file_id_cache.h"
+#include "file_stat_cache.h"
 #include "filename_id_table.h"
 #include "goma_hash.h"
 #include "sha256hash_hasher.h"
@@ -33,12 +35,12 @@ class DepsCacheStats;
 // we check whether we can reuse the dependet files list.
 // This is done by the following algorithm:
 //  For all dependent files:
-//   1. Check FileId. If it's the same, we think a file is not changed.
+//   1. Check FileStat. If it's the same, we think a file is not changed.
 //   2. Check directive_hash, which is a hash value created from file's
 //      directive lines. If it's the same, dependant files won't be changed.
 class DepsCache {
  public:
-  typedef OptionalSHA256HashValue Identifier;
+  using Identifier = absl::optional<SHA256HashValue>;
 
   static DepsCache* instance() { return instance_; }
   static bool IsEnabled() { return instance_ != nullptr; }
@@ -70,7 +72,7 @@ class DepsCache {
                        const std::string& cwd,
                        const std::string& input_file,
                        const std::set<std::string>& dependencies,
-                       FileIdCache* file_id_cache);
+                       FileStatCache* file_stat_cache);
 
   // Gets dependent files using |identifer|.
   // We check the dependecies are not changed. If changed, false will be
@@ -83,7 +85,7 @@ class DepsCache {
                        const std::string& cwd,
                        const std::string& input_file,
                        std::set<std::string>* dependencies,
-                       FileIdCache* file_id_cache);
+                       FileStatCache* file_stat_cache);
 
   void RemoveDependency(const Identifier& identifier);
 
@@ -97,17 +99,17 @@ class DepsCache {
   // |directive_hash| is a hash value of the file's directive lines.
   struct DepsHashId {
     DepsHashId() {}
-    DepsHashId(FilenameIdTable::Id id, const FileId& file_id,
-               const SHA256HashValue& directive_hash) :
-        id(id), file_id(file_id), directive_hash(directive_hash) {
-    }
+    DepsHashId(FilenameIdTable::Id id,
+               const FileStat& file_stat,
+               const SHA256HashValue& directive_hash)
+        : id(id), file_stat(file_stat), directive_hash(directive_hash) {}
 
     bool IsValid() const {
-      return id != FilenameIdTable::kInvalidId && file_id.IsValid();
+      return id != FilenameIdTable::kInvalidId && file_stat.IsValid();
     }
 
     FilenameIdTable::Id id;
-    FileId file_id;
+    FileStat file_stat;
     SHA256HashValue directive_hash;
   };
 
@@ -115,7 +117,7 @@ class DepsCache {
     DepsTableData() : last_used_time(0) {
     }
 
-    time_t last_used_time;
+    std::atomic<time_t> last_used_time;
     std::vector<DepsHashId> deps_hash_ids;
   };
 
@@ -139,9 +141,19 @@ class DepsCache {
   void IncrHitCount();
 
   static bool IsDirectiveModified(const string& filename,
-                                  const FileId& old_file_id,
+                                  const FileStat& old_file_stat,
                                   const SHA256HashValue& old_directive_hash,
-                                  FileIdCache* file_id_cache);
+                                  FileStatCache* file_stat_cache);
+
+  // Used for test.
+  bool UpdateLastUsedTime(const Identifier& identifier, time_t last_used_time);
+  size_t deps_table_size() const {
+    AUTO_SHARED_LOCK(lock, &mu_);
+    return deps_table_.size();
+  }
+  bool GetDepsHashId(const Identifier& identifier,
+                     const FilenameIdTable::Id& id,
+                     DepsHashId* deps_hash_id) const;
 
   static DepsCache* instance_;
 
@@ -156,9 +168,8 @@ class DepsCache {
   // In that case, cache is just ignored.
   const int max_proto_size_in_mega_bytes_;
 
-  // protects deps_table_.
-  mutable Lock mu_;
-  DepsTable deps_table_;
+  mutable ReadWriteLock mu_;
+  DepsTable deps_table_ GUARDED_BY(mu_);
 
   // Instead of using a filename, we alternatively use an id for
   // performance and memory space. So, we manage this table to convert
@@ -166,9 +177,9 @@ class DepsCache {
   FilenameIdTable filename_id_table_;
 
   mutable Lock count_mu_;
-  unsigned int hit_count_;
-  unsigned int missed_count_;
-  unsigned int missed_by_updated_count_;
+  unsigned int hit_count_ GUARDED_BY(count_mu_);
+  unsigned int missed_count_ GUARDED_BY(count_mu_);
+  unsigned int missed_by_updated_count_ GUARDED_BY(count_mu_);
 
   DISALLOW_COPY_AND_ASSIGN(DepsCache);
 };

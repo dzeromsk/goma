@@ -3,20 +3,21 @@ vars = {
 }
 
 deps = {
-     # protobuf 3.3.0
+     # protobuf 3.5.1
      # Note: When you update protobuf, you will need to update
      # test/goma_data.pb.{h,cc}. Copying them from your output directory should
      # work.
      "client/third_party/protobuf/protobuf":
-     "https://github.com/google/protobuf.git@a6189acd18b00611c1dc7042299ad75486f08a1a",
+     "https://github.com/google/protobuf.git@106ffc04be1abf3ff3399f54ccf149815b287dd9",
 
      # google-glog
      "client/third_party/glog":
      "https://github.com/google/glog.git@2063b387080c1e7adffd33ca07adff0eb346ff1a",
 
-     # googletest 1.7.0
+     # googletest
      "client/third_party/gtest":
-     Var("chromium_git") + "/external/googletest.git@6215b1cab9c2cb93cc0110fd536af3be5ac18f93",
+     Var('chromium_git') + '/external/github.com/google/googletest.git' + '@' +
+         'a325ad2db5deb623eab740527e559b81c0f39d65',
 
      # zlib 1.2.8
      "client/third_party/zlib":
@@ -43,32 +44,32 @@ deps = {
 
      # chrome's deps/third_party/boringssl
      "client/third_party/boringssl/src":
-     "https://boringssl.googlesource.com/boringssl@f8058d41147543d6ad9a5ae5d70e7d19198bbe33",
+     "https://boringssl.googlesource.com/boringssl@81a6f6d8de908e27901f5c968c576fbb9c3f35d0",
 
      # google-breakpad
      "client/third_party/breakpad/breakpad":
      Var("chromium_git") + "/breakpad/breakpad.git@" +
-         "70914b2d380d893364ad0110b8af18ba1ed5aaa3",
+         "e93f852a3c316ad767381d5e5bc839eba5c6225b",
 
      # lss
      "client/third_party/lss":
      Var("chromium_git") + "/linux-syscall-support.git@" +
-         "a91633d172407f6c83dd69af11510b37afebb7f9",
+         "a89bf7903f3169e6bc7b8efc10a73a7571de21cf",
 
      # chrome's patched-yasm
      "client/third_party/yasm/source/patched-yasm":
      Var("chromium_git") + "/chromium/deps/yasm/patched-yasm.git@" +
          "b98114e18d8b9b84586b10d24353ab8616d4c5fc",
 
-     # libc++ r256621
+     # libc++ r323563
      "client/third_party/libc++/trunk":
      Var("chromium_git") + "/chromium/llvm-project/libcxx.git@" +
-         "b1ece9c037d879843b0b0f5a2802e1e9d443b75a",
+         "27c341db41bc9df5c6f19cde65f002d6f1c2eb3c",
 
-     # libc++abi r256623
+     # libc++abi r323495
      "client/third_party/libc++abi/trunk":
      Var("chromium_git") + "/chromium/llvm-project/libcxxabi.git@" +
-         "0edb61e2e581758fc4cd4cd09fc588b3fc91a653",
+         "e1601db2504857d44db88a5d4e2ca50b32bbb7d9",
 
      # libFuzzer
      "client/third_party/libFuzzer/src":
@@ -77,11 +78,16 @@ deps = {
 
      # abseil
      "client/third_party/abseil/src":
-     "https://github.com/abseil/abseil-cpp.git@055cc7dce10aa6bd7cc2ef64e0fe453fb792da62",
+     "https://github.com/abseil/abseil-cpp.git@f88b4e9cd876905ee694cee1720095330e0bd20f",
 
-     # cctz (abseil needs this)
-     "client/third_party/cctz/src":
-     "https://github.com/google/cctz.git@e19879df3a14791b7d483c359c4acd6b2a1cd96b",
+     # google benchmark v1.3.0
+     "client/third_party/benchmark/src":
+     "https://github.com/google/benchmark.git@336bb8db986cc52cdf0cefa0a7378b9567d1afee",
+
+     # clang format scripts
+     "client/buildtools/clang_format/script":
+     Var("chromium_git") + "/chromium/llvm-project/cfe/tools/" +
+     "clang-format.git@0653eee0c81ea04715c635dd0885e8096ff6ba6d",
 }
 
 hooks = [
@@ -134,6 +140,40 @@ hooks = [
                    "--bucket", "chromium-gn",
                    "-s", "client/buildtools/linux64/gn.sha1",
        ],
+     },
+     # Pull clang-format binaries using checked-in hashes.
+     {
+         'name': 'clang_format_win',
+         'pattern': '.',
+         'condition': 'host_os == "win"',
+         'action': [ 'download_from_google_storage',
+                     '--no_resume',
+                     '--no_auth',
+                     '--bucket', 'chromium-clang-format',
+                     '-s', 'client/buildtools/win/clang-format.exe.sha1',
+         ],
+     },
+     {
+         'name': 'clang_format_mac',
+         'pattern': '.',
+         'condition': 'host_os == "mac"',
+         'action': [ 'download_from_google_storage',
+                     '--no_resume',
+                     '--no_auth',
+                     '--bucket', 'chromium-clang-format',
+                     '-s', 'client/buildtools/mac/clang-format.sha1',
+         ],
+     },
+     {
+         'name': 'clang_format_linux',
+         'pattern': '.',
+         'condition': 'host_os == "linux"',
+         'action': [ 'download_from_google_storage',
+                     '--no_resume',
+                     '--no_auth',
+                     '--bucket', 'chromium-clang-format',
+                     '-s', 'client/buildtools/linux64/clang-format.sha1',
+         ],
      },
      # Update the Windows toolchain if necessary.
      {

@@ -55,6 +55,7 @@ SubProcessStarted* SubProcessImpl::Spawn() {
                                req_.stderr_filename(),
                                output_option);
   spawner_->SetDetach(req_.detach());
+  spawner_->SetKeepEnv(req_.keep_env());
   if (req_.has_umask()) {
     spawner_->SetUmask(req_.umask());
   }
@@ -100,11 +101,10 @@ bool SubProcessImpl::Kill() {
               << " child_signaled=" << spawner_->IsSignaled()
               << " running=" << running;
     return spawner_->Kill();
-  } else {
-    LOG(INFO) << "id=" << req_.id() << " ignore kill " << req_.trace_id()
-              << " pid=" << started_.pid() << " running=" << running;
-    return running;
   }
+  LOG(INFO) << "id=" << req_.id() << " ignore kill " << req_.trace_id()
+            << " pid=" << started_.pid() << " running=" << running;
+  return running;
 }
 
 void SubProcessImpl::Signaled(int status) {

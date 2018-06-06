@@ -42,6 +42,7 @@ extern "C" {
 #endif
 
 #include <sstream>
+#include <utility>
 
 #include "absl/strings/match.h"
 #include "glog/logging.h"
@@ -141,16 +142,16 @@ bool ArFile::EntryHeader::SerializeToString(string* output) const {
   return true;
 }
 
-ArFile::ArFile(const string& filename, off_t offset)
-    : filename_(filename),
+ArFile::ArFile(string filename, off_t offset)
+    : filename_(std::move(filename)),
       thin_archive_(false),
       valid_(true),
       offset_(offset) {
   Init();
 }
 
-ArFile::ArFile(const string& filename)
-    : filename_(filename),
+ArFile::ArFile(string filename)
+    : filename_(std::move(filename)),
       thin_archive_(false),
       valid_(true),
       offset_(0) {

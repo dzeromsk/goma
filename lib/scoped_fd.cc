@@ -67,25 +67,6 @@ ScopedFd::FileDescriptor ScopedFd::OpenForRead(const string& filename) {
 }
 
 /* static */
-ScopedFd::FileDescriptor ScopedFd::OpenForStat(const string& filename) {
-#ifndef _WIN32
-  return OpenForRead(filename);
-#else
-  // On Windows, the length of path is 256. When compiling NaCl untrusted code,
-  // the length of path often exceeds 256. Usually it contains '..', so let's
-  // clean it.
-  const string& resolved = PathResolver::ResolvePath(filename);
-  return CreateFileA(resolved.c_str(), 0,
-                     FILE_SHARE_READ,
-                     nullptr,
-                     OPEN_EXISTING,
-                     // Specify to get info from directory.
-                     FILE_FLAG_BACKUP_SEMANTICS,
-                     nullptr);
-#endif
-}
-
-/* static */
 ScopedFd::FileDescriptor ScopedFd::OpenForAppend(
     const string& filename, int mode) {
 #ifndef _WIN32

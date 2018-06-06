@@ -14,16 +14,20 @@
 #include <string>
 #include <vector>
 
+#include "absl/memory/memory.h"
 #include "compiler_flags.h"
 #include "compiler_info.h"
 #include "file.h"
 #include "file_helper.h"
+#include "gcc_flags.h"
 #include "include_cache.h"
+#include "java_flags.h"
 #include "path.h"
 #include "path_resolver.h"
 #include "prototmp/deps_cache_data.pb.h"
 #include "subprocess.h"
 #include "unittest_util.h"
+#include "vc_flags.h"
 
 using std::string;
 
@@ -40,7 +44,7 @@ class DepsCacheTest : public testing::Test {
   typedef DepsCache::DepsHashId DepsHashId;
 
   void SetUp() override {
-    tmpdir_.reset(new TmpdirUtil("deps_cache_test"));
+    tmpdir_ = absl::make_unique<TmpdirUtil>("deps_cache_test");
     IncludeCache::Init(32, true);
     DepsCache::Init(file::JoinPath(tmpdir_->tmpdir(), ".goma_deps"),
                     kDepsCacheAliveDuration,
@@ -57,47 +61,31 @@ class DepsCacheTest : public testing::Test {
     tmpdir_.reset();
   }
 
-  void SetFileId(FileIdCache* cache, const string& filename,
-                 const FileId& file_id) {
-    std::pair<FileIdCache::FileIdMap::iterator, bool> p =
-        cache->file_ids_.insert(std::make_pair(filename, file_id));
+  void SetFileStat(FileStatCache* cache,
+                   const string& filename,
+                   const FileStat& file_stat) {
+    std::pair<FileStatCache::FileStatMap::iterator, bool> p =
+        cache->file_stats_.insert(std::make_pair(filename, file_stat));
     if (!p.second)
-      p.first->second = file_id;
+      p.first->second = file_stat;
   }
 
   bool GetDepsHashId(const DepsCache::Identifier& identifier,
                      const string& filename,
                      DepsCache::DepsHashId* deps_hash_id) const {
-    CHECK(identifier.valid());
+    CHECK(identifier.has_value());
 
     FilenameIdTable::Id id = dc_->filename_id_table_.ToId(filename);
     if (id == FilenameIdTable::kInvalidId)
       return false;
 
-    auto it = dc_->deps_table_.find(identifier.value());
-    if (it == dc_->deps_table_.end())
-      return false;
-
-    for (const auto& dhi : it->second.deps_hash_ids) {
-      if (dhi.id == id) {
-        *deps_hash_id = dhi;
-        return true;
-      }
-    }
-
-    return false;
+    return dc_->GetDepsHashId(identifier, id, deps_hash_id);
   }
 
   bool UpdateLastUsedTime(const DepsCache::Identifier& identifier,
                           time_t last_used_time) {
-    CHECK(identifier.valid());
-
-    auto it = dc_->deps_table_.find(identifier.value());
-    if (it == dc_->deps_table_.end())
-      return false;
-
-    it->second.last_used_time = last_used_time;
-    return true;
+    CHECK(identifier.has_value());
+    return dc_->UpdateLastUsedTime(identifier, last_used_time);
   }
 
   void UpdateGomaBuiltRevision() {
@@ -135,7 +123,7 @@ class DepsCacheTest : public testing::Test {
 
   void UpdateIdentifierLastUsedTime(const DepsCache::Identifier& identifier,
                                     time_t last_used_time) {
-    CHECK(identifier.valid());
+    CHECK(identifier.has_value());
 
     const string& deps_path = file::JoinPath(tmpdir_->tmpdir(), ".goma_deps");
 
@@ -186,26 +174,24 @@ class DepsCacheTest : public testing::Test {
   bool SetDependencies(const DepsCache::Identifier& identifier,
                        const string& input_file,
                        const std::set<string>& dependencies,
-                       FileIdCache* file_id_cache) {
+                       FileStatCache* file_stat_cache) {
     return dc_->SetDependencies(identifier, tmpdir_->realcwd(), input_file,
-                                dependencies, file_id_cache);
+                                dependencies, file_stat_cache);
   }
 
   bool GetDependencies(const DepsCache::Identifier& identifier,
                        const string& input_file,
                        std::set<string>* dependencies,
-                       FileIdCache* file_id_cache) const {
+                       FileStatCache* file_stat_cache) const {
     return dc_->GetDependencies(identifier, tmpdir_->realcwd(), input_file,
-                                dependencies, file_id_cache);
+                                dependencies, file_stat_cache);
   }
 
   void RemoveDependency(const DepsCache::Identifier& identifier) {
     return dc_->RemoveDependency(identifier);
   }
 
-  int DepsCacheSize() const {
-    return static_cast<int>(dc_->deps_table_.size());
-  }
+  int DepsCacheSize() const { return static_cast<int>(dc_->deps_table_size()); }
 
   DepsCache::Identifier MakeFreshIdentifier() {
     SHA256HashValue hash_value;
@@ -236,25 +222,25 @@ TEST_F(DepsCacheTest, SetGetDependencies) {
 
   // First compile.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
     // Since identifier is not registered, we cannot utilize the dependencies
     // cache.
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
     EXPECT_TRUE(deps.empty());
 
     // Note that deps does not contain the input file itself.
     deps.insert(ah);
-    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_id_cache));
+    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_stat_cache));
   }
 
   // Second compile. We can utilize the dependency cache.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
 
     std::set<string> deps_expected;
     deps_expected.insert(ah);
@@ -269,10 +255,10 @@ TEST_F(DepsCacheTest, SetGetDependencies) {
   // Third compile.
   // Since directive hash is not changed, this should succeed.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
 
     std::set<string> deps_expected;
     deps_expected.insert(ah);
@@ -288,10 +274,10 @@ TEST_F(DepsCacheTest, SetGetDependencies) {
   // Fourth compile. Since acc directive hash is changed,
   // GetDependencies should return false.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
     EXPECT_TRUE(deps.empty());
   }
 }
@@ -309,25 +295,25 @@ TEST_F(DepsCacheTest, SetGetDependenciesRelative) {
 
   // First compile.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
     // Since identifier is not registered, we cannot utilize the dependencies
     // cache.
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
     EXPECT_TRUE(deps.empty());
 
     // Note that deps does not contain the input file itself.
     deps.insert(ah);
-    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_id_cache));
+    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_stat_cache));
   }
 
   // Second compile. We can utilize the dependency cache.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
 
     std::set<string> deps_expected;
     deps_expected.insert(ah);
@@ -342,10 +328,10 @@ TEST_F(DepsCacheTest, SetGetDependenciesRelative) {
   // Third compile.
   // Since directive hash is not changed, this should succeed.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
 
     std::set<string> deps_expected;
     deps_expected.insert(ah);
@@ -361,10 +347,10 @@ TEST_F(DepsCacheTest, SetGetDependenciesRelative) {
   // Fourth compile. Since acc directive hash is changed,
   // GetDependencies should return false.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
     EXPECT_TRUE(deps.empty());
   }
 }
@@ -382,28 +368,28 @@ TEST_F(DepsCacheTest, RemoveDependencies) {
 
   // First compile.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
     deps.insert(ah);
-    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_id_cache));
+    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_stat_cache));
   }
 
   // Second compile. We can utilize the dependency cache.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
   }
 
   RemoveDependency(identifier);
 
   // Third compile. Since we've removed identifier, we cannot utilize the cache.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
   }
 }
 
@@ -424,19 +410,19 @@ TEST_F(DepsCacheTest, RemoveFile) {
 
   // First compile.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
     deps.insert(ah);
     deps.insert(bh);
-    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_id_cache));
+    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_stat_cache));
   }
 
   // Second compile. We can utilize the dependency cache.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
   }
 
   // Delete b.h
@@ -444,10 +430,10 @@ TEST_F(DepsCacheTest, RemoveFile) {
 
   // Third compile. Since we've removed a file, cache should not be used.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
   }
 }
 
@@ -464,14 +450,14 @@ TEST_F(DepsCacheTest, Restart) {
 
   // First compile.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
     EXPECT_TRUE(deps.empty());
 
     deps.insert(ah);
-    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_id_cache));
+    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_stat_cache));
   }
 
   // Restart DepsCache.
@@ -486,10 +472,10 @@ TEST_F(DepsCacheTest, Restart) {
 
   // Second compile. We can utilize the dependency cache.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_TRUE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
 
     std::set<string> deps_expected;
     deps_expected.insert(ah);
@@ -497,7 +483,7 @@ TEST_F(DepsCacheTest, Restart) {
   }
 }
 
-TEST_F(DepsCacheTest, RestartWithFileIdUpdate) {
+TEST_F(DepsCacheTest, RestartWithFileStatUpdate) {
   const DepsCache::Identifier identifier1 = MakeFreshIdentifier();
   const DepsCache::Identifier identifier2 = MakeFreshIdentifier();
 
@@ -511,11 +497,11 @@ TEST_F(DepsCacheTest, RestartWithFileIdUpdate) {
 
   // First compile for identifier1
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
     deps.insert(ah);
-    ASSERT_TRUE(SetDependencies(identifier1, acc, deps, &file_id_cache));
+    ASSERT_TRUE(SetDependencies(identifier1, acc, deps, &file_stat_cache));
   }
 
   // Update a.cc with same directive hash.
@@ -525,15 +511,15 @@ TEST_F(DepsCacheTest, RestartWithFileIdUpdate) {
 
   // First compile for identifier2
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
     deps.insert(ah);
-    ASSERT_TRUE(SetDependencies(identifier2, acc, deps, &file_id_cache));
+    ASSERT_TRUE(SetDependencies(identifier2, acc, deps, &file_stat_cache));
   }
 
   // Here, a.cc was updated after identifer1 compile.
-  // FileId was different, but directive_hash should be the same.
+  // FileStat was different, but directive_hash should be the same.
   {
     DepsHashId deps_hash_id1;
     DepsHashId deps_hash_id2;
@@ -541,7 +527,7 @@ TEST_F(DepsCacheTest, RestartWithFileIdUpdate) {
     ASSERT_TRUE(GetDepsHashId(identifier2, acc, &deps_hash_id2));
 
     ASSERT_EQ(deps_hash_id1.directive_hash, deps_hash_id2.directive_hash);
-    ASSERT_NE(deps_hash_id1.file_id, deps_hash_id2.file_id);
+    ASSERT_NE(deps_hash_id1.file_stat, deps_hash_id2.file_stat);
   }
 
   // Restart DepsCache.
@@ -556,7 +542,7 @@ TEST_F(DepsCacheTest, RestartWithFileIdUpdate) {
 
   // DepsHashId will be updated to the latest one.
   // Here, a.cc was updated after identifer1 compile.
-  // FileId was different, but directive_hash should be the same.
+  // FileStat was different, but directive_hash should be the same.
   {
     DepsHashId deps_hash_id1;
     DepsHashId deps_hash_id2;
@@ -564,7 +550,7 @@ TEST_F(DepsCacheTest, RestartWithFileIdUpdate) {
     ASSERT_TRUE(GetDepsHashId(identifier2, acc, &deps_hash_id2));
 
     EXPECT_EQ(deps_hash_id1.directive_hash, deps_hash_id2.directive_hash);
-    EXPECT_EQ(deps_hash_id1.file_id, deps_hash_id2.file_id);
+    EXPECT_EQ(deps_hash_id1.file_stat, deps_hash_id2.file_stat);
   }
 }
 
@@ -590,12 +576,12 @@ TEST_F(DepsCacheTest, RestartWithDirectiveHashUpdate) {
 
   // First compile for identifier1
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
     deps.insert(ah);
     deps.insert(bh);
-    ASSERT_TRUE(SetDependencies(identifier1, acc, deps, &file_id_cache));
+    ASSERT_TRUE(SetDependencies(identifier1, acc, deps, &file_stat_cache));
   }
 
   // Update a.cc with different directive hash.
@@ -605,21 +591,21 @@ TEST_F(DepsCacheTest, RestartWithDirectiveHashUpdate) {
 
   // First compile for identifier2
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
 
     // mtime might be the same as before (machine too fast).
     // So, we'd like to update mtime here to improve test stability.
-    FileId file_id = file_id_cache.Get(acc);
-    file_id.mtime += 1;
-    SetFileId(&file_id_cache, acc, file_id);
+    FileStat file_stat = file_stat_cache.Get(acc);
+    file_stat.mtime += 1;
+    SetFileStat(&file_stat_cache, acc, file_stat);
 
     std::set<string> deps;
     deps.insert(ah);
-    ASSERT_TRUE(SetDependencies(identifier2, acc, deps, &file_id_cache));
+    ASSERT_TRUE(SetDependencies(identifier2, acc, deps, &file_stat_cache));
   }
 
   // Here, a.cc was updated after identifer1 compile.
-  // Both directive_hash and file_id were different.
+  // Both directive_hash and file_stat were different.
   {
     DepsHashId deps_hash_id1;
     DepsHashId deps_hash_id2;
@@ -627,7 +613,7 @@ TEST_F(DepsCacheTest, RestartWithDirectiveHashUpdate) {
     ASSERT_TRUE(GetDepsHashId(identifier2, acc, &deps_hash_id2));
 
     ASSERT_NE(deps_hash_id1.directive_hash, deps_hash_id2.directive_hash);
-    ASSERT_NE(deps_hash_id1.file_id, deps_hash_id2.file_id);
+    ASSERT_NE(deps_hash_id1.file_stat, deps_hash_id2.file_stat);
   }
 
   // Restart DepsCache.
@@ -666,19 +652,19 @@ TEST_F(DepsCacheTest, RestartWithOldIdentifier) {
 
   // First compile for identifier1
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
     deps.insert(ah);
-    ASSERT_TRUE(SetDependencies(identifier1, acc, deps, &file_id_cache));
+    ASSERT_TRUE(SetDependencies(identifier1, acc, deps, &file_stat_cache));
   }
   // First compile for identifier2
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
     deps.insert(ah);
-    ASSERT_TRUE(SetDependencies(identifier2, acc, deps, &file_id_cache));
+    ASSERT_TRUE(SetDependencies(identifier2, acc, deps, &file_stat_cache));
   }
 
   // Change the last_used_time of identifier2
@@ -757,12 +743,12 @@ TEST_F(DepsCacheTest, RestartWithOldIdentifierWithNegativeAliveDuration) {
 
   // Add old identifiers.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
     deps.insert(ah);
-    ASSERT_TRUE(SetDependencies(identifier1, acc, deps, &file_id_cache));
-    ASSERT_TRUE(SetDependencies(identifier2, acc, deps, &file_id_cache));
+    ASSERT_TRUE(SetDependencies(identifier1, acc, deps, &file_stat_cache));
+    ASSERT_TRUE(SetDependencies(identifier2, acc, deps, &file_stat_cache));
 
     time_t time_old_enough = 0;
     ASSERT_TRUE(UpdateLastUsedTime(identifier1, time_old_enough));
@@ -800,14 +786,14 @@ TEST_F(DepsCacheTest, RestartWithBuiltRevisionUpdate) {
 
   // First compile.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
     EXPECT_TRUE(deps.empty());
 
     deps.insert(ah);
-    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_id_cache));
+    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_stat_cache));
   }
 
   // Restart DepsCache.
@@ -826,10 +812,10 @@ TEST_F(DepsCacheTest, RestartWithBuiltRevisionUpdate) {
 
   // All cache will be disposed.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
   }
 }
 
@@ -846,14 +832,14 @@ TEST_F(DepsCacheTest, RestartWithMissingSha256) {
 
   // First compile.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
     EXPECT_TRUE(deps.empty());
 
     deps.insert(ah);
-    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_id_cache));
+    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_stat_cache));
   }
 
   // Restart DepsCache.
@@ -876,10 +862,10 @@ TEST_F(DepsCacheTest, RestartWithMissingSha256) {
 
   // All cache will be disposed.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
   }
 }
 
@@ -896,14 +882,14 @@ TEST_F(DepsCacheTest, RestartWithInvalidSha256) {
 
   // First compile.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
     EXPECT_TRUE(deps.empty());
 
     deps.insert(ah);
-    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_id_cache));
+    EXPECT_TRUE(SetDependencies(identifier, acc, deps, &file_stat_cache));
   }
 
   // Restart DepsCache.
@@ -926,10 +912,10 @@ TEST_F(DepsCacheTest, RestartWithInvalidSha256) {
 
   // All cache will be disposed.
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier, acc, &deps, &file_stat_cache));
   }
 }
 
@@ -953,25 +939,25 @@ TEST_F(DepsCacheTest, RestartWithUpdatedFilesInSomeIdentifier) {
       "#include <stdio.h>\n"
       "piyo");
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
 
     std::set<string> deps;
     deps.insert(ah);
     deps.insert(bh);
-    EXPECT_TRUE(SetDependencies(identifier1, acc, deps, &file_id_cache));
+    EXPECT_TRUE(SetDependencies(identifier1, acc, deps, &file_stat_cache));
   }
 
   tmpdir_->CreateTmpFile("a.h", "#include <string.h>\n");
 
   {
-    FileIdCache file_id_cache;
-    FileId file_id = file_id_cache.Get(ah);
-    file_id.mtime += 1;  // Ensure it's newer than the previous.
-    SetFileId(&file_id_cache, ah, file_id);
+    FileStatCache file_stat_cache;
+    FileStat file_stat = file_stat_cache.Get(ah);
+    file_stat.mtime += 1;  // Ensure it's newer than the previous.
+    SetFileStat(&file_stat_cache, ah, file_stat);
 
     std::set<string> deps;
     deps.insert(ah);
-    EXPECT_TRUE(SetDependencies(identifier2, acc, deps, &file_id_cache));
+    EXPECT_TRUE(SetDependencies(identifier2, acc, deps, &file_stat_cache));
   }
 
   // Restart DepsCache.
@@ -986,14 +972,14 @@ TEST_F(DepsCacheTest, RestartWithUpdatedFilesInSomeIdentifier) {
   dc_ = DepsCache::instance();
 
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
-    EXPECT_FALSE(GetDependencies(identifier1, acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifier1, acc, &deps, &file_stat_cache));
   }
   {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
-    EXPECT_TRUE(GetDependencies(identifier2, acc, &deps, &file_id_cache));
+    EXPECT_TRUE(GetDependencies(identifier2, acc, &deps, &file_stat_cache));
   }
 }
 
@@ -1015,14 +1001,14 @@ TEST_F(DepsCacheTest, RestartWithLargeNumberIdentifiers) {
       "piyo");
 
   for (int i = 0; i < N; ++i) {
-    FileIdCache file_id_cache;
+    FileStatCache file_stat_cache;
     std::set<string> deps;
 
-    EXPECT_FALSE(GetDependencies(identifiers[i], acc, &deps, &file_id_cache));
+    EXPECT_FALSE(GetDependencies(identifiers[i], acc, &deps, &file_stat_cache));
     EXPECT_TRUE(deps.empty());
 
     deps.insert(ah);
-    EXPECT_TRUE(SetDependencies(identifiers[i], acc, deps, &file_id_cache));
+    EXPECT_TRUE(SetDependencies(identifiers[i], acc, deps, &file_stat_cache));
   }
 
   // Restart DepsCache.
@@ -1053,7 +1039,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     GCCFlags flags(args, "/tmp");
     CompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
     identifier = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier.valid());
+    EXPECT_TRUE(identifier.has_value());
   }
 
   DepsCache::Identifier identifier_compiler;
@@ -1066,7 +1052,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     GCCFlags flags(args, "/tmp");
     CompilerInfo info(CreateBarebornCompilerInfo(bare_clang));
     identifier_compiler = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier_compiler.valid());
+    EXPECT_TRUE(identifier_compiler.has_value());
   }
 
   DepsCache::Identifier identifier_filename;
@@ -1079,7 +1065,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     GCCFlags flags(args, "/tmp");
     CompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
     identifier_filename = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier_filename.valid());
+    EXPECT_TRUE(identifier_filename.has_value());
   }
 
   DepsCache::Identifier identifier_include;
@@ -1093,7 +1079,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     GCCFlags flags(args, "/tmp");
     CompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
     identifier_include = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier_include.valid());
+    EXPECT_TRUE(identifier_include.has_value());
   }
 
   DepsCache::Identifier identifier_systeminclude;
@@ -1107,7 +1093,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     GCCFlags flags(args, "/tmp");
     CompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
     identifier_systeminclude = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier_systeminclude.valid());
+    EXPECT_TRUE(identifier_systeminclude.has_value());
   }
 
   DepsCache::Identifier identifier_macro;
@@ -1121,7 +1107,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     GCCFlags flags(args, "/tmp");
     CompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
     identifier_macro = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier_macro.valid());
+    EXPECT_TRUE(identifier_macro.has_value());
   }
 
   DepsCache::Identifier identifier_cwd;
@@ -1134,7 +1120,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     GCCFlags flags(args, "/tmp2");  // this differs.
     CompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
     identifier_cwd = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier_cwd.valid());
+    EXPECT_TRUE(identifier_cwd.has_value());
   }
 
   EXPECT_NE(identifier.value(), identifier_include.value());
@@ -1158,7 +1144,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierVC) {
     VCFlags flags(args, "C:\\tmp");
     CompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
     identifier = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier.valid());
+    EXPECT_TRUE(identifier.has_value());
   }
 
   DepsCache::Identifier identifier_filename;
@@ -1171,7 +1157,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierVC) {
     VCFlags flags(args, "C:\\tmp");
     CompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
     identifier_filename = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier_filename.valid());
+    EXPECT_TRUE(identifier_filename.has_value());
   }
 
   DepsCache::Identifier identifier_include;
@@ -1185,7 +1171,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierVC) {
     VCFlags flags(args, "C:\\tmp");
     CompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
     identifier_include = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier_include.valid());
+    EXPECT_TRUE(identifier_include.has_value());
   }
 
   DepsCache::Identifier identifier_compiler;
@@ -1198,7 +1184,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierVC) {
     VCFlags flags(args, "C:\\tmp");
     CompilerInfo info(CreateBarebornCompilerInfo("C:\\clang-cl.exe"));
     identifier_compiler = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier_compiler.valid());
+    EXPECT_TRUE(identifier_compiler.has_value());
   }
 
   DepsCache::Identifier identifier_macro;
@@ -1212,7 +1198,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierVC) {
     VCFlags flags(args, "C:\\tmp");
     CompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
     identifier_macro = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier_macro.valid());
+    EXPECT_TRUE(identifier_macro.has_value());
   }
 
   DepsCache::Identifier identifier_cwd;
@@ -1225,7 +1211,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierVC) {
     VCFlags flags(args, "C:\\tmp2");  // this differs.
     CompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
     identifier_cwd = MakeDepsIdentifier(info, flags);
-    EXPECT_TRUE(identifier_cwd.valid());
+    EXPECT_TRUE(identifier_cwd.has_value());
   }
 
   EXPECT_NE(identifier.value(), identifier_filename.value());
@@ -1248,7 +1234,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierJavac) {
   cid->set_found(true);
   CompilerInfo info(std::move(cid));
   DepsCache::Identifier identifier = MakeDepsIdentifier(info, flags);
-  EXPECT_FALSE(identifier.valid());
+  EXPECT_FALSE(identifier.has_value());
 }
 
 }  // namespace devtools_goma

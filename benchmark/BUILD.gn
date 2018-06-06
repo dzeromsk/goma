@@ -1,0 +1,106 @@
+# place holder
+group("benchmark") {
+}
+
+executable("cpp_parser_benchmark") {
+  testonly = true
+  sources = [
+    "cpp_parser_benchmark.cc",
+  ]
+  deps = [
+    "//build/config:exe_and_shlib_deps",
+    "//client:cpp_parser_lib",
+    "//third_party:glog",
+    "//third_party/benchmark",
+  ]
+}
+
+executable("cpp_macro_expander_benchmark") {
+  testonly = true
+  sources = [
+    "cpp_macro_expander_benchmark.cc",
+  ]
+  deps = [
+    "//build/config:exe_and_shlib_deps",
+    "//client:cpp_parser_lib",
+    "//third_party:glog",
+    "//third_party/benchmark",
+  ]
+}
+
+executable("unordered_map_benchmark") {
+  testonly = true
+  sources = [
+    "unordered_map_benchmark.cc",
+  ]
+  deps = [
+    "//build/config:exe_and_shlib_deps",
+    "//third_party/benchmark",
+    "//third_party/tensorflow_core:flat_map",
+  ]
+}
+
+executable("lockhelper_benchmark") {
+  testonly = true
+  sources = [
+    "lockhelper_benchmark.cc",
+  ]
+  deps = [
+    "//base",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:glog",
+    "//third_party/benchmark",
+  ]
+}
+
+executable("path_benchmark") {
+  testonly = true
+  sources = [
+    "path_benchmark.cc",
+  ]
+  deps = [
+    "//base",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:glog",
+    "//third_party/benchmark",
+  ]
+}
+
+executable("path_resolver_benchmark") {
+  testonly = true
+  sources = [
+    "path_resolver_benchmark.cc",
+  ]
+  deps = [
+    "//build/config:exe_and_shlib_deps",
+    "//lib",
+    "//third_party:glog",
+    "//third_party/benchmark",
+  ]
+}
+
+executable("simple_timer_benchmark") {
+  testonly = true
+  sources = [
+    "simple_timer_benchmark.cc",
+  ]
+  deps = [
+    "//build/config:exe_and_shlib_deps",
+    "//client:common",
+    "//third_party/abseil",
+    "//third_party/benchmark",
+  ]
+}
+
+executable("file_stat_benchmark") {
+  testonly = true
+  sources = [
+    "file_stat_benchmark.cc",
+  ]
+  deps = [
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:goma_test_lib",
+    "//third_party/benchmark",
+  ]
+}

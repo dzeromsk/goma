@@ -77,7 +77,7 @@ class JsonWebToken {
     DISALLOW_COPY_AND_ASSIGN(Key);
   };
 
-  explicit JsonWebToken(const ClaimSet& claim_set);
+  explicit JsonWebToken(ClaimSet claim_set);
   ~JsonWebToken();
 
   // LoadKey returns a Key from pem_key string.

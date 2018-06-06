@@ -18,6 +18,7 @@ executable("cpu_unittest") {
   ]
   deps = [
     ":cpu",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:glog",
     "//third_party:gtest",
     "//third_party:gtest_main",

@@ -8,6 +8,8 @@
 #include <glog/stl_logging.h>
 #include <json/json.h>
 
+#include "absl/strings/ascii.h"
+#include "clang_tidy_flags.h"
 #include "cmdline_parser.h"
 #include "file_helper.h"
 #include "flag_parser.h"
@@ -247,7 +249,7 @@ bool CompilationDatabaseReader::AddCompileOptions(
   size_t init_pos = 1;
   if (!argv.empty()) {
     string argv0 = string(file::Stem(argv[0]));
-    std::transform(argv0.begin(), argv0.end(), argv0.begin(), ::tolower);
+    absl::AsciiStrToLower(&argv0);
     if (argv0 == "gomacc") {
       init_pos = 2;
     }

@@ -6,6 +6,7 @@
 #include "tls_descriptor.h"
 
 #include <sstream>
+#include <utility>
 
 #include "callback.h"
 #include "compiler_proxy_info.h"
@@ -16,16 +17,23 @@
 
 namespace devtools_goma {
 
-TLSDescriptor::TLSDescriptor(
-    SocketDescriptor* desc, TLSEngine* e,
-    const Options& options,
-    WorkerThreadManager* wm)
-    : d_(desc), engine_(e), wm_(wm),
-      readable_closure_(nullptr), writable_closure_(nullptr),
-      network_write_offset_(0), ssl_pending_(false),
-      active_read_(false), active_write_(false),
+TLSDescriptor::TLSDescriptor(SocketDescriptor* desc,
+                             TLSEngine* e,
+                             Options options,
+                             WorkerThreadManager* wm)
+    : d_(desc),
+      engine_(e),
+      wm_(wm),
+      readable_closure_(nullptr),
+      writable_closure_(nullptr),
+      network_write_offset_(0),
+      ssl_pending_(false),
+      active_read_(false),
+      active_write_(false),
       io_failed_(false),
-      options_(options), connect_status_(READY), is_closed_(false),
+      options_(std::move(options)),
+      connect_status_(READY),
+      is_closed_(false),
       cancel_readable_closure_(nullptr) {
   thread_ = GetCurrentThreadId();
 }
@@ -193,7 +201,8 @@ void TLSDescriptor::TransportLayerReadable() {
     io_failed_ = true;
     PutClosuresInRunQueue();
     return;
-  } else if (connect_status_ == READY) {
+  }
+  if (connect_status_ == READY) {
     int ret = engine_->SetDataFromTransport(
         absl::string_view(network_read_buffer_, read_bytes));
     if (ret < 0) {  // Error in TLS engine.
@@ -262,14 +271,13 @@ void TLSDescriptor::TransportLayerWritable() {
       io_failed_ = true;
       PutClosuresInRunQueue();
       return;
-    } else {
-      network_write_offset_ += ret;
-      if (network_write_buffer_.size() == network_write_offset_) {
-        network_write_buffer_.clear();
-        network_write_offset_ = 0;
-        if (connect_status_ == NEED_WRITE)
-          connect_status_ = NEED_READ;
-      }
+    }
+    network_write_offset_ += ret;
+    if (network_write_buffer_.size() == network_write_offset_) {
+      network_write_buffer_.clear();
+      network_write_offset_ = 0;
+      if (connect_status_ == NEED_WRITE)
+        connect_status_ = NEED_READ;
     }
   }
 }

@@ -447,35 +447,3 @@ bool ElfParser::IsElf(const string& filename) {
 }
 
 }  // namespace devtools_goma
-
-#ifdef TEST
-
-#include <cstdlib>
-#include <iostream>
-
-using devtools_goma::ElfParser;
-
-int main(int argc, char* argv[]) {
-  if (argc != 2) {
-    std::cout << "Usage: " << argv[0] << " <filename>" << std::endl;
-    exit(EXIT_FAILURE);
-  }
-  google::InitGoogleLogging(argv[0]);
-
-  std::unique_ptr<ElfParser> elf = ElfParser::NewElfParser(argv[1]);
-  CHECK(elf != nullptr);
-  CHECK(elf->valid());
-  std::vector<string> needed, rpath;
-  if (!elf->ReadDynamicNeededAndRpath(&needed, &rpath)) {
-    LOG(FATAL) << "ReadDynamicNeededAndRpath";
-  }
-  for (const auto& it : needed) {
-    std::cout << "NEEDED:" << it << std::endl;
-  }
-  for (const auto& it : rpath) {
-    std::cout << "RPATH:" << it << std::endl;
-  }
-  exit(0);
-}
-
-#endif

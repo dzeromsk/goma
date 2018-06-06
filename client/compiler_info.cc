@@ -18,25 +18,33 @@
 #include <unordered_map>
 
 #include "absl/strings/match.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
 #include "autolock_timer.h"
+#include "clang_tidy_flags.h"
 #include "cmdline_parser.h"
 #include "compiler_flags.h"
 #include "compiler_specific.h"
-#include "file_dir.h"
+#include "counterz.h"
+#include "cpp_directive_parser.h"
+#include "cpp_parser.h"
 #include "file.h"
-#include "file_id.h"
+#include "file_dir.h"
+#include "file_stat.h"
 #include "flag_parser.h"
+#include "gcc_flags.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "goma_hash.h"
 #include "ioutil.h"
+#include "java_flags.h"
 #include "mypath.h"
 #include "path.h"
 #include "path_resolver.h"
 #include "path_util.h"
 #include "scoped_tmp_file.h"
 #include "util.h"
+#include "vc_flags.h"
 
 #ifdef _WIN32
 #include "config_win.h"
@@ -49,53 +57,18 @@ namespace {
 
 #include "clang_features.cc"
 
-void SetFileIdToData(const FileId& file_id, CompilerInfoData::FileId* data) {
-#ifdef _WIN32
-  data->set_volume_serial_number(file_id.volume_serial_number);
-  data->set_file_index_high(file_id.file_index_high);
-  data->set_file_index_low(file_id.file_index_low);
-#else
-  data->set_dev(file_id.dev);
-  data->set_inode(file_id.inode);
-#endif
-  data->set_mtime(file_id.mtime);
-  data->set_size(file_id.size);
-  data->set_is_directory(file_id.is_directory);
+void SetFileStatToData(const FileStat& file_stat,
+                       CompilerInfoData::FileStat* data) {
+  data->set_mtime(file_stat.mtime);
+  data->set_size(file_stat.size);
+  data->set_is_directory(file_stat.is_directory);
 }
 
-void GetFileIdFromData(const CompilerInfoData::FileId& data,
-                       FileId* file_id) {
-#ifdef _WIN32
-  file_id->volume_serial_number = data.volume_serial_number();
-  file_id->file_index_high = data.file_index_high();
-  file_id->file_index_low = data.file_index_low();
-#else
-  file_id->dev = data.dev();
-  file_id->inode = data.inode();
-#endif
-  file_id->mtime = data.mtime();
-  file_id->size = data.size();
-  file_id->is_directory = data.is_directory();
-}
-
-// If |path| exsts in |sha256_cache|, the value is returned.
-// Otherwise, calculate sha256 hash from |path|, and put the result
-// to |sha256_cache|.
-// Returns false if calculating sha256 hash from |path| failed.
-bool GetHashFromCacheOrFile(const string& path,
-                            string* hash,
-                            std::unordered_map<string, string>* sha256_cache) {
-  auto it = sha256_cache->find(path);
-  if (it != sha256_cache->end()) {
-    *hash = it->second;
-    return true;
-  }
-
-  if (!GomaSha256FromFile(path, hash))
-    return false;
-
-  sha256_cache->insert(make_pair(path, *hash));
-  return true;
+void GetFileStatFromData(const CompilerInfoData::FileStat& data,
+                         FileStat* file_stat) {
+  file_stat->mtime = data.mtime();
+  file_stat->size = data.size();
+  file_stat->is_directory = data.is_directory();
 }
 
 bool AddSubprogramInfo(
@@ -281,6 +254,7 @@ std::unique_ptr<CompilerInfoData> CompilerInfoBuilder::FillFromCompilerOutputs(
     const CompilerFlags& flags,
     const string& local_compiler_path,
     const std::vector<string>& compiler_info_envs) {
+  GOMA_COUNTERZ("");
   std::unique_ptr<CompilerInfoData> data(new CompilerInfoData);
 
   data->set_last_used_at(time(nullptr));
@@ -290,7 +264,7 @@ std::unique_ptr<CompilerInfoData> CompilerInfoBuilder::FillFromCompilerOutputs(
   // real compiler path but also target and version.
   // However, I understand we need large refactoring of CompilerInfo
   // for minimizing the execution while keeping readability.
-  if (flags.is_gcc()) {
+  if (flags.type() == CompilerType::Gcc) {
     data->set_local_compiler_path(local_compiler_path);
     data->set_real_compiler_path(
         GetRealCompilerPath(local_compiler_path, flags.cwd(),
@@ -317,21 +291,22 @@ std::unique_ptr<CompilerInfoData> CompilerInfoBuilder::FillFromCompilerOutputs(
           file::JoinPathRespectAbsolute(flags.cwd(),
                                         data->real_compiler_path())));
 
-  if (!GomaSha256FromFile(abs_local_compiler_path,
-                          data->mutable_local_compiler_hash())) {
+  if (!hash_cache_.GetHashFromCacheOrFile(
+          abs_local_compiler_path, data->mutable_local_compiler_hash())) {
     LOG(ERROR) << "Could not open local compiler file "
                << abs_local_compiler_path;
     data->set_found(false);
     return data;
   }
 
-  if (!GomaSha256FromFile(data->real_compiler_path(),
-                          data->mutable_hash())) {
+  if (!hash_cache_.GetHashFromCacheOrFile(data->real_compiler_path(),
+                                          data->mutable_hash())) {
     LOG(ERROR) << "Could not open real compiler file "
                << data->real_compiler_path();
     data->set_found(false);
     return data;
   }
+
   data->set_name(GetCompilerName(*data));
   if (data->name().empty()) {
     AddErrorMessage("Failed to get compiler name of " +
@@ -342,27 +317,27 @@ std::unique_ptr<CompilerInfoData> CompilerInfoBuilder::FillFromCompilerOutputs(
   }
   data->set_lang(flags.lang());
 
-  FileId local_compiler_id(abs_local_compiler_path);
-  if (!local_compiler_id.IsValid()) {
+  FileStat local_compiler_stat(abs_local_compiler_path);
+  if (!local_compiler_stat.IsValid()) {
     LOG(ERROR) << "Failed to get file id of " << abs_local_compiler_path;
     data->set_found(false);
     return data;
   }
-  SetFileIdToData(local_compiler_id, data->mutable_local_compiler_id());
-  data->mutable_real_compiler_id()->CopyFrom(data->local_compiler_id());
+  SetFileStatToData(local_compiler_stat, data->mutable_local_compiler_stat());
+  data->mutable_real_compiler_stat()->CopyFrom(data->local_compiler_stat());
 
   data->set_found(true);
 
   if (abs_local_compiler_path != data->real_compiler_path()) {
-    FileId real_compiler_id(data->real_compiler_path());
-    if (!real_compiler_id.IsValid()) {
+    FileStat real_compiler_stat(data->real_compiler_path());
+    if (!real_compiler_stat.IsValid()) {
       LOG(ERROR) << "Failed to get file id of " << data->real_compiler_path();
       data->set_found(false);
       return data;
     }
-    SetFileIdToData(real_compiler_id, data->mutable_real_compiler_id());
+    SetFileStatToData(real_compiler_stat, data->mutable_real_compiler_stat());
   }
-  if (flags.is_gcc()) {
+  if (flags.type() == CompilerType::Gcc) {
     // Some compilers uses wrapper script to set build target, and in such a
     // situation, build target could be different.
     // To make goma backend use proper wrapper script, or set proper -target,
@@ -374,11 +349,18 @@ std::unique_ptr<CompilerInfoData> CompilerInfoBuilder::FillFromCompilerOutputs(
         abs_local_compiler_path, compiler_info_envs,
         flags.cwd(), data->mutable_target());
 
-    bool is_clang = CompilerFlags::IsClangCommand(
-        data->real_compiler_path());
+    bool is_clang = GCCFlags::IsClangCommand(data->real_compiler_path());
 
     const GCCFlags& gcc_flags = static_cast<const GCCFlags&>(flags);
     const bool is_clang_tidy = false;
+
+    // If input is LLVM IR, we assume it ThinLTO backend phase.
+    // The phase should not use system include paths, predefined macro and
+    // features.
+    //
+    // See also:
+    // http://blog.llvm.org/2016/06/thinlto-scalable-and-incremental-lto.html
+    const bool is_input_ir = gcc_flags.lang() == "ir";
 
     // TODO: As we have -x flags in compiler_info,
     //               include_processor don't need to have 2 kinds of
@@ -388,7 +370,8 @@ std::unique_ptr<CompilerInfoData> CompilerInfoBuilder::FillFromCompilerOutputs(
     //               (-isystem and CPLUS_INCLUDE_PATH).
     //               Once b/5218687 is fixed, we should
     //               be able to eliminate cxx_system_include_paths.
-    if (!SetBasicCompilerInfo(local_compiler_path,
+    if (!is_input_ir &&
+        !SetBasicCompilerInfo(local_compiler_path,
                               gcc_flags.compiler_info_flags(),
                               compiler_info_envs,
                               gcc_flags.cwd(),
@@ -487,8 +470,8 @@ std::unique_ptr<CompilerInfoData> CompilerInfoBuilder::FillFromCompilerOutputs(
         data->add_hidden_predefined_macros("__has_include_next__");
       }
     }
-  } else if (flags.is_vc()) {
-    if (CompilerFlags::IsClangClCommand(local_compiler_path)) {
+  } else if (flags.type() == CompilerType::Clexe) {
+    if (VCFlags::IsClangClCommand(local_compiler_path)) {
       const VCFlags& vc_flags = static_cast<const VCFlags&>(flags);
       const bool is_clang = true;
       const bool is_clang_tidy = false;
@@ -551,7 +534,7 @@ std::unique_ptr<CompilerInfoData> CompilerInfoBuilder::FillFromCompilerOutputs(
         return data;
       }
     }
-  } else if (flags.is_javac()) {
+  } else if (flags.type() == CompilerType::Javac) {
     if (!GetJavacVersion(local_compiler_path, compiler_info_envs, flags.cwd(),
                          data->mutable_version())) {
       AddErrorMessage("Failed to get java version for " + local_compiler_path,
@@ -560,7 +543,7 @@ std::unique_ptr<CompilerInfoData> CompilerInfoBuilder::FillFromCompilerOutputs(
       return data;
     }
     data->set_target("java");
-  } else if (flags.is_clang_tidy()) {
+  } else if (flags.type() == CompilerType::ClangTidy) {
     if (!GetClangTidyVersionTarget(local_compiler_path,
                                    compiler_info_envs,
                                    flags.cwd(),
@@ -689,15 +672,22 @@ bool CompilerInfoBuilder::ParseFeatures(
       features.second + extensions.second + attributes.second +
       cpp_attributes.second + declspec_attributes.second +
       builtins.second;
-  std::vector<string> lines = ToVector(
-      absl::StrSplit(feature_output, '\n', absl::SkipEmpty()));
+  std::vector<string> lines =
+      ToVector(absl::StrSplit(feature_output, '\n', absl::SkipEmpty()));
   size_t index = 0;
   int expected_index = -1;
   for (const auto& line : lines) {
-    if (line[0] == '#' && line.size() > 3) {
-      // expects:
-      // # <number> "<filename>"
-      expected_index = std::atoi(line.c_str() + 2) - 1;
+    {
+      absl::string_view line_view(line);
+      if ((absl::ConsumePrefix(&line_view, "# ") ||
+           absl::ConsumePrefix(&line_view, "#line ")) &&
+          !line_view.empty()) {
+        // expects:
+        // # <number> "<filename>" or
+        // #line <number> "<filename>"
+        (void)absl::SimpleAtoi(line_view, &expected_index);
+        --expected_index;
+      }
     }
 
     if (line[0] == '#' || line[0] == '\0')
@@ -720,12 +710,12 @@ bool CompilerInfoBuilder::ParseFeatures(
     }
 
     size_t current_index = index++;
-    LOG_IF(WARNING,
-           expected_index < 0 ||
-           static_cast<size_t>(expected_index) != current_index)
+    LOG_IF(WARNING, expected_index < 0 ||
+                        static_cast<size_t>(expected_index) != current_index)
         << "index seems to be wrong."
         << " current_index=" << current_index
-        << " expected_index=" << expected_index;
+        << " expected_index=" << expected_index
+        << " feature_output=" << feature_output;
 
     // The result is 0 or 1 in most cases.
     // __has_cpp_attribute(xxx) can be 200809, 201309, though.
@@ -1324,7 +1314,7 @@ string CompilerInfoBuilder::ParseRealClangPath(absl::string_view v_out) {
   if (pos == absl::string_view::npos)
     return "";
   v_out = v_out.substr(0, pos);
-  if (!CompilerFlags::IsClangCommand(v_out))
+  if (!GCCFlags::IsClangCommand(v_out))
     return "";
   return string(v_out);
 }
@@ -1377,7 +1367,7 @@ string CompilerInfoBuilder::GetRealCompilerPath(
   // For pnacl-clang, although we still use binary_hash of local_compiler for
   // command_spec in request, we also need real compiler to check toolchain
   // update for compiler_info_cache.
-  if (CompilerFlags::IsClangCommand(normal_gcc_path)) {
+  if (GCCFlags::IsClangCommand(normal_gcc_path)) {
     const string real_path = GetRealClangPath(normal_gcc_path, cwd, envs);
     if (real_path.empty()) {
       LOG(WARNING) << "seems not be a clang?"
@@ -1396,9 +1386,8 @@ string CompilerInfoBuilder::GetRealCompilerPath(
     string real_chromeos_clang_path = real_path + ".elf";
     if (access(real_chromeos_clang_path.c_str(), X_OK) == 0) {
       return real_chromeos_clang_path;
-    } else {
-      return real_path;
     }
+    return real_path;
 #endif
   }
 #endif
@@ -1456,7 +1445,7 @@ string CompilerInfoBuilder::GetRealCompilerPath(
   // For Windows nacl-{gcc,g++}.
   // The real binary is ../libexec/nacl-{gcc,g++}.exe.  Binaries under
   // the bin directory are just wrappers to them.
-  if (CompilerFlags::IsNaClGCCCommand(normal_gcc_path)) {
+  if (GCCFlags::IsNaClGCCCommand(normal_gcc_path)) {
     const string& candidate_path = file::JoinPath(
         GetNaClToolchainRoot(normal_gcc_path),
         file::JoinPath("libexec", file::Basename(normal_gcc_path)));
@@ -1493,7 +1482,7 @@ string CompilerInfoBuilder::GetRealSubprogramPath(
     dirname.remove_suffix(sizeof(kGoldSuffix) - 1);
   }
   const string new_subprog_path = file::JoinPath(dirname, "objcopy.elf");
-  FileId new_id(new_subprog_path);
+  FileStat new_id(new_subprog_path);
   if (!new_id.IsValid()) {
     LOG(INFO) << ".elf does not exist, might not be chromeos path?"
               << " expect to exist=" << new_subprog_path
@@ -1649,11 +1638,17 @@ bool CompilerInfoBuilder::ParseClangVersionTarget(
   static const char* kTarget = "Target: ";
   std::vector<string> lines = ToVector(
       absl::StrSplit(sharp_output, absl::ByAnyChar("\r\n"), absl::SkipEmpty()));
-  if (lines.size() < 2)
+  if (lines.size() < 2) {
+    LOG(ERROR) << "lines has less than 2 elements."
+               << " sharp_output=" << sharp_output;
     return false;
-  if (!absl::StartsWith(lines[1], kTarget))
+  }
+  if (!absl::StartsWith(lines[1], kTarget)) {
+    LOG(ERROR) << "lines[1] does not have " << kTarget << " prefix."
+               << " lines[1]=" << lines[1] << " sharp_output=" << sharp_output;
     return false;
-  version->assign(lines[0]);
+  }
+  version->assign(std::move(lines[0]));
   target->assign(lines[1].substr(strlen(kTarget)));
   return true;
 }
@@ -1726,7 +1721,7 @@ static string GccDisplayPrograms(
        back_inserter(argv));
   argv.push_back(lang_flag);
   if (!option.empty()) {
-    if (CompilerFlags::IsClangClCommand(normal_compiler_path)) {
+    if (VCFlags::IsClangClCommand(normal_compiler_path)) {
       argv.push_back("-Xclang");
     }
     argv.push_back(option);
@@ -1801,7 +1796,7 @@ bool CompilerInfoBuilder::SetBasicCompilerInfo(
   // For clang-cl.exe, we use /TP and /TC like we do for gcc and clang.
   string cxx_lang_flag;
   string c_lang_flag;
-  if (CompilerFlags::IsClangClCommand(local_compiler_path)) {
+  if (VCFlags::IsClangClCommand(local_compiler_path)) {
     cxx_lang_flag = "/TP";
     c_lang_flag = "/TC";
   } else {
@@ -2054,7 +2049,7 @@ bool CompilerInfoBuilder::GetSystemIncludePaths(
 #ifdef _WIN32
   // In the (build: Windows, target: NaCl (not PNaCl)) compile,
   // include paths under toolchain root are shown as relative path from it.
-  if (CompilerFlags::IsNaClGCCCommand(normal_compiler_path)) {
+  if (GCCFlags::IsNaClGCCCommand(normal_compiler_path)) {
     compiler_info->set_toolchain_root(
         GetNaClToolchainRoot(normal_compiler_path));
   }
@@ -2094,7 +2089,7 @@ static string GccDisplayPredefinedMacros(
   argv.push_back(lang_flag);
   argv.push_back("-E");
   argv.push_back(empty_file);
-  if (CompilerFlags::IsClangClCommand(normal_compiler_path)) {
+  if (VCFlags::IsClangClCommand(normal_compiler_path)) {
     argv.push_back("-Xclang");
   }
   argv.push_back("-dM");
@@ -2191,7 +2186,7 @@ void CompilerInfoBuilder::AddErrorMessage(
   if (compiler_info->failed_at() == 0)
     compiler_info->set_failed_at(time(nullptr));
 
-  if (!compiler_info->has_error_message()) {
+  if (compiler_info->has_error_message()) {
     compiler_info->set_error_message(
         compiler_info->error_message() + "\n");
   }
@@ -2212,8 +2207,8 @@ void CompilerInfoBuilder::OverrideError(
 /* static */
 bool CompilerInfoBuilder::SubprogramInfoFromPath(
     const string& path, CompilerInfoData::SubprogramInfo* s) {
-  FileId file_id(path);
-  if (!file_id.IsValid()) {
+  FileStat file_stat(path);
+  if (!file_stat.IsValid()) {
     return false;
   }
   string hash;
@@ -2222,7 +2217,7 @@ bool CompilerInfoBuilder::SubprogramInfoFromPath(
   }
   s->set_name(path);
   s->set_hash(hash);
-  SetFileIdToData(file_id, s->mutable_file_id());
+  SetFileStatToData(file_stat, s->mutable_file_stat());
   return true;
 }
 
@@ -2264,7 +2259,7 @@ std::string CompilerInfoBuilder::GetCompilerName(const CompilerInfoData& data) {
     // See also b/13107706
     return CompilerFlags::GetCompilerName(data.local_compiler_path());
   }
-  if (!CompilerFlags::IsClangCommand(data.real_compiler_path())) {
+  if (!GCCFlags::IsClangCommand(data.real_compiler_path())) {
     return CompilerFlags::GetCompilerName(data.real_compiler_path());
   }
   // clang++ is usually symlink to clang, and real compiler path is
@@ -2301,7 +2296,7 @@ void CompilerInfo::SubprogramInfo::FromData(
     SubprogramInfo* info) {
   info->name = info_data.name();
   info->hash = info_data.hash();
-  GetFileIdFromData(info_data.file_id(), &info->file_id);
+  GetFileStatFromData(info_data.file_stat(), &info->file_stat);
 }
 
 /* static */
@@ -2317,7 +2312,7 @@ CompilerInfo::SubprogramInfo CompilerInfo::SubprogramInfo::FromPath(
 string CompilerInfo::SubprogramInfo::DebugString() const {
   std::stringstream ss;
   ss << "name: " << name;
-  ss << ", valid:" << file_id.IsValid();
+  ss << ", valid:" << file_stat.IsValid();
   ss << ", hash: " << hash;
   return ss.str();
 }
@@ -2327,37 +2322,37 @@ string CompilerInfo::DebugString() const {
 }
 
 bool CompilerInfo::IsUpToDate(const string& local_compiler_path) const {
-  FileId cur_local(local_compiler_path);
-  if (cur_local != local_compiler_id_) {
+  FileStat cur_local(local_compiler_path);
+  if (cur_local != local_compiler_stat_) {
     LOG(INFO) << "compiler id is not matched:"
               << " path=" << local_compiler_path
-              << " local_compiler_id=" << local_compiler_id_.DebugString()
+              << " local_compiler_stat=" << local_compiler_stat_.DebugString()
               << " cur_local=" << cur_local.DebugString();
     return false;
   }
   if (local_compiler_path != data_->real_compiler_path()) {
     // Since |local_compiler_path| != |real_compiler_path|,
     // We need to check that the real compiler is also the same.
-    FileId cur_real(data_->real_compiler_path());
-    if (cur_real != real_compiler_id_) {
+    FileStat cur_real(data_->real_compiler_path());
+    if (cur_real != real_compiler_stat_) {
       LOG(INFO) << "real compiler id is not matched:"
                 << " local_compiler_path=" << local_compiler_path
                 << " real_compiler_path=" << data_->real_compiler_path()
-                << " local_compiler_id=" << local_compiler_id_.DebugString()
-                << " real_compiler_id=" << real_compiler_id_.DebugString()
+                << " local_compiler_stat=" << local_compiler_stat_.DebugString()
+                << " real_compiler_stat=" << real_compiler_stat_.DebugString()
                 << " cur_real=" << cur_real.DebugString();
       return false;
     }
   }
 
   for (const auto& subprog : subprograms_) {
-    FileId file_id(subprog.name);
-    if (file_id != subprog.file_id) {
+    FileStat file_stat(subprog.name);
+    if (file_stat != subprog.file_stat) {
       LOG(INFO) << "subprogram is not matched:"
                 << " local_compiler_path=" << local_compiler_path
                 << " subprogram=" << subprog.name
-                << " subprogram_file_id=" << subprog.file_id.DebugString()
-                << " file_id=" << file_id.DebugString();
+                << " subprogram_file_stat=" << subprog.file_stat.DebugString()
+                << " file_stat=" << file_stat.DebugString();
       return false;
     }
   }
@@ -2365,15 +2360,13 @@ bool CompilerInfo::IsUpToDate(const string& local_compiler_path) const {
   return true;
 }
 
-bool CompilerInfo::UpdateFileIdIfHashMatch(
-    std::unordered_map<string, string>* sha256_cache) {
+bool CompilerInfo::UpdateFileStatIfHashMatch(SHA256HashCache* sha256_cache) {
   // Checks real compiler hash and subprogram hash.
-  // If they are all matched, we update FileId.
+  // If they are all matched, we update FileStat.
 
   string local_hash;
-  if (!GetHashFromCacheOrFile(abs_local_compiler_path(),
-                              &local_hash,
-                              sha256_cache)) {
+  if (!sha256_cache->GetHashFromCacheOrFile(abs_local_compiler_path(),
+                                            &local_hash)) {
     LOG(WARNING) << "calculating local compiler hash failed: "
                  << "path=" << local_compiler_path();
     return false;
@@ -2387,7 +2380,7 @@ bool CompilerInfo::UpdateFileIdIfHashMatch(
   }
 
   string real_hash;
-  if (!GetHashFromCacheOrFile(real_compiler_path(), &real_hash, sha256_cache)) {
+  if (!sha256_cache->GetHashFromCacheOrFile(real_compiler_path(), &real_hash)) {
     LOG(WARNING) << "calculating real compiler hash failed: "
                  << "path=" << real_compiler_path();
     return false;
@@ -2402,7 +2395,7 @@ bool CompilerInfo::UpdateFileIdIfHashMatch(
 
   for (const auto& subprog : subprograms_) {
     string subprogram_hash;
-    if (!GetHashFromCacheOrFile(subprog.name, &subprogram_hash, sha256_cache)) {
+    if (!sha256_cache->GetHashFromCacheOrFile(subprog.name, &subprogram_hash)) {
       LOG(WARNING) << "calculating subprogram hash failed: "
                    << "name=" << subprog.name;
       return false;
@@ -2436,44 +2429,44 @@ bool CompilerInfo::UpdateFileIdIfHashMatch(
     }
   }
 
-  // OK. all hash matched. Let's update FileId.
+  // OK. all hash matched. Let's update FileStat.
 
-  FileId cur_local(local_compiler_path());
-  if (cur_local != local_compiler_id_) {
-    LOG(INFO) << "local_compiler_id_ is updated:"
-              << " old=" << local_compiler_id_.DebugString()
+  FileStat cur_local(local_compiler_path());
+  if (cur_local != local_compiler_stat_) {
+    LOG(INFO) << "local_compiler_stat_ is updated:"
+              << " old=" << local_compiler_stat_.DebugString()
               << " new=" << cur_local.DebugString();
-    local_compiler_id_ = cur_local;
-    SetFileIdToData(cur_local, data_->mutable_local_compiler_id());
+    local_compiler_stat_ = cur_local;
+    SetFileStatToData(cur_local, data_->mutable_local_compiler_stat());
   }
 
   // When |local_compiler_path| == |real_compiler_path|,
-  // local_compiler_id and real_compiler_id should be the same.
-  // Otherwise, we take FileId for real_compiler_path().
-  FileId cur_real(cur_local);
+  // local_compiler_stat and real_compiler_stat should be the same.
+  // Otherwise, we take FileStat for real_compiler_path().
+  FileStat cur_real(cur_local);
   if (local_compiler_path() != real_compiler_path()) {
-    cur_real = FileId(real_compiler_path());
+    cur_real = FileStat(real_compiler_path());
   }
-  if (cur_real != real_compiler_id_) {
-    LOG(INFO) << "real_compiler_id_ is updated:"
-              << " old=" << real_compiler_id_.DebugString()
+  if (cur_real != real_compiler_stat_) {
+    LOG(INFO) << "real_compiler_stat_ is updated:"
+              << " old=" << real_compiler_stat_.DebugString()
               << " new=" << cur_real.DebugString();
-    real_compiler_id_ = cur_real;
-    SetFileIdToData(cur_real, data_->mutable_real_compiler_id());
+    real_compiler_stat_ = cur_real;
+    SetFileStatToData(cur_real, data_->mutable_real_compiler_stat());
   }
 
   for (size_t i = 0; i < subprograms_.size(); ++i) {
     auto& subprog = subprograms_[i];
     auto* data_subprog = data_->mutable_subprograms(i);
 
-    FileId file_id(subprog.name);
-    if (file_id != subprog.file_id) {
+    FileStat file_stat(subprog.name);
+    if (file_stat != subprog.file_stat) {
       LOG(INFO) << "subprogram id is updated:"
                 << " name=" << subprog.name
-                << " old=" << subprog.file_id.DebugString()
-                << " new=" << file_id.DebugString();
-      subprog.file_id = file_id;
-      SetFileIdToData(file_id, data_subprog->mutable_file_id());
+                << " old=" << subprog.file_stat.DebugString()
+                << " new=" << file_stat.DebugString();
+      subprog.file_stat = file_stat;
+      SetFileStatToData(file_stat, data_subprog->mutable_file_stat());
     }
   }
 
@@ -2556,7 +2549,7 @@ string CompilerInfo::abs_local_compiler_path() const {
 }
 
 const string& CompilerInfo::request_compiler_hash() const {
-  if (CompilerFlags::IsPNaClClangCommand(data_->local_compiler_path())) {
+  if (GCCFlags::IsPNaClClangCommand(data_->local_compiler_path())) {
     return data_->local_compiler_hash();
   }
   return data_->hash();
@@ -2564,8 +2557,8 @@ const string& CompilerInfo::request_compiler_hash() const {
 
 void CompilerInfo::Init() {
   CHECK(data_.get());
-  GetFileIdFromData(data_->local_compiler_id(), &local_compiler_id_);
-  GetFileIdFromData(data_->real_compiler_id(), &real_compiler_id_);
+  GetFileStatFromData(data_->local_compiler_stat(), &local_compiler_stat_);
+  GetFileStatFromData(data_->real_compiler_stat(), &real_compiler_stat_);
 
   for (const auto& p : data_->quote_include_paths()) {
     quote_include_paths_.push_back(p);
@@ -2622,6 +2615,10 @@ void CompilerInfo::Init() {
     SubprogramInfo::FromData(data, &s);
     subprograms_.push_back(s);
   }
+
+  CppParser::EnsureInitialize();
+  predefined_directives_ =
+      CppDirectiveParser::ParseFromString(predefined_macros());
 }
 
 time_t CompilerInfo::last_used_at() const {

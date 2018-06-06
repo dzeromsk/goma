@@ -33,10 +33,10 @@
 #endif
 
 // Following definitions are only valid for win32.
-typedef int uid_t;
-typedef int gid_t;
+typedef unsigned int uid_t;
+typedef unsigned int gid_t;
 typedef unsigned long pid_t;
-typedef int mode_t;
+typedef unsigned int mode_t;
 typedef int ssize_t;
 
 #if defined (_MSC_VER) && (_MSC_VER < 1600)

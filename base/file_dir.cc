@@ -5,16 +5,19 @@
 
 #include "file_dir.h"
 
+#include <utility>
+
 #ifndef _WIN32
 #include <dirent.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 #else
 #include "config_win.h"
 #endif
 
 #include "file.h"
+#include "filesystem.h"
+#include "options.h"
 #include "path.h"
 #include "status.h"
 
@@ -80,52 +83,13 @@ bool ListDirectory(const string& dirname, std::vector<DirEntry>* entries) {
 bool DeleteDirectory(const string& dirname) {
   return RemoveDirectoryA(dirname.c_str()) != 0;
 }
-
-int unlink(const char* path) {
-  if (DeleteFileA(path) != TRUE) {
-    return -1;
-  }
-  return 0;
-}
 #endif
-
-bool RecursivelyDelete(const string& name) {
-  // TODO: rewrite non recursive like devtools/goma/server/dirutil.cc?
-  std::vector<devtools_goma::DirEntry> entries;
-  if (!devtools_goma::ListDirectory(name, &entries)) {
-    return false;
-  }
-  if (entries.empty()) {
-    if (unlink(name.c_str()) != 0) {
-      return false;
-    }
-  }
-  for (const auto& ent : entries) {
-    if (ent.name == "." || ent.name == "..") {
-      continue;
-    }
-    const string& filename = file::JoinPath(name, ent.name);
-    if (ent.is_dir) {
-      if (!RecursivelyDelete(filename)) {
-        return false;
-      }
-    } else {
-      if (unlink(filename.c_str()) != 0) {
-        return false;
-      }
-    }
-  }
-  if (!devtools_goma::DeleteDirectory(name)) {
-    return false;
-  }
-  return true;
-}
 
 bool EnsureDirectory(const string& dirname, int mode) {
   if (file::IsDirectory(dirname, file::Defaults()).ok()) {
     return true;
   }
-  if (File::CreateDir(dirname.c_str(), mode)) {
+  if (file::CreateDir(dirname.c_str(), file::CreationMode(mode)).ok()) {
     return true;
   }
 

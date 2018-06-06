@@ -16,6 +16,7 @@
 
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "content.h"
@@ -30,16 +31,14 @@ namespace devtools_goma {
 
 const char* LinkerScriptParser::fakeroot_ = "";
 
-LinkerScriptParser::LinkerScriptParser(
-    std::unique_ptr<Content> content,
-    const string& current_directory,
-    const std::vector<string>& searchdirs,
-    const string& sysroot)
+LinkerScriptParser::LinkerScriptParser(std::unique_ptr<Content> content,
+                                       string current_directory,
+                                       std::vector<string> searchdirs,
+                                       string sysroot)
     : content_(new ContentCursor(std::move(content))),
-      current_directory_(current_directory),
-      searchdirs_(searchdirs),
-      sysroot_(sysroot) {
-}
+      current_directory_(std::move(current_directory)),
+      searchdirs_(std::move(searchdirs)),
+      sysroot_(std::move(sysroot)) {}
 
 LinkerScriptParser::~LinkerScriptParser() {
 }
@@ -53,7 +52,8 @@ bool LinkerScriptParser::ParseUntil(const string& term_token) {
   while (NextToken(&token)) {
     if (!term_token.empty() && token == term_token) {
       return true;
-    } else if (token == "INCLUDE") {
+    }
+    if (token == "INCLUDE") {
       if (!ProcessInclude())
         return false;
     } else if (token == "INPUT") {
@@ -227,7 +227,8 @@ bool LinkerScriptParser::ProcessFileList(bool accept_as_needed) {
   while (NextToken(&token)) {
     if (token == ")") {
       return true;
-    } else if (token == "AS_NEEDED") {
+    }
+    if (token == "AS_NEEDED") {
       if (accept_as_needed) {
         if (!ProcessAsNeeded())
           return false;

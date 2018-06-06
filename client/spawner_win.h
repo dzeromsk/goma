@@ -87,15 +87,15 @@ class SpawnerWin : public Spawner {
       ScopedFd::FileDescriptor child_process,
       const string& job_name);
 
-  static DWORD WINAPI OutputThread(LPVOID thread_params);
-  static DWORD WINAPI InputThread(LPVOID thread_params);
+  static unsigned __stdcall OutputThread(void* thread_params);
+  static unsigned __stdcall InputThread(void* thread_params);
 
   ScopedFd input_thread_;  // thread to send input of the child process
-  DWORD input_thread_id_;
+  unsigned input_thread_id_;
   bool stop_input_thread_;  // Let InputThread to finish itself if this is true.
 
   ScopedFd output_thread_;  // thread to receive output of the child process
-  DWORD output_thread_id_;
+  unsigned output_thread_id_;
   ScopedFd stop_output_thread_;  // event to notify the redir thread to exit
 
   DWORD process_status_;

@@ -17,9 +17,21 @@ bool HasPrefixDir(absl::string_view path, absl::string_view prefix);
 bool HasPrefixDirWithSep(absl::string_view path, absl::string_view prefix,
                          char pathsep);
 
+// Get file dirname of the given |filename|.
+// This function think both '/' and '\\' as path separators.
+absl::string_view GetDirname(absl::string_view filename);
+
+// Get file basename of the given |filename|.
+// This function think both '/' and '\\' as path separators.
+absl::string_view GetBasename(absl::string_view filename);
+
 // Get file extension of the given |filename|.
 // This function think both '/' and '\\' as path separators.
-absl::string_view GetFileNameExtension(absl::string_view filename);
+absl::string_view GetExtension(absl::string_view filename);
+
+// Get the part of the basename of |filename| prior to the final ".".
+// If there is no "." in |filename|, this function gets basename.
+absl::string_view GetStem(absl::string_view filename);
 
 }  // namespace devtools_goma
 

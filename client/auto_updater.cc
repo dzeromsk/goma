@@ -5,6 +5,7 @@
 
 #include "auto_updater.h"
 
+#include <utility>
 #include <vector>
 
 #include "autolock_timer.h"
@@ -23,7 +24,7 @@
 
 namespace devtools_goma {
 
-AutoUpdater::AutoUpdater(const string& goma_ctl)
+AutoUpdater::AutoUpdater(string goma_ctl)
     : dir_(GetMyDirectory()),
       my_version_(-1),
       pulled_version_(-1),
@@ -31,7 +32,7 @@ AutoUpdater::AutoUpdater(const string& goma_ctl)
       server_(nullptr),
       pull_closure_id_(ThreadpoolHttpServer::kInvalidClosureId),
       subproc_(nullptr),
-      goma_ctl_(goma_ctl) {
+      goma_ctl_(std::move(goma_ctl)) {
   ReadManifest(file::JoinPath(dir_, "MANIFEST"), &my_version_);
 }
 
@@ -216,6 +217,7 @@ void AutoUpdater::StartGomaCtlUpdate() {
   req->set_weight(SubProcessReq::HEAVY_WEIGHT);
   req->set_priority(SubProcessReq::LOW_PRIORITY);
   req->set_detach(true);
+  req->set_keep_env(true);
   subproc->Start(nullptr);
   // "goma_ctl.py update" runs in detached mode.
   // subproc will be deleted in Start(), and never send feedback from

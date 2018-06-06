@@ -15,6 +15,7 @@
 
 
 #include "absl/strings/string_view.h"
+#include "compiler_type.h"
 #include "flag_parser.h"
 using std::string;
 
@@ -55,11 +56,7 @@ class CompilerFlags {
   virtual string compiler_name() const = 0;
 
   virtual string lang() const { return lang_; }
-  virtual bool is_gcc() const { return false; }
-  virtual bool is_javac() const { return false; }
-  virtual bool is_vc() const { return false; }
-  virtual bool is_clang_tidy() const { return false; }
-  virtual bool is_java() const { return false; }
+  virtual CompilerType type() const = 0;
 
   // Returns true if the |env| is important for compiler_proxy running env.
   // This will be sent from gomacc to compiler_proxy.
@@ -93,19 +90,6 @@ class CompilerFlags {
 
   string DebugString() const;
 
-  // True if arg is gcc command name. Note that clang is considered as
-  // gcc variant, so IsGCCCommand("clang") returns true.  However, since
-  // clang-cl is not compatible with gcc, IsGCCCommand("clang-cl") returns
-  // false.
-  static bool IsGCCCommand(absl::string_view arg);
-  static bool IsClangCommand(absl::string_view arg);
-  static bool IsClangClCommand(absl::string_view arg);
-  static bool IsVCCommand(absl::string_view arg);
-  static bool IsNaClGCCCommand(absl::string_view arg);
-  static bool IsPNaClClangCommand(absl::string_view arg);
-  static bool IsJavacCommand(absl::string_view arg);
-  static bool IsClangTidyCommand(absl::string_view arg);
-  static bool IsJavaCommand(absl::string_view arg);
   static string GetCompilerName(absl::string_view arg);
 
   // Expands @response_file in |args| and sets in |expand_args| and
@@ -120,7 +104,30 @@ class CompilerFlags {
                               std::vector<string>* optional_input_filenames);
 
  protected:
-  CompilerFlags(const std::vector<string>& args, const string& cwd);
+  enum FlagType {
+    kNormal,  // A flag will be added with AddFlag
+    kPrefix,  // A flag will be added with AddPrefixFlag
+    kBool,    // A flag will be added with AddBoolFlag
+  };
+
+  template <bool is_defined>
+  class MacroStore : public FlagParser::Callback {
+   public:
+    explicit MacroStore(std::vector<std::pair<string, bool>>* macros)
+        : macros_(macros) {}
+
+    // Returns parsed flag value of value for flag.
+    string ParseFlagValue(const FlagParser::Flag& /* flag */,
+                          const string& value) override {
+      macros_->push_back(std::make_pair(value, is_defined));
+      return value;
+    }
+
+   private:
+    std::vector<std::pair<string, bool>>* macros_;
+  };
+
+  CompilerFlags(const std::vector<string>& args, string cwd);
   void Fail(const string& msg, const std::vector<string>& args);
 
   std::vector<string> args_;
@@ -142,294 +149,6 @@ class CompilerFlags {
   string fail_message_;
   string implicit_macros_;
 };
-
-class GCCFlags : public CompilerFlags {
- public:
-  enum Mode {
-    PREPROCESS, COMPILE, LINK
-  };
-
-  GCCFlags(const std::vector<string>& args, const string& cwd);
-
-  const std::vector<string> include_dirs() const;
-  const std::vector<string>& non_system_include_dirs() const {
-    return non_system_include_dirs_;
-  }
-  const std::vector<string>& root_includes() const { return root_includes_; }
-  const std::vector<string>& framework_dirs() const { return framework_dirs_; }
-
-  const std::vector<std::pair<string, bool>>& commandline_macros() const {
-    return commandline_macros_;
-  }
-
-  string compiler_name() const override;
-
-  Mode mode() const { return mode_; }
-
-  string isysroot() const { return isysroot_; }
-  const string& resource_dir() const { return resource_dir_; }
-  const std::set<string>& fsanitize() const { return fsanitize_; }
-  const std::map<string, string>& fdebug_prefix_map() const {
-    return fdebug_prefix_map_;
-  }
-
-  bool is_cplusplus() const { return is_cplusplus_; }
-  bool has_nostdinc() const { return has_nostdinc_; }
-  bool has_no_integrated_as() const { return has_no_integrated_as_; }
-  bool has_pipe() const { return has_pipe_; }
-  bool has_ffreestanding() const { return has_ffreestanding_; }
-  bool has_fno_hosted() const { return has_fno_hosted_; }
-  bool has_fno_sanitize_blacklist() const {
-    return has_fno_sanitize_blacklist_;
-  }
-  bool has_fsyntax_only() const { return has_fsyntax_only_; }
-  bool has_resource_dir() const { return !resource_dir_.empty(); }
-  bool has_wrapper() const { return has_wrapper_; }
-  bool has_fplugin() const { return has_fplugin_; }
-  bool is_precompiling_header() const { return is_precompiling_header_; }
-  bool is_stdin_input() const { return is_stdin_input_; }
-
-  bool is_gcc() const override { return true; }
-
-  bool IsClientImportantEnv(const char* env) const override;
-  bool IsServerImportantEnv(const char* env) const override;
-
-  static void DefineFlags(FlagParser* parser);
-
-  static string GetCompilerName(absl::string_view arg);
-
-  // If we know -Wfoo, returns true for "foo".
-  static bool IsKnownWarningOption(absl::string_view option);
-  static bool IsKnownDebugOption(absl::string_view v);
-
- private:
-  friend class GCCFlagsTest;
-  static string GetLanguage(const string& compiler_name,
-                            const string& input_filename);
-  // Get file extension of the given |filepath|.
-  static string GetFileNameExtension(const string& filepath);
-
-  std::vector<string> remote_flags_;
-  std::vector<string> non_system_include_dirs_;
-  std::vector<string> root_includes_;
-  std::vector<string> framework_dirs_;
-  // The second value is true if the macro is defined and false if undefined.
-  std::vector<std::pair<string, bool>> commandline_macros_;
-  Mode mode_;
-  string isysroot_;
-  string resource_dir_;
-  // -fsanitize can be specified multiple times, and can be comma separated
-  // values.
-  std::set<string> fsanitize_;
-  std::map<string, string> fdebug_prefix_map_;
-  bool is_cplusplus_;
-  bool has_nostdinc_;
-  bool has_no_integrated_as_;
-  bool has_pipe_;
-  bool has_ffreestanding_;
-  bool has_fno_hosted_;
-  bool has_fno_sanitize_blacklist_;
-  bool has_fsyntax_only_;
-  bool has_wrapper_;
-  bool has_fplugin_;
-  bool is_precompiling_header_;
-  bool is_stdin_input_;
-};
-
-class JavacFlags : public CompilerFlags {
- public:
-  JavacFlags(const std::vector<string>& args, const string& cwd);
-
-  string compiler_name() const override {
-    return "javac";
-  }
-
-  bool is_javac() const override { return true; }
-
-  bool IsClientImportantEnv(const char* env) const override { return false; }
-  bool IsServerImportantEnv(const char* env) const override { return false; }
-
-  static void DefineFlags(FlagParser* parser);
-  static string GetCompilerName(absl::string_view arg);
-
-  const std::vector<string>& jar_files() const { return jar_files_; }
-
-  const std::vector<string>& processors() const { return processors_; }
-
- private:
-  friend class JavacFlagsTest;
-
-  std::vector<string> jar_files_;
-  std::vector<string> processors_;
-};
-
-class VCFlags : public CompilerFlags {
- public:
-  VCFlags(const std::vector<string>& args, const string& cwd);
-
-  const std::vector<string>& include_dirs() const { return include_dirs_; }
-  const std::vector<string>& root_includes() const { return root_includes_; }
-  const std::vector<std::pair<string, bool>>& commandline_macros() const {
-    return commandline_macros_;
-  }
-
-  bool is_cplusplus() const { return is_cplusplus_; }
-  bool ignore_stdinc() const { return ignore_stdinc_; }
-  bool require_mspdbserv() const { return require_mspdbserv_; }
-  bool has_Brepro() const { return has_Brepro_; }
-
-  string compiler_name() const override;
-
-  bool is_vc() const override { return true; }
-
-  bool IsClientImportantEnv(const char* env) const override;
-  bool IsServerImportantEnv(const char* env) const override;
-
-  static void DefineFlags(FlagParser* parser);
-  static bool ExpandArgs(const string& cwd, const std::vector<string>& args,
-                         std::vector<string>* expanded_args,
-                         std::vector<string>* optional_input_filenames);
-
-  const string& creating_pch() const { return creating_pch_; }
-  const string& using_pch() const { return using_pch_; }
-  const string& using_pch_filename() const { return using_pch_filename_; }
-
-  static string GetCompilerName(absl::string_view arg);
-
- private:
-  friend class VCFlagsTest;
-  // Get file extension of the given |filepath|.
-  static string GetFileNameExtension(const string& filepath);
-  // Compose output file path
-  static string ComposeOutputFilePath(const string& input_file_name,
-                                      const string& output_file_or_dir,
-                                      const string& output_file_ext);
-
-  std::vector<string> include_dirs_;
-  std::vector<string> root_includes_;
-  // The second value is true if the macro is defined and false if undefined.
-  std::vector<std::pair<string, bool>> commandline_macros_;
-  bool is_cplusplus_;
-  bool ignore_stdinc_;
-  bool has_Brepro_;
-  string creating_pch_;
-  string using_pch_;
-  // The filename of .pch, if specified.
-  string using_pch_filename_;
-  bool require_mspdbserv_;
-};
-
-// ClangTidy will be used like this.
-// $ clang-tidy -checks='*' foo.cc -- -I. -std=c++11
-// This command line contains options for clang-tidy and options for clang.
-// clang options are parsed in the internal |gcc_flags_|.
-// When '--' is not given in the command line, compilation database
-// (compile_commands.json) is read. Otherwise, compilation database won't
-// be used.
-class ClangTidyFlags : public CompilerFlags {
- public:
-  ClangTidyFlags(const std::vector<string>& args, const string& cwd);
-
-  string compiler_name() const override;
-  bool is_clang_tidy() const override { return true; }
-
-  const string& cwd_for_include_processor() const override {
-    return gcc_flags_->cwd();
-  }
-
-  // Sets the corresponding clang args for IncludeProcessor.
-  // These are set in CompilerTask::InitCompilerFlags.
-  void SetClangArgs(const std::vector<string>& clang_args, const string& dir);
-  void SetCompilationDatabasePath(const string& compdb_path);
-  void set_is_successful(bool flag) { is_successful_ = flag; }
-
-  // NOTE: These methods are valid only after SetClangArgs() is called.
-  // Calling these before SetClangArgs() will cause undefined behavior.
-  const std::vector<string>& non_system_include_dirs() const {
-    return gcc_flags_->non_system_include_dirs();
-  }
-  const std::vector<string>& root_includes() const {
-    return gcc_flags_->root_includes();
-  }
-  const std::vector<string>& framework_dirs() const {
-    return gcc_flags_->framework_dirs();
-  }
-  const std::vector<std::pair<string, bool>>& commandline_macros() const {
-    return gcc_flags_->commandline_macros();
-  }
-  bool is_cplusplus() const { return gcc_flags_->is_cplusplus(); }
-  bool has_nostdinc() const { return gcc_flags_->has_nostdinc(); }
-
-  const string& build_path() const { return build_path_; }
-  const std::vector<string>& extra_arg() const { return extra_arg_; }
-  const std::vector<string>& extra_arg_before() const {
-    return extra_arg_before_;
-  }
-
-  bool seen_hyphen_hyphen() const { return seen_hyphen_hyphen_; }
-  const std::vector<string>& args_after_hyphen_hyphen() const {
-    return args_after_hyphen_hyphen_;
-  }
-
-  bool IsClientImportantEnv(const char* env) const override { return false; }
-  bool IsServerImportantEnv(const char* env) const override { return false; }
-
-  static void DefineFlags(FlagParser* parser);
-  static string GetCompilerName(absl::string_view arg);
-
- private:
-  string build_path_;  // the value of option "-p".
-  std::vector<string> extra_arg_;
-  std::vector<string> extra_arg_before_;
-
-  bool seen_hyphen_hyphen_;
-  std::vector<string> args_after_hyphen_hyphen_;
-
-  // Converted clang flag. This should be made in the constructor.
-  std::unique_ptr<GCCFlags> gcc_flags_;
-};
-
-class JavaFlags : public CompilerFlags {
- public:
-  JavaFlags(const std::vector<string>& args, const string& cwd);
-
-  string compiler_name() const override {
-    return "java";
-  }
-
-  bool is_java() const override { return true; }
-
-  bool IsClientImportantEnv(const char* env) const override { return false; }
-  bool IsServerImportantEnv(const char* env) const override { return false; }
-
-  static void DefineFlags(FlagParser* parser);
-  static string GetCompilerName(absl::string_view arg) {
-    return "java";
-  }
-  const std::vector<string>& jar_files() const { return jar_files_; }
-
- private:
-  std::vector<string> jar_files_;
-};
-
-// Get the version of gcc/clang to fill CommandSpec.
-// dumpversion is the result of gcc/clang -dumpversion
-// version is the result of gcc/clang --version
-string GetCxxCompilerVersionFromCommandOutputs(const string& command,
-                                               const string& dumpversion,
-                                               const string& version);
-
-// Truncate string at \r\n.
-string GetFirstLine(const string& buf);
-
-// Remove a program name from |version| if it comes from gcc/g++.
-string NormalizeGccVersion(const string& version);
-
-// Parses list of given class paths, and appends .jar and .zip to |jar_files|.
-// Note: |jar_files| will not be cleared inside, and the output will be
-// appended.
-void ParseJavaClassPaths(const std::vector<string>& class_paths,
-                         std::vector<string>* jar_files);
 
 }  // namespace devtools_goma
 

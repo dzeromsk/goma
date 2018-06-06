@@ -47,8 +47,8 @@ const CppToken::OperatorFunction CppToken::kFunctionTable[] = {
   And, Xor, Or, LAnd, LOr
 };
 
-std::string CppToken::DebugString() const {
-  std::string str;
+string CppToken::DebugString() const {
+  string str;
   str.reserve(16);
   switch (type) {
     case IDENTIFIER:
@@ -94,12 +94,6 @@ std::string CppToken::DebugString() const {
       break;
     case END:
       return "[END]";
-    case BEGIN_HIDE:
-      str.append("[BEGIN_HIDE(" + std::to_string(v.int_value) + ")]");
-      break;
-    case END_HIDE:
-      str.append("[END_HIDE(" + std::to_string(v.int_value) + ")]");
-      break;
     default:
       str.append("[");
       if (!string_value.empty()) {
@@ -114,11 +108,11 @@ std::string CppToken::DebugString() const {
   return str;
 }
 
-std::string CppToken::GetCanonicalString() const {
+string CppToken::GetCanonicalString() const {
   if (!string_value.empty())
     return string_value;
   if (v.char_value.c)
-    return std::string() + v.char_value.c;
+    return string() + v.char_value.c;
   return v.char_value.c2;
 }
 

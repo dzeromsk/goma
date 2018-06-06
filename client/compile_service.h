@@ -183,7 +183,7 @@ class CompileService {
     DISALLOW_COPY_AND_ASSIGN(GetCompilerInfoParam);
   };
 
-  explicit CompileService(WorkerThreadManager* wm);
+  CompileService(WorkerThreadManager* wm, int compiler_info_pool);
   ~CompileService();
 
   WorkerThreadManager* wm() { return wm_; }
@@ -431,15 +431,20 @@ class CompileService {
   // before.
   bool ContainFailedInput(const std::vector<string>& inputs) const;
 
-  void SetMaxSumOutputSize(size_t size) { max_sum_output_size_ = size; }
+  void SetMaxSumOutputSize(size_t size) LOCKS_EXCLUDED(buf_mu_) {
+    AUTO_EXCLUSIVE_LOCK(lock, &buf_mu_);
+    max_sum_output_size_ = size;
+  }
 
   // Acquire output buffer in buf for filesize. buf must be empty.
   // Returns true when succeeded and buf would have filesize buffer.
   // Returns false otherwise, and buf remains empty.
-  bool AcquireOutputBuffer(size_t filesize, string* buf);
+  bool AcquireOutputBuffer(size_t filesize, string* buf)
+      LOCKS_EXCLUDED(buf_mu_);
   // Release output buffer acquired by AcquireOutputBuffer.
   // filesize and buf should be the same with AcquireOutputBuffer.
-  void ReleaseOutputBuffer(size_t filesize, string* buf);
+  void ReleaseOutputBuffer(size_t filesize, string* buf)
+      LOCKS_EXCLUDED(buf_mu_);
 
   // Records output file is renamed or not.
   void RecordOutputRename(bool rename);
@@ -461,12 +466,11 @@ class CompileService {
   // Called when reply from Exec.
   void ExecDone(WorkerThreadManager::ThreadId thread_id, OneshotClosure* done);
 
-  // Called when compiler_mu_ is held either exlusive or shared.
-  bool FindLocalCompilerPathUnlocked(
-      const string& key,
-      const string& key_cwd,
-      string* local_compiler_path,
-      string* no_goma_local_path) const;
+  bool FindLocalCompilerPathUnlocked(const string& key,
+                                     const string& key_cwd,
+                                     string* local_compiler_path,
+                                     string* no_goma_local_path) const
+      SHARED_LOCKS_REQUIRED(compiler_mu_);
   bool FindLocalCompilerPathAndUpdate(
       const string& key,
       const string& key_cwd,
@@ -482,19 +486,21 @@ class CompileService {
 
   const CompileTask* FindTaskByIdUnlocked(int task_id, bool include_active);
 
-  void DumpCommonStatsUnlocked(GomaStats* stats);
+  void DumpCommonStatsUnlocked(GomaStats* stats) SHARED_LOCKS_REQUIRED(buf_mu_)
+      EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   void GetCompilerInfoInternal(GetCompilerInfoParam* param,
                                OneshotClosure* callback);
 
   WorkerThreadManager* wm_;
 
-  mutable Lock quit_mu_;  // protects quit_
-  bool quit_;
+  mutable Lock quit_mu_;
+  bool quit_ GUARDED_BY(quit_mu_);
 
   mutable Lock task_id_mu_;
   int task_id_ GUARDED_BY(task_id_mu_);
 
+  // TODO: add thread annotation
   mutable Lock mu_;  // protects other fields.
   ConditionVariable cond_;
 
@@ -512,7 +518,7 @@ class CompileService {
 
   // CompileTask's input that failed.
   mutable ReadWriteLock failed_inputs_mu_;
-  std::unordered_set<string> failed_inputs_;
+  std::unordered_set<string> failed_inputs_ GUARDED_BY(failed_inputs_mu_);
 
   string username_;
   string nodename_;
@@ -531,11 +537,10 @@ class CompileService {
 
   int compiler_info_pool_;
 
-  // protects compiler_info_waiters_, compiler_info_callbacks.
   mutable Lock compiler_info_mu_;
   // key: key_cwd: value: a list of waiting param+closure.
   std::unordered_map<std::string, CompilerInfoWaiterList*>
-      compiler_info_waiters_;
+      compiler_info_waiters_ GUARDED_BY(compiler_info_mu_);
 
   std::unique_ptr<FileHashCache> file_hash_cache_;
 
@@ -584,13 +589,13 @@ class CompileService {
   // key: error reason, value: count
   std::unordered_map<string, int> error_to_user_;
 
-  // protects local_compiler_paths_
   mutable ReadWriteLock compiler_mu_;
 
   // key: <gomacc_path>:<basename>:<cwd>:<local_path>
   //     if all path in <local_path> are absolute, "." is used for <cwd>.
   // value: (local_compiler_path, no_goma_local_path)
-  std::unordered_map<string, std::pair<string, string>> local_compiler_paths_;
+  std::unordered_map<string, std::pair<string, string>> local_compiler_paths_
+      GUARDED_BY(compiler_mu_);
 
   int num_exec_request_;
   int num_exec_success_;
@@ -610,22 +615,24 @@ class CompileService {
 
   std::map<string, int> local_run_reason_;
 
+  mutable ReadWriteLock buf_mu_;
+
   int num_file_requested_;
   int num_file_uploaded_;
   int num_file_missed_;
   int num_file_output_;
   int num_file_rename_output_;
-  int num_file_output_buf_;
+  int num_file_output_buf_ GUARDED_BY(buf_mu_);
 
   int num_include_processor_total_files_;
   int num_include_processor_skipped_files_;
   int64_t include_processor_total_wait_time_;  // might not fit in int32.
   int64_t include_processor_total_run_time_;  // might not fit in int32.
 
-  size_t cur_sum_output_size_;
-  size_t max_sum_output_size_;
-  size_t req_sum_output_size_;
-  size_t peak_req_sum_output_size_;
+  size_t cur_sum_output_size_ GUARDED_BY(buf_mu_);
+  size_t max_sum_output_size_ GUARDED_BY(buf_mu_);
+  size_t req_sum_output_size_ GUARDED_BY(buf_mu_);
+  size_t peak_req_sum_output_size_ GUARDED_BY(buf_mu_);
 
   bool can_send_user_info_;
   int allowed_network_error_duration_in_sec_;

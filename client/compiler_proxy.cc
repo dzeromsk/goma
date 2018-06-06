@@ -8,8 +8,6 @@
 // #define HAVE_HEAP_PROFILER 1
 // #define HAVE_CPU_PROFILER 1
 
-#include "threadpool_http_server.h"
-
 #include <stdio.h>
 #include <time.h>
 
@@ -36,17 +34,19 @@
 #include <sstream>
 #include <string>
 #include <unordered_set>
+#include <utility>
 
+#include "absl/memory/memory.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_replace.h"
 #include "absl/strings/str_split.h"
 #include "arfile_reader.h"
-#include "autolock_timer.h"
 #include "auto_updater.h"
-#include "breakpad.h"
+#include "autolock_timer.h"
 #include "basictypes.h"
+#include "breakpad.h"
 #include "callback.h"
-#include "compile_stats.h"
 #include "compile_service.h"
 #include "compile_stats.h"
 #include "compiler_flags.h"
@@ -64,12 +64,13 @@
 #include "compilerz_script.h"
 #include "compilerz_style.h"
 #include "counterz.h"
+#include "cpp_directive_optimizer.h"
 #include "cpp_macro.h"
 #include "deps_cache.h"
 #include "env_flags.h"
 #include "file_hash_cache.h"
 #include "file_helper.h"
-#include "file_id_cache.h"
+#include "file_stat_cache.h"
 #include "glog/logging.h"
 #include "goma_file.h"
 #include "goma_file_http.h"
@@ -83,8 +84,9 @@
 #include "include_cache.h"
 #include "include_file_finder.h"
 #include "ioutil.h"
-#include "jarfile_reader.h"
+#include "java/jarfile_reader.h"
 #include "jquery.min.h"
+#include "list_dir_cache.h"
 #include "local_output_cache.h"
 #include "log_cleaner.h"
 #include "log_service_client.h"
@@ -106,6 +108,7 @@ MSVC_POP_WARNING()
 #include "subprocess_controller_client.h"
 #include "subprocess_option_setter.h"
 #include "subprocess_task.h"
+#include "threadpool_http_server.h"
 #include "trustedipsmanager.h"
 #include "util.h"
 #include "watchdog.h"
@@ -171,23 +174,29 @@ namespace devtools_goma {
 class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
                                  public ThreadpoolHttpServer::Monitor {
  public:
-  CompilerProxyHttpHandler(const string& myname,
-                           const string& tmpdir,
+  CompilerProxyHttpHandler(string myname,
+                           string setting,
+                           string tmpdir,
                            WorkerThreadManager* wm)
-      : myname_(myname),
-        service_(wm),
+      : myname_(std::move(myname)),
+        setting_(std::move(setting)),
+        service_(wm, FLAGS_COMPILER_INFO_POOL),
         log_cleaner_closure_id_(kInvalidPeriodicClosureId),
         memory_tracker_closure_id_(kInvalidPeriodicClosureId),
         rpc_sent_count_(0),
-        tmpdir_(tmpdir)
+        tmpdir_(std::move(tmpdir))
 #if HAVE_HEAP_PROFILER
-      , compiler_proxy_heap_profile_file_(file::JoinPathRespectAbsolute(
-          tmpdir_, FLAGS_COMPILER_PROXY_HEAP_PROFILE_FILE))
+        ,
+        compiler_proxy_heap_profile_file_(file::JoinPathRespectAbsolute(
+            tmpdir_,
+            FLAGS_COMPILER_PROXY_HEAP_PROFILE_FILE))
 #endif
 #if HAVE_CPU_PROFILER
-      , compiler_proxy_cpu_profile_file_(file::JoinPathRespectAbsolute(
-          tmpdir_, FLAGS_COMPILER_PROXY_CPU_PROFILE_FILE))
-      , cpu_profiling_(false)
+        ,
+        compiler_proxy_cpu_profile_file_(file::JoinPathRespectAbsolute(
+            tmpdir_,
+            FLAGS_COMPILER_PROXY_CPU_PROFILE_FILE)),
+        cpu_profiling_(false)
 #endif
   {
     if (FLAGS_SEND_USER_INFO) {
@@ -286,46 +295,35 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
             FLAGS_BURST_MAX_SUBPROCS_LOW,
             FLAGS_BURST_MAX_SUBPROCS_HEAVY));
     client->SetMonitor(
-        std::unique_ptr<NetworkErrorMonitor>(
-            new NetworkErrorMonitor(option_setter.get())));
+        absl::make_unique<NetworkErrorMonitor>(option_setter.get()));
     service_.SetSubProcessOptionSetter(std::move(option_setter));
     service_.SetMaxCompilerDisabledTasks(FLAGS_MAX_COMPILER_DISABLED_TASKS);
     service_.SetHttpClient(std::move(client));
 
     HttpRPC::Options http_rpc_options;
     InitHttpRPCOptions(&http_rpc_options);
-    service_.SetHttpRPC(std::unique_ptr<HttpRPC>(
-        new HttpRPC(service_.http_client(), http_rpc_options)));
+    service_.SetHttpRPC(
+        absl::make_unique<HttpRPC>(service_.http_client(), http_rpc_options));
 
-    service_.SetExecServiceClient(std::unique_ptr<ExecServiceClient>(
-        new ExecServiceClient(service_.http_rpc(), "/e")));
+    service_.SetExecServiceClient(
+        absl::make_unique<ExecServiceClient>(service_.http_rpc(), "/e"));
 
     MultiHttpRPC::Options multi_store_options;
     multi_store_options.max_req_in_call = FLAGS_MULTI_STORE_IN_CALL;
     multi_store_options.req_size_threshold_in_call =
         FLAGS_MULTI_STORE_THRESHOLD_SIZE_IN_CALL;
     multi_store_options.check_interval_ms = FLAGS_MULTI_STORE_PENDING_MS;
-    service_.SetMultiFileStore(std::unique_ptr<MultiFileStore>(
-        new MultiFileStore(
-            service_.http_rpc(),
-            "/s",
-            multi_store_options,
-            wm)));
-    service_.SetFileServiceHttpClient(std::unique_ptr<FileServiceHttpClient>(
-        new FileServiceHttpClient(
-            service_.http_rpc(),
-            "/s",
-            "/l",
-            service_.multi_file_store())));
+    service_.SetMultiFileStore(absl::make_unique<MultiFileStore>(
+
+        service_.http_rpc(), "/s", multi_store_options, wm));
+    service_.SetFileServiceHttpClient(absl::make_unique<FileServiceHttpClient>(
+
+        service_.http_rpc(), "/s", "/l", service_.multi_file_store()));
     if (FLAGS_PROVIDE_INFO)
-      service_.SetLogServiceClient(
-          std::unique_ptr<LogServiceClient>(
-              new LogServiceClient(
-                  service_.http_rpc(),
-                  "/sl",
-                  FLAGS_NUM_LOG_IN_SAVE_LOG,
-                  FLAGS_LOG_PENDING_MS,
-                  wm)));
+      service_.SetLogServiceClient(absl::make_unique<LogServiceClient>(
+
+          service_.http_rpc(), "/sl", FLAGS_NUM_LOG_IN_SAVE_LOG,
+          FLAGS_LOG_PENDING_MS, wm));
     ArFileReader::Register();
     JarFileReader::Register();
     service_.StartIncludeProcessorWorkers(FLAGS_INCLUDE_PROCESSOR_THREADS);
@@ -692,6 +690,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
         DumpContentionLogToInfoLog();
         DumpStatsProto();
         DumpCounterz();
+        DumpDirectiveOptimizer();
         LOG(INFO) << "Dump done.";
         devtools_goma::FlushLogFiles();
         http_server_request->SendReply("HTTP/1.1 200 OK\r\n\r\nquit!");
@@ -915,6 +914,8 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
     *ss << "<tr>";
 
     *ss << "<td>";
+    *ss << "CompilerProxyIdPrefix: " << service_.compiler_proxy_id_prefix()
+        << kBr;
 
     char ctime_buf[30];
     const time_t start_time = service_.start_time();
@@ -1332,6 +1333,9 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
     const string health_status =
         service_.http_client()->GetHealthStatusMessage();
     *response = "HTTP/1.1 200 OK\r\n\r\n" + health_status;
+    if (!setting_.empty()) {
+      *response += "\nsetting=" + setting_;
+    }
     LOG(INFO) << "I am healthy:" << health_status
               << " to pid:" << request.peer_pid()
               << " query:" << query;
@@ -1526,8 +1530,10 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
       MemoryUsageLog memory_usage_log;
       memory_usage_log.set_compiler_proxy_start_time(service_.start_time());
       memory_usage_log.set_compiler_proxy_user_agent(kUserAgentString);
-      memory_usage_log.set_username(service_.username());
-      memory_usage_log.set_nodename(service_.nodename());
+      if (FLAGS_SEND_USER_INFO) {
+        memory_usage_log.set_username(service_.username());
+        memory_usage_log.set_nodename(service_.nodename());
+      }
 
       time_t current_time;
       time(&current_time);
@@ -1589,10 +1595,19 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   }
 
   void DumpCounterz() {
+#ifdef HAVE_COUNTERZ
     if (FLAGS_DUMP_COUNTERZ_FILE.empty())
       return;
 
     Counterz::Dump(FLAGS_DUMP_COUNTERZ_FILE);
+#endif  // HAVE_COUNTERZ
+  }
+
+  void DumpDirectiveOptimizer() {
+    std::ostringstream ss;
+    CppDirectiveOptimizer::DumpStats(&ss);
+    LOG(INFO) << "Dumping directive optimizer...\n"
+              << ss.str();
   }
 
 #if HAVE_HEAP_PROFILER
@@ -1658,6 +1673,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   }
 
   const string myname_;
+  const string setting_;
   CompileService service_;
   LogCleaner log_cleaner_;
   PeriodicClosureId log_cleaner_closure_id_;
@@ -1813,8 +1829,9 @@ int main(int argc, char* argv[], const char* envp[]) {
   }
 #endif
 
-  if (FLAGS_ENABLE_GLOBAL_FILE_ID_CACHE) {
-    devtools_goma::GlobalFileIdCache::Init();
+  if (FLAGS_ENABLE_GLOBAL_FILE_STAT_CACHE ||
+      FLAGS_ENABLE_GLOBAL_FILE_ID_CACHE) {
+    devtools_goma::GlobalFileStatCache::Init();
   }
 
   const string tmpdir = FLAGS_TMP_DIR;
@@ -1906,7 +1923,7 @@ int main(int argc, char* argv[], const char* envp[]) {
                                           absl::SkipEmpty())) {
       string cmd(cmd_view);
 #ifdef _WIN32
-      std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
+      absl::AsciiStrToLower(&cmd);
 #endif
       subproc_options.dont_kill_commands.insert(cmd);
     }
@@ -1921,7 +1938,8 @@ int main(int argc, char* argv[], const char* envp[]) {
 
   std::unique_ptr<devtools_goma::AutoUpdater> auto_updater;
   if (FLAGS_ENABLE_AUTO_UPDATE) {
-    auto_updater.reset(new devtools_goma::AutoUpdater(FLAGS_CTL_SCRIPT_NAME));
+    auto_updater =
+        absl::make_unique<devtools_goma::AutoUpdater>(FLAGS_CTL_SCRIPT_NAME);
     if (auto_updater->my_version() > 0) {
       LOG(INFO) << "goma version:" << auto_updater->my_version();
     }
@@ -1954,9 +1972,7 @@ int main(int argc, char* argv[], const char* envp[]) {
 
   devtools_goma::IncludeCache::Init(
       FLAGS_MAX_INCLUDE_CACHE_SIZE, !FLAGS_DEPS_CACHE_FILE.empty());
-  if (FLAGS_ENABLE_MACRO_CACHE) {
-    devtools_goma::InitMacroEnvCache();
-  }
+  devtools_goma::ListDirCache::Init(FLAGS_MAX_LIST_DIR_CACHE_ENTRY_NUM);
 
   std::unique_ptr<devtools_goma::WorkerThreadRunner> init_deps_cache(
       new devtools_goma::WorkerThreadRunner(
@@ -1970,12 +1986,13 @@ int main(int argc, char* argv[], const char* envp[]) {
   devtools_goma::TrustedIpsManager trustedipsmanager;
   InitTrustedIps(&trustedipsmanager);
 
+  string setting;
   if (!FLAGS_SETTINGS_SERVER.empty()) {
-    ApplySettings(FLAGS_SETTINGS_SERVER, FLAGS_ASSERT_SETTINGS, &wm);
+    setting = ApplySettings(FLAGS_SETTINGS_SERVER, FLAGS_ASSERT_SETTINGS, &wm);
   }
   std::unique_ptr<devtools_goma::CompilerProxyHttpHandler> handler(
       new devtools_goma::CompilerProxyHttpHandler(
-          string(file::Basename(argv[0])), tmpdir, &wm));
+          string(file::Basename(argv[0])), setting, tmpdir, &wm));
 
   ThreadpoolHttpServer server(FLAGS_COMPILER_PROXY_LISTEN_ADDR,
                               FLAGS_COMPILER_PROXY_PORT,
@@ -2047,10 +2064,8 @@ int main(int argc, char* argv[], const char* envp[]) {
   handler->Wait();
   devtools_goma::CompilerInfoCache::Quit();
   devtools_goma::DepsCache::Quit();
-  if (FLAGS_ENABLE_MACRO_CACHE) {
-    devtools_goma::QuitMacroEnvCache();
-  }
   devtools_goma::IncludeCache::Quit();
+  devtools_goma::ListDirCache::Quit();
   devtools_goma::SubProcessControllerClient::Get()->Shutdown();
 
   handler.reset();
@@ -2063,8 +2078,9 @@ int main(int argc, char* argv[], const char* envp[]) {
   LOG(INFO) << "wait:" << status;
 #endif
 
-  if (FLAGS_ENABLE_GLOBAL_FILE_ID_CACHE) {
-    devtools_goma::GlobalFileIdCache::Quit();
+  if (FLAGS_ENABLE_GLOBAL_FILE_STAT_CACHE ||
+      FLAGS_ENABLE_GLOBAL_FILE_ID_CACHE) {
+    devtools_goma::GlobalFileStatCache::Quit();
   }
 
 #if HAVE_COUNTERZ

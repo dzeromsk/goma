@@ -1,0 +1,6 @@
+Copied FlatMap implementation from https://github.com/tensorflow/tensorflow.
+
+Changed:
+  1. Use std::hash for the default function
+  2. Suppress a few warnings on cl.exe
+

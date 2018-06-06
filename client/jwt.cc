@@ -11,8 +11,9 @@
 #include <openssl/evp.h>
 
 #include <memory>
-#include <string>
 #include <sstream>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/strings/str_join.h"
@@ -76,9 +77,8 @@ std::string JsonWebToken::Key::Sign(const std::string& input) const {
   return sig;
 }
 
-JsonWebToken::JsonWebToken(const ClaimSet& claim_set)
-    : claim_set_(claim_set) {
-}
+JsonWebToken::JsonWebToken(ClaimSet claim_set)
+    : claim_set_(std::move(claim_set)) {}
 
 JsonWebToken::~JsonWebToken() {
 }

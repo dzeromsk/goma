@@ -73,7 +73,8 @@ bool ParsePosixCommandLineToArgv(const string& cmdline,
     if (ch == '\'') {
       squote = true;
       continue;
-    } else if (ch == '\"') {
+    }
+    if (ch == '\"') {
       dquote = true;
       continue;
     }

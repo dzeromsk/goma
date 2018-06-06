@@ -8,14 +8,23 @@
 
 namespace devtools_goma {
 
-namespace {
+// static
+bool Macro::IsParenBalanced(const ArrayTokenList& tokens) {
+  int level = 0;
+  for (const auto& t : tokens) {
+    if (t.IsPuncChar('(')) {
+      ++level;
+    } else if (t.IsPuncChar(')')) {
+      --level;
+      if (level < 0) {
+        return false;
+      }
+    }
+  }
+  return level == 0;
+}
 
-Lock mu_;
-std::vector<std::unique_ptr<MacroEnv>>* macro_env_cache_ GUARDED_BY(mu_);
-
-}  // anonymous namespace
-
-string Macro::DebugString(CppParser* parser, const string& name) const {
+string Macro::DebugString(CppParser* parser) const {
   string str;
   str.reserve(64);
   str.append("Macro[");
@@ -38,12 +47,6 @@ string Macro::DebugString(CppParser* parser, const string& name) const {
     case CBK_FUNC:
       str.append("(CALLBACK_FUNC)]");
       break;
-    case UNDEFINED:
-      str.append("(UNDEFINED)]");
-      break;
-    case UNUSED:
-      str.append("(UNUSED)]");
-      break;
   }
   str.append(" => ");
   if (callback) {
@@ -54,36 +57,6 @@ string Macro::DebugString(CppParser* parser, const string& name) const {
     }
   }
   return str;
-}
-
-void InitMacroEnvCache() {
-  AUTOLOCK(lock, &mu_);
-  CHECK(macro_env_cache_ == nullptr);
-  macro_env_cache_ = new std::vector<std::unique_ptr<MacroEnv>>();
-}
-
-void QuitMacroEnvCache() {
-  AUTOLOCK(lock, &mu_);
-  delete macro_env_cache_;
-  macro_env_cache_ = nullptr;
-}
-
-std::unique_ptr<MacroEnv> GetMacroEnvFromCache() {
-  AUTOLOCK(lock, &mu_);
-  if (macro_env_cache_ == nullptr || macro_env_cache_->empty()) {
-    return std::unique_ptr<MacroEnv>(new MacroEnv);
-  }
-  auto macro = std::move(macro_env_cache_->back());
-  macro_env_cache_->pop_back();
-  return macro;
-}
-
-void ReleaseMacroEnvToCache(std::unique_ptr<MacroEnv> macro) {
-  AUTOLOCK(lock, &mu_);
-  if (macro_env_cache_ == nullptr) {
-    return;
-  }
-  macro_env_cache_->push_back(std::move(macro));
 }
 
 }  // namespace devtools_goma

@@ -11,8 +11,8 @@
 #include <gtest/gtest.h>
 
 #include "content.h"
-#include "file_id.h"
-#include "file_id_cache.h"
+#include "file_stat.h"
+#include "file_stat_cache.h"
 #include "goma_hash.h"
 #include "unittest_util.h"
 
@@ -30,13 +30,13 @@ class IncludeCacheTest : public testing::Test {
     IncludeCache::Quit();
   }
 
-  std::unique_ptr<Content> MakeDirectiveOnlyContent(int size) {
+  string MakeDirectiveOnlyString(int size) {
     string buf(size, '#');
     for (int i = 1023; i < size; i += 1024) {
       buf[i] = '\n';
     }
 
-    return Content::CreateFromString(buf);
+    return buf;
   }
 
   int Size(IncludeCache* include_cache) const {
@@ -46,75 +46,105 @@ class IncludeCacheTest : public testing::Test {
   size_t CacheSize(IncludeCache* include_cache) const {
     return include_cache->current_cache_size_;
   }
+  size_t HitCount(IncludeCache* include_cache) const {
+    return include_cache->hit_count_.value();
+  }
+  size_t MissedCount(IncludeCache* include_cache) const {
+    return include_cache->missed_count_.value();
+  }
 };
 
-TEST_F(IncludeCacheTest, SetGet) {
+TEST_F(IncludeCacheTest, GetDirectiveList) {
   IncludeCache* ic = IncludeCache::instance();
 
-  std::unique_ptr<Content> original(Content::CreateFromString(
-      "#include <stdio.h>\n"
-      "non-directive-line\n"));
+  TmpdirUtil tmpdir("includecache");
+  string ah = tmpdir.FullPath("a.h");
+  string content = "#include <stdio.h>\n";
+  tmpdir.CreateTmpFile("a.h", content);
 
-  FileId file_id;
-  file_id.size = original->size();
-  file_id.mtime = 100;
+  FileStat file_stat;
+  file_stat.size = content.size();
+  file_stat.mtime = 100;
 
-  ic->Insert("kotori", *original, file_id);
+  size_t hit_count_0 = HitCount(ic);
+  size_t missed_count_0 = MissedCount(ic);
 
-  {
-    std::unique_ptr<Content> content(
-        ic->GetCopyIfNotModified("kotori", file_id));
-    EXPECT_TRUE(content.get() != nullptr);
+  (void)ic->GetIncludeItem(ah, file_stat);
+  EXPECT_EQ(hit_count_0, HitCount(ic));
+  EXPECT_EQ(missed_count_0 + 1, MissedCount(ic));
 
-    string actual(content->buf(), content->buf_end());
-    EXPECT_EQ("#include <stdio.h>\n", actual);
-  }
+  // Reload
+  (void)ic->GetIncludeItem(ah, file_stat);
+  EXPECT_EQ(hit_count_0 + 1, HitCount(ic));
+  EXPECT_EQ(missed_count_0 + 1, MissedCount(ic));
 
-  // When mtime is newer, we cannot take Content.
-  file_id.mtime = 105;
-  {
-    std::unique_ptr<Content> content(
-        ic->GetCopyIfNotModified("kotori", file_id));
-    EXPECT_TRUE(content.get() == nullptr);
-  }
+  // Reload with mtime
+  file_stat.mtime = 105;
+  (void)ic->GetIncludeItem(ah, file_stat);
+  EXPECT_EQ(hit_count_0 + 1, HitCount(ic));
+  EXPECT_EQ(missed_count_0 + 2, MissedCount(ic));
+}
+
+TEST_F(IncludeCacheTest, SetGetIfMaxSizeIsZero) {
+  // Initialize with max size is 0.
+  IncludeCache::Quit();
+  IncludeCache::Init(0, true);
+
+  IncludeCache* ic = IncludeCache::instance();
+
+  TmpdirUtil tmpdir("includecache");
+  string ah = tmpdir.FullPath("a.h");
+  string content = "#include <stdio.h>\n";
+  tmpdir.CreateTmpFile("a.h", content);
+
+  FileStat file_stat;
+  file_stat.size = content.size();
+  file_stat.mtime = 100;
+
+  size_t hit_count_0 = HitCount(ic);
+  size_t missed_count_0 = MissedCount(ic);
+
+  (void)ic->GetIncludeItem(ah, file_stat);
+  EXPECT_EQ(hit_count_0, HitCount(ic));
+  EXPECT_EQ(missed_count_0 + 1, MissedCount(ic));
+
+  // Reload (missed due to evicted)
+  (void)ic->GetIncludeItem(ah, file_stat);
+  EXPECT_EQ(hit_count_0, HitCount(ic));
+  EXPECT_EQ(missed_count_0 + 2, MissedCount(ic));
+
+  // Reload with mtime
+  file_stat.mtime = 105;
+  (void)ic->GetIncludeItem(ah, file_stat);
+  EXPECT_EQ(hit_count_0, HitCount(ic));
+  EXPECT_EQ(missed_count_0 + 3, MissedCount(ic));
 }
 
 TEST_F(IncludeCacheTest, ExceedMemory) {
-  const int kFileSize = 256 * 1024;
+  const size_t kFileSize = 2 * 1024 * 1024;  // (> 1MB)
 
   IncludeCache* ic = IncludeCache::instance();
 
-  std::unique_ptr<Content> content(MakeDirectiveOnlyContent(kFileSize));
+  TmpdirUtil tmpdir("includecache");
+  string ah = tmpdir.FullPath("a.h");
+  string content = MakeDirectiveOnlyString(kFileSize);
+  tmpdir.CreateTmpFile("a.h", content);
 
-  FileId file_id;
-  file_id.size = kFileSize;
-  file_id.mtime = 100;
+  FileStat file_stat;
+  file_stat.size = content.size();
+  file_stat.mtime = 100;
 
-  ic->Insert("key0", *content, file_id);
-  ic->Insert("key1", *content, file_id);
-  ic->Insert("key2", *content, file_id);
-  ic->Insert("key3", *content, file_id);
+  size_t hit_count_0 = HitCount(ic);
+  size_t missed_count_0 = MissedCount(ic);
 
-  EXPECT_EQ(4, Size(ic));
-  EXPECT_EQ(1024 * 1024UL, CacheSize(ic));
+  (void)ic->GetIncludeItem(ah, file_stat);
+  EXPECT_EQ(hit_count_0, HitCount(ic));
+  EXPECT_EQ(missed_count_0 + 1, MissedCount(ic));
 
-  ic->Insert("key5", *content, file_id);
-
-  // key0 has been evicted, since it is inserted first.
-  EXPECT_EQ(4, Size(ic));
-  EXPECT_EQ(1024 * 1024UL, CacheSize(ic));
-  EXPECT_EQ(nullptr, ic->GetCopyIfNotModified("key0", file_id));
-
-  // key1 is not evicted yet.
-  std::unique_ptr<Content> key1_content(
-      ic->GetCopyIfNotModified("key1", file_id));
-  EXPECT_NE(nullptr, key1_content.get());
-
-  // Insert key0 again.
-  ic->Insert("key0", *content, file_id);
-
-  // Then, key1 should be evicted.
-  EXPECT_EQ(nullptr, ic->GetCopyIfNotModified("key1", file_id));
+  // Reload (evicted due to large file)
+  (void)ic->GetIncludeItem(ah, file_stat);
+  EXPECT_EQ(hit_count_0, HitCount(ic));
+  EXPECT_EQ(missed_count_0 + 2, MissedCount(ic));
 }
 
 TEST_F(IncludeCacheTest, GetDirectiveHash)
@@ -134,12 +164,13 @@ TEST_F(IncludeCacheTest, GetDirectiveHash)
     ComputeDataHashKeyForSHA256HashValue("#include <stdio.h>\n",
                                          &hash_expected);
 
-    FileIdCache file_id_cache;
-    FileId file_id(file_id_cache.Get(ah));
-    ASSERT_TRUE(file_id.IsValid());
+    FileStatCache file_stat_cache;
+    FileStat file_stat(file_stat_cache.Get(ah));
+    ASSERT_TRUE(file_stat.IsValid());
 
-    OptionalSHA256HashValue hash_actual = ic->GetDirectiveHash(ah, file_id);
-    EXPECT_TRUE(hash_actual.valid());
+    absl::optional<SHA256HashValue> hash_actual =
+        ic->GetDirectiveHash(ah, file_stat);
+    EXPECT_TRUE(hash_actual.has_value());
     EXPECT_EQ(hash_expected, hash_actual.value());
   }
 
@@ -151,12 +182,13 @@ TEST_F(IncludeCacheTest, GetDirectiveHash)
     ComputeDataHashKeyForSHA256HashValue("#include <string.h>\n",
                                          &hash_expected);
 
-    FileIdCache file_id_cache;
-    FileId file_id(file_id_cache.Get(ah));
-    ASSERT_TRUE(file_id.IsValid());
+    FileStatCache file_stat_cache;
+    FileStat file_stat(file_stat_cache.Get(ah));
+    ASSERT_TRUE(file_stat.IsValid());
 
-    OptionalSHA256HashValue hash_actual = ic->GetDirectiveHash(ah, file_id);
-    EXPECT_TRUE(hash_actual.valid());
+    absl::optional<SHA256HashValue> hash_actual =
+        ic->GetDirectiveHash(ah, file_stat);
+    EXPECT_TRUE(hash_actual.has_value());
     EXPECT_EQ(hash_expected, hash_actual.value());
   }
 
@@ -167,17 +199,19 @@ TEST_F(IncludeCacheTest, GetDirectiveHash)
     SHA256HashValue hash_expected;
     ComputeDataHashKeyForSHA256HashValue("#include <math.h>\n", &hash_expected);
 
-    FileIdCache file_id_cache;
-    FileId file_id(file_id_cache.Get(bh));
-    ASSERT_TRUE(file_id.IsValid());
+    FileStatCache file_stat_cache;
+    FileStat file_stat(file_stat_cache.Get(bh));
+    ASSERT_TRUE(file_stat.IsValid());
 
-    OptionalSHA256HashValue hash_actual = ic->GetDirectiveHash(bh, file_id);
-    EXPECT_TRUE(hash_actual.valid());
+    absl::optional<SHA256HashValue> hash_actual =
+        ic->GetDirectiveHash(bh, file_stat);
+    EXPECT_TRUE(hash_actual.has_value());
     EXPECT_EQ(hash_expected, hash_actual.value());
 
-    std::unique_ptr<Content> content(ic->GetCopyIfNotModified(bh, file_id));
-    ASSERT_TRUE(content.get() != nullptr);
-    EXPECT_EQ("#include <math.h>\n", content->ToStringView());
+    size_t hit_count_before = HitCount(ic);
+    (void)ic->GetIncludeItem(bh, file_stat);
+    size_t hit_count_after = HitCount(ic);
+    EXPECT_EQ(hit_count_before + 1, hit_count_after);
   }
 }
 

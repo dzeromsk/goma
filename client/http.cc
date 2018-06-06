@@ -25,6 +25,7 @@
 #include <sstream>
 #include <string>
 
+#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 #include "autolock_timer.h"
 #include "callback.h"
@@ -135,8 +136,7 @@ HttpClient::Options::Options()
       min_retry_backoff_ms(500), max_retry_backoff_ms(5000),
       fail_fast(false), network_error_margin(0),
       network_error_threshold_percent(kDefaultErrorThresholdPercent),
-      allow_throttle(true), reuse_connection(true),
-      force_connect_errorneous_address(false) {
+      allow_throttle(true), reuse_connection(true) {
 }
 
 bool HttpClient::Options::InitFromURL(absl::string_view url) {
@@ -363,7 +363,7 @@ class HttpClient::Task {
     }
 
     // TODO: make connect async.
-    d_ = client_->NewDescriptor(is_ping_);
+    d_ = client_->NewDescriptor();
     if (d_ == nullptr) {
       ++status_->num_connect_failed;
       // Note we do not retry if handling ping because its scenario
@@ -953,17 +953,11 @@ bool HttpClient::shutting_down() const {
   return shutting_down_;
 }
 
-Descriptor* HttpClient::NewDescriptor(bool may_retry) {
+Descriptor* HttpClient::NewDescriptor() {
   ScopedSocket fd(socket_pool_->NewSocket());
-  if (!fd.valid() && (may_retry || options_.force_connect_errorneous_address)) {
-    socket_pool_->ClearErrors();
-    fd = socket_pool_->NewSocket();
-    if (fd.valid()) {
-      LOG(INFO) << "connection retry success after clearing errors";
-    } else {
-      LOG(WARNING) << "connection retry failed after clearing errors";
-    }
-  }
+  // Note that unlike our past implementation, even on seeing previous network
+  // error we can get at least one socket if getaddrinfo succeeds.
+  // Thus, invalid fd means no address found by getaddrinfo.
   if (!fd.valid()) {
     {
       AUTOLOCK(lock, &mu_);
@@ -985,10 +979,9 @@ Descriptor* HttpClient::NewDescriptor(bool may_retry) {
         engine, tls_desc_options, wm_);
     d->Init();
     return d;
-  } else {
-    return wm_->RegisterSocketDescriptor(std::move(fd),
-                                         WorkerThreadManager::PRIORITY_MED);
   }
+  return wm_->RegisterSocketDescriptor(std::move(fd),
+                                       WorkerThreadManager::PRIORITY_MED);
 }
 
 void HttpClient::ReleaseDescriptor(
@@ -1841,8 +1834,8 @@ void HttpClient::Response::Buffer(char** buf, int* buf_size) {
     if (buffer_.size() < body_offset_ + content_length_) {
       buffer_.resize(body_offset_ + content_length_);
     }
-  } else if (*buf_size < kBufSize / 2) {
-    buffer_.resize(buffer_.size() + kBufSize);
+  } else if (*buf_size < kNetworkBufSize / 2) {
+    buffer_.resize(buffer_.size() + kNetworkBufSize);
   }
   *buf = &buffer_[len_];
   *buf_size = buffer_.size() - len_;
@@ -1880,7 +1873,8 @@ bool HttpClient::Response::Recv(int r) {
     // Go to next step quickly since Status 204 has nothing to parse.
     result_ = OK;
     return true;
-  } else if (status_code_ != 200) {
+  }
+  if (status_code_ != 200) {
     // heder found and error code.
     LOG(WARNING) << trace_id_ << " read "
                  << " http=" << status_code_
@@ -2015,17 +2009,17 @@ void HttpClient::Response::Parse() {
   if (encoding == ENCODING_DEFLATE) {
     // see chrome/src/net/base/gzip_filter.cc Insert ZlibHeader.
     static const char kZlibHeader[2] = {0x78, 0x01};
-    zlib_header.reset(
-        new google::protobuf::io::ArrayInputStream(kZlibHeader, 2));
+    zlib_header = absl::make_unique<google::protobuf::io::ArrayInputStream>(
+        kZlibHeader, 2);
     zlib_content = std::move(input);
     zlib_streams[0] = zlib_header.get();
     zlib_streams[1] = zlib_content.get();
-    sub_stream.reset(
-        new google::protobuf::io::ConcatenatingInputStream(zlib_streams, 2));
-    input.reset(
-        new google::protobuf::io::GzipInputStream(
-            sub_stream.get(),
-            google::protobuf::io::GzipInputStream::ZLIB));
+    sub_stream =
+        absl::make_unique<google::protobuf::io::ConcatenatingInputStream>(
+            zlib_streams, 2);
+    input = absl::make_unique<google::protobuf::io::GzipInputStream>(
+
+        sub_stream.get(), google::protobuf::io::GzipInputStream::ZLIB);
   } else if (encoding == ENCODING_LZMA2) {
 #ifdef ENABLE_LZMA
     // TODO: We might want Lzma2InputStream

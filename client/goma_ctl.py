@@ -46,8 +46,6 @@ _DEFAULT_NO_SSL_ENV = [
 _MAX_COOLDOWN_WAIT = 5  # seconds to wait for compiler_proxy to shutdown.
 _COOLDOWN_SLEEP = 1  # seconds to each wait for compiler_proxy to shutdown.
 _CURL_RETRY = 5  # times to retry for transient failures on curl.
-_TMP_DIR_PREFIX = 'goma_'
-_TMP_DIR_WIN = 'goma'
 _CRASH_DUMP_DIR = 'goma_crash'
 _CACHE_DIR = 'goma_cache'
 _PRODUCT_NAME = 'Goma'  # product name used for crash report.
@@ -216,45 +214,70 @@ def _ParseSpaceSeparatedValues(data):
 
 
 def _ParseLsof(data):
-  """Parse lsof -F pu <filename>.
+  """Parse lsof.
+
+  Expected inputs are results of:
+  - lsof -F pun <filename>
+    e.g.
+    p1234
+    u5678
+    f9
+  - lsof -F pun -p <pid>
+    e.g.
+    p1234
+    u5678
+    fcwd
+    n/
+    fmem
+    n/lib/ld.so
+    (f and n repeats, which should be owned by pid:1234 & uid:5678)
+  - lsof -F pun -P -i tcp:<port>
+    e.g.
+    p1234
+    u5678
+    f9
+    nlocalhost:1112
 
   Although this function might only be used on Posix environment, I put this
   here for ease of testing.
 
-  e.g. If data is like this:
-  | u1
-  | p2
-  | u3
-  | p4
   This function returns:
-  | [{'uid': 1L, 'pid': 2L}, {'uid': 3L, 'pid': 4L}]
+  | [{'uid': 1L, 'pid': 2L}]
+  or
+  | [{'uid': 1L, 'pid': 2L, 'name': '/tmp/goma.ipc'}]
+  or
+  | [{'uid': 1L, 'pid': 2L, 'name': 'localhost:8088'}]
 
   Args:
-    data: result of lsof -F pu <filename>.
+    data: result of lsof.
 
   Returns:
     a list of dictionaries parsed from data.
   """
-  rule = {
-      'p': 'pid',
-      'u': 'uid',
-      }
+  pid = None
+  uid = None
   contents = []
-  content = {}
   for line in data.splitlines():
     if not line:  # skip empty line.
       continue
 
-    if line[0] not in rule:  # skip unknown symbol.
-      continue
+    code = line[0]
+    value = line[1:]
 
-    label = rule[line[0]]
-    if label in content:
-      contents.append(content)
-      content = {}
-    content[label] = long(line[1:])
-  if content:
-    contents.append(content)
+    if code == 'p':
+      pid = long(value)
+    elif code == 'u':
+      uid = long(value)
+    elif code == 'n':
+      if uid is None or pid is None:
+        raise Error('failed to parse lsof result: %s' % data)
+      # Omit type=STREAM at the end.
+      TYPE_STREAM = ' type=STREAM'
+      if value.endswith(TYPE_STREAM):
+        value = value[0:-len(TYPE_STREAM)]
+      contents.append({'name': value,
+                       'uid': uid,
+                       'pid': pid})
   return contents
 
 
@@ -397,18 +420,6 @@ def _CalculateChecksum(filename):
     return hashlib.sha256(f.read()).hexdigest()
 
 
-def _GetUserRuntimeDirectory():
-  # pylint: disable=E1101
-  # Configure from sysname in uname.
-  if os.uname()[0] != 'Linux':
-    return None
-
-  # Prefer to use the user runtime directory on Linux.
-  user_runtime_dir = os.path.join('/run', 'user', '%d' % os.getuid())
-  if os.path.isdir(user_runtime_dir):
-    return user_runtime_dir
-
-
 class ConfigError(Exception):
   """Raises when an error found in configurations."""
 
@@ -523,7 +534,7 @@ class GomaDriver(object):
         self._env.WriteManifest(manifest, directory=self._latest_package_dir)
 
   def _GetRunningCompilerProxyVersion(self):
-    versionz = self._env.ControlCompilerProxy('/versionz', fast=True)
+    versionz = self._env.ControlCompilerProxy('/versionz', check_running=False)
     if versionz['status']:
       return versionz['message'].strip()
     return None
@@ -534,9 +545,9 @@ class GomaDriver(object):
 
   def _GetCompilerProxyHealthz(self):
     """Returns compiler proxy healthz message."""
-    healthz = self._env.ControlCompilerProxy('/healthz', fast=True)
+    healthz = self._env.ControlCompilerProxy('/healthz', check_running=False)
     if healthz['status']:
-      return healthz['message'].strip()
+      return healthz['message'].split()[0].strip()
     return 'unavailable /healthz'
 
   def _IsCompilerProxySilentlyUpdated(self):
@@ -548,7 +559,7 @@ class GomaDriver(object):
     return False
 
   def _IsGomaFlagUpdated(self):
-    flagz = self._env.ControlCompilerProxy('/flagz', fast=True)
+    flagz = self._env.ControlCompilerProxy('/flagz', check_running=False)
     if flagz['status']:
       return _IsGomaFlagUpdated(_ParseFlagz(flagz['message'].strip()))
     return False
@@ -643,9 +654,7 @@ class GomaDriver(object):
       self._KillStakeholders()
 
   def _GetStatus(self):
-    reply = self._env.ControlCompilerProxy('/healthz')
-    if not 'pid' in reply:
-      reply['pid'] = 'unknown'
+    reply = self._env.ControlCompilerProxy('/healthz', need_pids=True)
     print 'compiler proxy (pid=%(pid)s) status: %(url)s %(message)s' % reply
     if reply['message'].startswith('error:'):
         reply['status'] = False
@@ -1012,13 +1021,14 @@ class GomaDriver(object):
     return True
 
 
-  def _CreateDirectory(self, dir_name, purpose):
+  def _CreateDirectory(self, dir_name, purpose, suppress_message=False):
     info = {
         'purpose': purpose,
         'dir': dir_name,
         }
     if not self._env.IsDirectoryExist(info['dir']):
-      sys.stderr.write('creating %(purpose)s dir (%(dir)s).\n' % info)
+      if not suppress_message:
+        sys.stderr.write('INFO: creating %(purpose)s dir (%(dir)s).\n' % info)
       self._env.MakeDirectory(info['dir'])
     else:
       if not self._env.EnsureDirectoryOwnedByUser(info['dir']):
@@ -1033,7 +1043,8 @@ class GomaDriver(object):
     os.environ['GOMA_TMP_DIR'] = tmp_dir
 
   def _CreateCrashDumpDirectory(self):
-    self._CreateDirectory(self._env.GetCrashDumpDirectory(), 'crash dump')
+    self._CreateDirectory(self._env.GetCrashDumpDirectory(), 'crash dump',
+                          suppress_message=True)
 
   def _CreateCacheDirectory(self):
     self._CreateDirectory(self._env.GetCacheDirectory(), 'cache')
@@ -1111,7 +1122,14 @@ class GomaEnv(object):
     self._gomacc_port = None
     self._https_proxy = None
     self._backup = None
+    self._goma_tmp_dir = None
+    # TODO: remove this in python3
+    self._delete_tmp_dir = False
     self._SetupEnviron()
+
+  def __del__(self):
+    if self._delete_tmp_dir:
+      shutil.rmtree(self._goma_tmp_dir)
 
   # methods that may interfere with external environment.
   def MayUsingDefaultIPCPort(self):
@@ -1255,40 +1273,40 @@ class GomaEnv(object):
       proc.kill()
     raise e
 
-  def ControlCompilerProxy(self, command, fast=False):
+  def ControlCompilerProxy(self, command, check_running=True, need_pids=False):
     """Send comamnd to compiler proxy.
 
     Args:
       command: a string of command to send to the compiler proxy.
-      fast: True if it doesn't needs to check compiler_proxy is running
-            and stakeholder pids.
+      check_running: True if it needs to check compiler_proxy is running
+      need_pids: True if it needs stakeholder pids.
 
     Returns:
-      Dict of boolean status, message string, and url prefix.
-      if fast is False, it will have pids for stakeholder's pids.
-      if fast is True, pids will be empty.
+      Dict of boolean status, message string, url prefix, and pids.
+      if need_pids is True, pid field will be stakeholder's pids if
+      compiler_proxy is available.  Otherwise, pid='unknown'.
     """
     self.CheckConfig()
-    if not fast and not self.CompilerProxyRunning():
-      return {'status': False, 'message': 'goma is not running.', 'url': ''}
+    pids = 'unknown'
+    if check_running and not self.CompilerProxyRunning():
+      return {'status': False, 'message': 'goma is not running.', 'url': '',
+              'pid': pids}
     url_prefix = 'http://127.0.0.1:0'
     try:
       url_prefix = 'http://127.0.0.1:%s' % self._GetCompilerProxyPort()
       url = '%s%s' % (url_prefix, command)
       resp = urllib2.urlopen(url)
       reply = resp.read()
-      pids = ''
-      if not fast:
+      if need_pids:
         pids = ','.join(self._GetStakeholderPids())
-      return {'status': True, 'message': reply, 'url': url_prefix,
-              'pid': pids}
+      return {'status': True, 'message': reply, 'url': url_prefix, 'pid': pids}
     except (urllib2.URLError, Error, socket.error) as ex:
       # urllib2.urlopen(url) may raise socket.error, such as [Errno 10054]
       # An existing connection was forcibly closed by the remote host.
       # socket.error uses IOError as base class in python 2.6.
       # note: socket.error changed to an alias of OSError in python 3.3.
       msg = repr(ex)
-    return {'status': False, 'message': msg, 'url': url_prefix}
+    return {'status': False, 'message': msg, 'url': url_prefix, 'pid': pids}
 
   def _FindCurlPath(self):
     """Identify depot_tool path and use the curl there."""
@@ -1374,7 +1392,24 @@ class GomaEnv(object):
     Returns:
       a directory name.
     """
-    raise NotImplementedError
+    if self._goma_tmp_dir:
+      return self._goma_tmp_dir
+
+    if not os.path.exists(self._gomacc_binary):
+      # When installing goma from `goma_ctl.py update`, gomacc does not exist.
+      # In such case, we need to get tempdir from other than gomacc.
+
+      # TODO: Use tmpfile.TemporaryDirectory in python3
+      self._goma_tmp_dir = tempfile.mkdtemp()
+      self._delete_tmp_dir = True
+      return self._goma_tmp_dir
+
+    env = os.environ.copy()
+    env['GLOG_logtostderr'] = 'true'
+    self._goma_tmp_dir = subprocess.check_output(
+        [self._gomacc_binary, 'tmp_dir'],
+        env=env).strip()
+    return self._goma_tmp_dir
 
   def GetCrashDumpDirectory(self):
     """Get a directory path that may contain crash dump.
@@ -1597,7 +1632,16 @@ class GomaEnv(object):
       for filename in entry[1]:
         from_name = os.path.join(backup_dir_path, filename)
         to_name = os.path.join(entry[0], filename)
-        from_stat = os.stat(from_name)
+        # After we started to use gomacc to get GomaTmpDir, a file named
+        # UNKNOWN.INFO started to be detected on ChromeOS, which does not exist
+        # on rollback.
+        # Following code is a workaround to avoid failure due to missing
+        # UNKNOWN.INFO.
+        try:
+          from_stat = os.stat(from_name)
+        except OSError as e:
+          sys.stderr.write('cannot access backuped file: %s' % e)
+          continue
         to_stat = os.stat(to_name) if os.path.exists(to_name) else None
         # Skip unchanged file / dir.
         # I expect this also skips running processes since we cannot update it
@@ -1855,22 +1899,6 @@ class GomaEnvWin(GomaEnv):
     GomaEnv.__init__(self)
     self._platform = 'win64'
 
-  def GetGomaTmpDir(self):
-    """Get a directory path for goma.
-
-    In chromium/win, we couldn't access %USERNAME%, so _GetUsername
-    is not available.  We could assume %TEMP% would be in %USERPROFILE%.
-    or window is single user machine, so may no need to care so much for
-    other users.
-
-    Returns:
-      a directory name.
-    """
-    tmp_dir = os.environ.get('GOMA_TMP_DIR')
-    if tmp_dir:
-      return tmp_dir
-    return os.path.join(_GetTempDirectory(), _TMP_DIR_WIN)
-
   @staticmethod
   def GetPackageExtension(platform):
     return 'zip'
@@ -2041,20 +2069,6 @@ class GomaEnvPosix(GomaEnv):
     self._fuser_path = None
     self._pwd = __import__('pwd')
 
-  def GetGomaTmpDir(self):
-    """Get a directory path for goma.
-
-    Returns:
-      a directory name.
-    """
-    tmp_dir = os.environ.get('GOMA_TMP_DIR')
-    if tmp_dir:
-      return tmp_dir
-    tmp_dir = _GetUserRuntimeDirectory()
-    if not tmp_dir:
-      tmp_dir = _GetTempDirectory()
-    return os.path.join(tmp_dir, _TMP_DIR_PREFIX + self.GetUsername())
-
   @staticmethod
   def GetPackageExtension(platform):
     return 'tgz' if platform == 'mac' else 'txz'
@@ -2111,6 +2125,26 @@ class GomaEnvPosix(GomaEnv):
     return subprocess.call(['cp -aRf %s %s' % (source_files, self._dir)],
                            shell=True) == 0
 
+  def _ExecLsof(self, cmd):
+    lsof_command = [self._LSOF, '-F', 'pun', '-P']
+    if cmd['type'] == 'process':
+      lsof_command.extend(['-p', cmd['name']])
+    elif cmd['type'] == 'file':
+      lsof_command.extend([cmd['name']])
+    elif cmd['type'] == 'network':
+      lsof_command.extend(['-i', cmd['name']])
+    else:
+      raise Error('unknown cmd type: %s' % cmd)
+
+    # Lsof returns 1 for WARNING even if the result is good enough.
+    # It also returns 1 if an owner process is not found.
+    ret = subprocess.Popen(lsof_command,
+                           stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT).communicate()[0]
+    if ret:
+      return _ParseLsof(ret)
+    return []
+
   def _GetOwners(self, name, network=False):
     """Get owner pid/uid of file or listen port.
 
@@ -2137,22 +2171,12 @@ class GomaEnvPosix(GomaEnv):
           return [{'pid': x[0], 'uid': x[1], 'resource': name}
                   for x in zip(pids, uids)]
 
-    lsof_command = [self._LSOF, '-F', 'pu']
     if network:
-      lsof_command.append('-i')
-    # Lsof returns 1 for WARNING even if the result is good enough.
-    # It also returns 1 if an owner process is not found.
-    ret = subprocess.Popen(lsof_command + [name],
-                           stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT).communicate()[0]
-    if ret:
-      result_list = _ParseLsof(ret)
-      for entry in result_list:
-        entry['resource'] = name
-      return result_list
-    return []
+      return self._ExecLsof({'type': 'network', 'name': name})
+    else:
+      return self._ExecLsof({'type': 'file', 'name': name})
 
-  def _GetStakeholderPids(self, quick=False):
+  def _GetStakeholderPids(self):
     """Get PID of stake holders.
 
     Args:
@@ -2176,8 +2200,6 @@ class GomaEnvPosix(GomaEnv):
 
     results = []
     results.extend(self._GetOwners(socket_file))
-    if quick:
-      return results
     results.extend(self._GetOwners(lock_filename))
     results.extend(self._GetOwners('TCP:%s' % port, network=True))
 
@@ -2204,7 +2226,29 @@ class GomaEnvPosix(GomaEnv):
 
   def CompilerProxyRunning(self):
     """Returns True if compiler proxy is running."""
-    return bool(self._GetStakeholderPids(quick=True))
+    pids = ''
+    try:
+      # note: mac pgrep does not know --delimitor.
+      pids = subprocess.check_output(['pgrep', '-d', ',',
+                                      self._COMPILER_PROXY]).strip()
+    except subprocess.CalledProcessError as e:
+      if e.returncode == 1:
+        # compiler_proxy is not running.
+        return False
+      else:
+        # should be fatal error.
+        raise e
+    if not pids:
+      raise Error('executed pgrep but result is not given')
+
+    tmpdir = self.GetGomaTmpDir()
+    socket_file = os.path.join(
+        tmpdir, os.environ['GOMA_COMPILER_PROXY_SOCKET_NAME'])
+    entries = self._ExecLsof({'type': 'process', 'name': pids})
+    for entry in entries:
+      if socket_file == entry['name']:
+        return True
+    return False
 
   def WarnNonProtectedFile(self, filename):
     # This is platform dependent part.

@@ -29,10 +29,10 @@ class TLSDescriptor : public Descriptor {
   };
   // It doesn't take ownership of e and wm.
   // It keep desc inside but desc should be deleted by WorkerThreadManager.
-  TLSDescriptor(
-      SocketDescriptor* desc, TLSEngine* e,
-      const Options& options,
-      WorkerThreadManager* wm);
+  TLSDescriptor(SocketDescriptor* desc,
+                TLSEngine* e,
+                Options options,
+                WorkerThreadManager* wm);
   ~TLSDescriptor() override;
 
   // To be deleted by WorkerThreadManager.
@@ -80,7 +80,7 @@ class TLSDescriptor : public Descriptor {
   WorkerThreadManager::ThreadId thread_;
   std::unique_ptr<PermanentClosure> readable_closure_;
   std::unique_ptr<PermanentClosure> writable_closure_;
-  char network_read_buffer_[kBufSize];
+  char network_read_buffer_[kNetworkBufSize];
   string network_write_buffer_;
   size_t network_write_offset_;
   // Shows application read/write failed because TLS engine needs more work.

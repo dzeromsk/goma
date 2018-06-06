@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/memory/memory.h"
 #include "compiler_flags.h"
 #include "path.h"
 #include "subprocess.h"
@@ -49,8 +50,8 @@ class HashCheckingCompilerInfoValidator
 
   bool Validate(const CompilerInfo& compiler_info,
                 const string& local_compiler_path) override {
-    // If FileId is the same, this should be ok.
-    if (compiler_info.local_compiler_id() == local_compiler_file_id_) {
+    // If FileStat is the same, this should be ok.
+    if (compiler_info.local_compiler_stat() == local_compiler_file_stat_) {
       return true;
     }
 
@@ -66,13 +67,13 @@ class HashCheckingCompilerInfoValidator
   void SetLocalCompilerHash(const std::string& hash) {
     local_compiler_hash_ = hash;
   }
-  void SetLocalCompilerFileId(const FileId& file_id) {
-    local_compiler_file_id_ = file_id;
+  void SetLocalCompilerFileStat(const FileStat& file_stat) {
+    local_compiler_file_stat_ = file_stat;
   }
 
  private:
   std::string local_compiler_hash_;
-  FileId local_compiler_file_id_;
+  FileStat local_compiler_file_stat_;
 };
 
 class CompilerInfoCacheTest : public testing::Test {
@@ -113,9 +114,9 @@ class CompilerInfoCacheTest : public testing::Test {
     validator_ = validator;
   }
 
-  void SetCompilerInfoFileId(CompilerInfo* compiler_info,
-                             const FileId& file_id) {
-    compiler_info->local_compiler_id_ = file_id;
+  void SetCompilerInfoFileStat(CompilerInfo* compiler_info,
+                               const FileStat& file_stat) {
+    compiler_info->local_compiler_stat_ = file_stat;
   }
 
   void SetCompilerInfoHash(CompilerInfo* compiler_info,
@@ -127,8 +128,8 @@ class CompilerInfoCacheTest : public testing::Test {
     return cache_->compiler_info_;
   }
 
-  const std::unordered_map<string, std::unordered_set<string>*>& keys_by_hash()
-      const {
+  const std::unordered_map<string, std::unique_ptr<std::unordered_set<string>>>&
+  keys_by_hash() const {
     return cache_->keys_by_hash_;
   }
 
@@ -266,7 +267,7 @@ TEST_F(CompilerInfoCacheTest, DupStore) {
   EXPECT_TRUE(cis.get() == nullptr);
 
   // get valid compiler info, which is the same as before.
-  cid.reset(new CompilerInfoData);
+  cid = absl::make_unique<CompilerInfoData>();
   cid->set_last_used_at(now);
   cid->set_found(true);
 
@@ -281,7 +282,7 @@ TEST_F(CompilerInfoCacheTest, DupStore) {
   }
 
   // update with different data.
-  cid.reset(new CompilerInfoData);
+  cid = absl::make_unique<CompilerInfoData>();
   cid->set_last_used_at(now);
   cid->set_name("gcc");
   cid->set_found(true);
@@ -445,7 +446,7 @@ TEST_F(CompilerInfoCacheTest, Marshal) {
   ScopedCompilerInfoState cis(cache_->Store(key, std::move(cid)));
 
   key.base = "/usr/bin/gcc -O2 -fno-diagnostics-show-option";
-  cid.reset(new CompilerInfoData);
+  cid = absl::make_unique<CompilerInfoData>();
   cid->set_name("gcc");
   cid->set_lang("c");
   cid->set_found(true);
@@ -458,7 +459,7 @@ TEST_F(CompilerInfoCacheTest, Marshal) {
 
   key.base = "/usr/bin/g++ -O2";
   key.local_compiler_path = "/usr/bin/g++";
-  cid.reset(new CompilerInfoData);
+  cid = absl::make_unique<CompilerInfoData>();
   cid->set_name("g++");
   cid->set_lang("c++");
   cid->set_found(true);
@@ -473,7 +474,7 @@ TEST_F(CompilerInfoCacheTest, Marshal) {
 
   key.base = "/usr/bin/clang";
   key.local_compiler_path = "/usr/bin/clang";
-  cid.reset(new CompilerInfoData);
+  cid = absl::make_unique<CompilerInfoData>();
   cid->set_name("clang");
   cid->set_lang("c");
   cid->set_found(true);
@@ -583,14 +584,14 @@ TEST_F(CompilerInfoCacheTest, Unmarshal) {
   EXPECT_EQ(2U, keys_by_hash().size());
   auto found = keys_by_hash().find(hash1);
   EXPECT_TRUE(found != keys_by_hash().end());
-  const std::unordered_set<string>* keys = found->second;
+  const std::unordered_set<string>* keys = found->second.get();
   EXPECT_EQ(2U, keys->size());
   EXPECT_EQ(1U, keys->count("/usr/bin/gcc -O2 @"));
   EXPECT_EQ(1U, keys->count("/usr/bin/gcc -O2 -fno-diagnostics-show-option @"));
 
   found = keys_by_hash().find(hash2);
   EXPECT_TRUE(found != keys_by_hash().end());
-  keys = found->second;
+  keys = found->second.get();
   EXPECT_EQ(1U, keys->size());
   EXPECT_EQ(1U, keys->count("/usr/bin/g++ -O2 @"));
 }
@@ -598,13 +599,13 @@ TEST_F(CompilerInfoCacheTest, Unmarshal) {
 TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
 {
   const std::string valid_hash = "valid_hash";
-  FileId valid_fileid;
-  valid_fileid.mtime = 1234567;
+  FileStat valid_filestat;
+  valid_filestat.mtime = 1234567;
 
   HashCheckingCompilerInfoValidator* validator =
         new HashCheckingCompilerInfoValidator();
   SetValidator(validator);  // valiadtor is owned by the callee.
-  validator->SetLocalCompilerFileId(valid_fileid);
+  validator->SetLocalCompilerFileStat(valid_filestat);
   validator->SetLocalCompilerHash(valid_hash);
 
   std::vector<string> args;
@@ -633,12 +634,8 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
     std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
     cid->set_last_used_at(time(nullptr));
     cid->set_found(true);
-#ifndef _WIN32
-    cid->mutable_local_compiler_id()->set_dev(valid_fileid.dev);
-    cid->mutable_local_compiler_id()->set_inode(valid_fileid.inode);
-#endif
-    cid->mutable_local_compiler_id()->set_mtime(valid_fileid.mtime);
-    cid->mutable_local_compiler_id()->set_size(valid_fileid.size);
+    cid->mutable_local_compiler_stat()->set_mtime(valid_filestat.mtime);
+    cid->mutable_local_compiler_stat()->set_size(valid_filestat.size);
     cid->set_local_compiler_hash(valid_hash);
     cid->set_hash(valid_hash);
 
@@ -652,12 +649,8 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
     // created 31 days ago
     cid->set_last_used_at(time(nullptr) - 60 * 60 * 24 * 31);
     cid->set_found(true);
-#ifndef _WIN32
-    cid->mutable_local_compiler_id()->set_dev(valid_fileid.dev);
-    cid->mutable_local_compiler_id()->set_inode(valid_fileid.inode);
-#endif
-    cid->mutable_local_compiler_id()->set_mtime(valid_fileid.mtime);
-    cid->mutable_local_compiler_id()->set_size(valid_fileid.size);
+    cid->mutable_local_compiler_stat()->set_mtime(valid_filestat.mtime);
+    cid->mutable_local_compiler_stat()->set_size(valid_filestat.size);
     cid->set_local_compiler_hash(valid_hash);
     cid->set_hash(valid_hash);
 
@@ -677,12 +670,12 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
   }
 
   {
-    // Change local compiler FileId. (= changed local file timestamp.)
-    FileId changed_fileid(valid_fileid);
-    changed_fileid.mtime += 1000;
-    validator->SetLocalCompilerFileId(changed_fileid);
+    // Change local compiler FileStat. (= changed local file timestamp.)
+    FileStat changed_filestat(valid_filestat);
+    changed_filestat.mtime += 1000;
+    validator->SetLocalCompilerFileStat(changed_filestat);
 
-    // Even FileId is changed, file hash is the same, CompilerInfo
+    // Even FileStat is changed, file hash is the same, CompilerInfo
     // will be taken.
     UpdateOlderCompilerInfo();
 
@@ -691,13 +684,13 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
   }
 
   {
-    // Change FileId & Hash
-    FileId changed_fileid(valid_fileid);
-    changed_fileid.mtime += 2000;
-    validator->SetLocalCompilerFileId(changed_fileid);
+    // Change FileStat & Hash
+    FileStat changed_filestat(valid_filestat);
+    changed_filestat.mtime += 2000;
+    validator->SetLocalCompilerFileStat(changed_filestat);
     validator->SetLocalCompilerHash("unexpected_hash");
 
-    // Since FileId and file hash are both changed,
+    // Since FileStat and file hash are both changed,
     // cache should be removed.
     UpdateOlderCompilerInfo();
 

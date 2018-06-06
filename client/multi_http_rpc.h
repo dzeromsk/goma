@@ -65,7 +65,8 @@ class MultiHttpRPC {
   friend class MultiJob;
 
   MultiHttpRPC(HttpRPC* http_rpc,
-               const string& path, const string& multi_path,
+               string path,
+               string multi_path,
                const Options& options,
                WorkerThreadManager* wm);
 

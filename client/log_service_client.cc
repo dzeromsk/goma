@@ -5,6 +5,8 @@
 
 #include "log_service_client.h"
 
+#include <utility>
+
 #include "absl/strings/match.h"
 #include "autolock_timer.h"
 #include "callback.h"
@@ -165,15 +167,14 @@ class LogServiceClient::SaveLogJob {
   DISALLOW_COPY_AND_ASSIGN(SaveLogJob);
 };
 
-LogServiceClient::LogServiceClient(
-    HttpRPC* http_rpc,
-    const string& save_log_path,
-    size_t max_log_in_req,
-    int max_pending_ms,
-    WorkerThreadManager* wm)
+LogServiceClient::LogServiceClient(HttpRPC* http_rpc,
+                                   string save_log_path,
+                                   size_t max_log_in_req,
+                                   int max_pending_ms,
+                                   WorkerThreadManager* wm)
     : wm_(wm),
       http_rpc_(http_rpc),
-      save_log_path_(save_log_path),
+      save_log_path_(std::move(save_log_path)),
       max_log_in_req_(max_log_in_req),
       max_pending_ms_(max_pending_ms),
       periodic_callback_id_(kInvalidPeriodicClosureId),

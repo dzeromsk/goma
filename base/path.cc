@@ -5,7 +5,7 @@
 
 #include "path.h"
 
-#include <string>
+#include <stddef.h>
 
 #include "glog/logging.h"
 
@@ -44,46 +44,51 @@ namespace file {
 
 namespace internal {
 
+string JoinPathIterators(const absl::string_view* begin,
+                         const absl::string_view* end,
+                         size_t cap) {
+  string result;
+  result.reserve(cap);
+
+  while (begin != end) {
+    const absl::string_view path = *begin++;
+
+    if (path.empty()) {
+      continue;
+    }
+    if (result.empty()) {
+      result.append(path.begin(), path.end());
+      continue;
+    }
+    AppendPath(&result, path);
+  }
+
+  return result;
+}
+
 string JoinPathImpl(std::initializer_list<absl::string_view> paths) {
   size_t cap = 0;
   for (const auto& path : paths) {
     cap += path.size() + 1;
   }
 
-  string result;
-  result.reserve(cap);
-
-  for (const auto& path : paths) {
-    if (path.empty()) {
-      continue;
-    }
-    if (result.empty()) {
-      result.append(path.begin(), path.end());
-      continue;
-    }
-    AppendPath(&result, path);
-  }
-  return result;
+  return JoinPathIterators(paths.begin(), paths.end(), cap);
 }
 
 string JoinPathRespectAbsoluteImpl(
     std::initializer_list<absl::string_view> paths) {
-  string result;
-  for (const auto& path : paths) {
-    if (path.empty()) {
-      continue;
-    }
-    if (result.empty()) {
-      result.append(path.begin(), path.end());
-      continue;
-    }
+  size_t cap = 0;
+  auto start_iter = paths.end();
+  for (; start_iter != paths.begin();) {
+    --start_iter;
+    const auto& path = *start_iter;
+    cap += path.size() + 1;
     if (IsAbsolutePath(path)) {
-      result = string(path);
-      continue;
+      break;
     }
-    AppendPath(&result, path);
   }
-  return result;
+
+  return JoinPathIterators(start_iter, paths.end(), cap);
 }
 
 }  // namespace internal

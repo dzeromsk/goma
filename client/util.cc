@@ -10,13 +10,13 @@
 
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
-#include "compiler_flags.h"
 #include "env_flags.h"
-#include "file_id.h"
+#include "file_stat.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "path.h"
 #include "path_resolver.h"
+#include "vc_flags.h"
 
 using std::string;
 
@@ -46,8 +46,7 @@ std::deque<string> ParsePathExts(const string& pathext_spec) {
   }
 
   for (auto& pathext : pathexts) {
-    std::transform(pathext.begin(), pathext.end(), pathext.begin(),
-                   ::tolower);
+    absl::AsciiStrToLower(&pathext);
   }
   return std::deque<string>(pathexts.begin(), pathexts.end());
 }
@@ -59,7 +58,7 @@ bool HasExecutableExtension(const std::deque<string>& pathexts,
     return false;
 
   string ext = filename.substr(pos);
-  std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+  absl::AsciiStrToLower(&ext);
   for (const auto& pathext : pathexts) {
     if (ext == pathext)
       return true;
@@ -138,7 +137,7 @@ bool IsGomacc(
     const string& cwd) {
   // TODO: fix workaround.
   // Workaround not to pause with dialog when cl.exe is executed.
-  if (CompilerFlags::IsVCCommand(candidate_path))
+  if (VCFlags::IsVCCommand(candidate_path))
     return false;
 
   std::vector<string> argv;
@@ -154,14 +153,14 @@ bool IsGomacc(
   return (status == 1) && (out.find("GOMA") != string::npos);
 }
 
-bool GetRealExecutablePath(
-    const FileId* gomacc_fileid,
-    const string& cmd, const string& cwd,
-    const string& path_env,
-    const string& pathext_env,
-    string* local_executable_path,
-    string* no_goma_path_env,
-    bool* is_in_relative_path) {
+bool GetRealExecutablePath(const FileStat* gomacc_filestat,
+                           const string& cmd,
+                           const string& cwd,
+                           const string& path_env,
+                           const string& pathext_env,
+                           string* local_executable_path,
+                           string* no_goma_path_env,
+                           bool* is_in_relative_path) {
   CHECK(local_executable_path);
 #ifndef _WIN32
   DCHECK(pathext_env.empty());
@@ -187,18 +186,17 @@ bool GetRealExecutablePath(
     if (candidate_path.empty())
       return false;
 #endif
-    const FileId candidate_fileid(candidate_path);
+    const FileStat candidate_filestat(candidate_path);
     if (is_in_relative_path)
       *is_in_relative_path = !file::IsAbsolutePath(cmd);
 
-    if (!candidate_fileid.IsValid())
+    if (!candidate_filestat.IsValid())
       return false;
 
-    if (gomacc_fileid && candidate_fileid == *gomacc_fileid)
+    if (gomacc_filestat && candidate_filestat == *gomacc_filestat)
       return false;
 
-    if (gomacc_fileid &&
-        IsGomacc(candidate_path, path_env, pathext_env, cwd))
+    if (gomacc_filestat && IsGomacc(candidate_path, path_env, pathext_env, cwd))
       return false;
 
     *local_executable_path = candidate_path;
@@ -238,9 +236,9 @@ bool GetRealExecutablePath(
       continue;
 #endif
 
-    FileId candidate_fileid(candidate_path);
-    if (candidate_fileid.IsValid()) {
-      if (gomacc_fileid && candidate_fileid == *gomacc_fileid &&
+    FileStat candidate_filestat(candidate_path);
+    if (candidate_filestat.IsValid()) {
+      if (gomacc_filestat && candidate_filestat == *gomacc_filestat &&
           next_pos != string::npos) {
         // file is the same as gomacc.
         // Update local path.
@@ -253,7 +251,7 @@ bool GetRealExecutablePath(
       } else {
         // file is executable, and from file id, it is different
         // from gomacc.
-        if (gomacc_fileid &&
+        if (gomacc_filestat &&
             IsGomacc(candidate_path, path_env.substr(pos), pathext_env, cwd)) {
           LOG(ERROR) << "You have 2 goma directories in your path? "
                      << candidate_path << " seems gomacc";

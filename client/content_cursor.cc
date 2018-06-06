@@ -19,10 +19,9 @@ bool ContentCursor::Advance(size_t n) {
   if (cur_ + n <= buf_end()) {
     cur_ = cur_ + n;
     return true;
-  } else {
-    cur_ = buf_end();
-    return false;
   }
+  cur_ = buf_end();
+  return false;
 }
 
 bool ContentCursor::SkipUntil(char c) {

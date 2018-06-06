@@ -28,13 +28,13 @@ namespace devtools_goma {
 // Returns cache ID if it was found in cache.
 bool FileHashCache::GetFileCacheKey(const string& filename,
                                     millitime_t missed_timestamp_ms,
-                                    const FileId& file_id,
+                                    const FileStat& file_stat,
                                     string* cache_key) {
   DCHECK(file::IsAbsolutePath(filename)) << filename;
   cache_key->clear();
 
-  if (!file_id.IsValid()) {
-    LOG(INFO) << "Clear cache: file_id is invalid: " << filename;
+  if (!file_stat.IsValid()) {
+    LOG(INFO) << "Clear cache: file_stat is invalid: " << filename;
     AUTO_EXCLUSIVE_LOCK(lock, &file_cache_mutex_);
     file_cache_.erase(filename);
     num_stat_error_.Add(1);
@@ -56,7 +56,7 @@ bool FileHashCache::GetFileCacheKey(const string& filename,
 
   // found in cache.  Verify (reasonably) that it is the one we
   // are looking for, using lightweight information.
-  if (file_id == info.file_id) {
+  if (file_stat == info.file_stat) {
     *cache_key = info.cache_key;
     bool valid = true;
     if (missed_timestamp_ms != 0) {
@@ -66,7 +66,7 @@ bool FileHashCache::GetFileCacheKey(const string& filename,
                         << " missed=" << missed_timestamp_ms
                         << " uploaded=" << info.last_uploaded_timestamp_ms;
     }
-    if (valid && info.last_checked > info.file_id.mtime) {
+    if (valid && info.last_checked > info.file_stat.mtime) {
       // We are reasonably confident that this was the right
       // information we found.
       return true;
@@ -85,13 +85,13 @@ bool FileHashCache::GetFileCacheKey(const string& filename,
 // TODO: there is a race condition that if file changed
 // between send and receive, it won't be detected correctly. Fix
 // that later if it's a problem..
-bool FileHashCache::StoreFileCacheKey(
-    const string& filename, const string& cache_key,
-    millitime_t upload_timestamp_ms,
-    const FileId& file_id) {
-  if (!file_id.IsValid()) {
-    LOG(WARNING) << "Try to store, but clear cache: failed taking FileId: "
-                  << filename;
+bool FileHashCache::StoreFileCacheKey(const string& filename,
+                                      const string& cache_key,
+                                      millitime_t upload_timestamp_ms,
+                                      const FileStat& file_stat) {
+  if (!file_stat.IsValid()) {
+    LOG(WARNING) << "Try to store, but clear cache: failed taking FileStat: "
+                 << filename;
     // Remove the cache key if it's not found in the cache.
     AUTO_EXCLUSIVE_LOCK(lock, &file_cache_mutex_);
     file_cache_.erase(filename);
@@ -104,7 +104,7 @@ bool FileHashCache::StoreFileCacheKey(
   {
     FileInfo info;
     info.cache_key = cache_key;
-    info.file_id = file_id;
+    info.file_stat = file_stat;
     info.last_checked = time(nullptr);
     info.last_uploaded_timestamp_ms = upload_timestamp_ms;
 
@@ -151,8 +151,8 @@ string FileHashCache::DebugString() {
   ss << "[file_cache] size=" << file_cache_.size() << std::endl;
   for (const auto& it : file_cache_) {
     ss << "filename:" << it.first << " key:" << it.second.cache_key
-       << " file_size:" << it.second.file_id.size
-       << " mtime:" << it.second.file_id.mtime << std::endl;
+       << " file_size:" << it.second.file_stat.size
+       << " mtime:" << it.second.file_stat.mtime << std::endl;
   }
   return ss.str();
 }

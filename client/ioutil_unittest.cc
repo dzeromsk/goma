@@ -29,7 +29,7 @@ TEST(IoutilTest, WriteStringToFileOrDieCrash) {
 }
 #endif  // GTEST_HAS_DEATH_TEST
 
-#ifdef _WIN32
+#if defined(_WIN32) && GTEST_HAS_DEATH_TEST
 TEST(IoutilTest, DeleteRecursivelyOrDieCrash) {
   char tmp_dir[PATH_MAX], first_dir[PATH_MAX];
   GetTempPathA(PATH_MAX, tmp_dir);

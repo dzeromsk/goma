@@ -5,6 +5,7 @@
 group("root") {
   deps = [
     "//base",
+    "//benchmark",
     "//client",
     "//lib",
   ]

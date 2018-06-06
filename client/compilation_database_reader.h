@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "compiler_flags.h"
+#include "clang_tidy_flags.h"
 
 namespace devtools_goma {
 

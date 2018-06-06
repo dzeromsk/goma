@@ -10,6 +10,7 @@
 #include <vector>
 
 
+#include "absl/strings/string_view.h"
 #include "basictypes.h"
 using std::string;
 
@@ -48,14 +49,14 @@ class PathResolver {
                                       string* OUTPUT);
 
   // Removes . and .. from |path|.
-  static string ResolvePath(const string& path);
+  static string ResolvePath(absl::string_view path);
 
   // Removes . and .. from |path|.
   // |sep_type| is used for notifying ResolvePath separator type.
   // If kPosixPathSep is given, ResolvePath uses '/' as a path separator.
   // If kWin32PathSep is given, ResolvePath uses '/' and '\\' as path
   // separators, and paths are joined with '\\'.
-  static string ResolvePath(const string& path, PathSeparatorType sep_type);
+  static string ResolvePath(absl::string_view path, PathSeparatorType sep_type);
 
   // Returns relative path from cwd.
   // If path and cwd doesn't share any directory hierarchy, returns path as is,

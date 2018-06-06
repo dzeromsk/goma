@@ -3,8 +3,6 @@
 // found in the LICENSE file.
 
 
-#include <memory>
-
 #include "worker_thread_manager.h"
 
 #ifndef _WIN32
@@ -15,17 +13,20 @@
 #include "socket_helper_win.h"
 #endif
 
+#include <memory>
+
+#include <glog/logging.h>
+#include <gtest/gtest.h>
+
+#include "absl/memory/memory.h"
 #include "callback.h"
 #include "compiler_specific.h"
-#include "socket_descriptor.h"
 #include "lockhelper.h"
 #include "mock_socket_factory.h"
 #include "platform_thread.h"
 #include "scoped_fd.h"
 #include "simple_timer.h"
-
-#include <glog/logging.h>
-#include <gtest/gtest.h>
+#include "socket_descriptor.h"
 
 namespace devtools_goma {
 
@@ -75,7 +76,7 @@ class WorkerThreadManagerTest : public ::testing::Test {
   };
 
   void SetUp() override {
-    wm_.reset(new WorkerThreadManager);
+    wm_ = absl::make_unique<WorkerThreadManager>();
     test_threadid_ = 0;
     num_test_threadid_ = 0;
     periodic_counter_ = 0;
@@ -569,7 +570,8 @@ TEST_F(WorkerThreadManagerTest, DescriptorWritable) {
     int n = s0.Read(buf, 1);
     if (n == 0) {
       break;
-    } else if (n < 0) {
+    }
+    if (n < 0) {
       PLOG(ERROR) << "read " << n;
       break;
     }

@@ -27,6 +27,7 @@
 
 #include <gtest/gtest.h>
 
+#include "absl/memory/memory.h"
 #include "arfile.h"
 #include "file.h"
 #include "ioutil.h"
@@ -42,7 +43,7 @@ namespace devtools_goma {
 class ArFileTest : public testing::Test {
   void SetUp() override {
     cwd_ = GetCurrentDirNameOrDie();
-    tmpdir_util_.reset(new TmpdirUtil("arfile_unittest"));
+    tmpdir_util_ = absl::make_unique<TmpdirUtil>("arfile_unittest");
     PCHECK(Chdir(tmpdir_util_->tmpdir().c_str()));
   }
 

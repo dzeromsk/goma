@@ -10,8 +10,6 @@
 #include <tuple>
 #include <utility>
 
-#include <glog/logging.h>
-
 #include "basictypes.h"
 
 namespace devtools_goma {
@@ -29,9 +27,6 @@ class Closure {
   virtual ~Closure() {}
   virtual void Run() = 0;
 
-  virtual bool IsRepeatable() const = 0;
-  void CheckIsRepeatable() const { CHECK(IsRepeatable()); }
-
  private:
   DISALLOW_COPY_AND_ASSIGN(Closure);
 };
@@ -41,8 +36,6 @@ class OneshotClosure : public Closure {
   OneshotClosure() {}
   ~OneshotClosure() override {}
 
-  bool IsRepeatable() const final { return false; }
-
  private:
   DISALLOW_COPY_AND_ASSIGN(OneshotClosure);
 };
@@ -51,8 +44,6 @@ class PermanentClosure : public Closure {
  public:
   PermanentClosure() {}
   ~PermanentClosure() override {}
-
-  bool IsRepeatable() const final { return true; }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PermanentClosure);

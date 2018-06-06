@@ -99,8 +99,8 @@ class WorkerThreadManager {
 
    private:
     mutable Lock mu_;
-    bool done_;
-    const char* location_;
+    bool done_ GUARDED_BY(mu_);
+    const char* location_ GUARDED_BY(mu_);
 
     DISALLOW_COPY_AND_ASSIGN(UnregisteredClosureData);
   };
@@ -193,20 +193,21 @@ class WorkerThreadManager {
       int ms, std::unique_ptr<PermanentClosure> closure);
 
   WorkerThread* GetWorker(ThreadId id);
-  WorkerThread* GetWorkerUnlocked(ThreadId id);
+  WorkerThread* GetWorkerUnlocked(ThreadId id) SHARED_LOCKS_REQUIRED(mu_);
   WorkerThread* GetCurrentWorker();
 
   PeriodicClosureId NextPeriodicClosureId();
 
-  // |mu_| protects |workers_|, |next_worker_index_| and |next_pool_|.
   mutable ReadWriteLock mu_;
-  std::vector<WorkerThread*> workers_;
+  std::vector<WorkerThread*> workers_ GUARDED_BY(mu_);
+  size_t next_worker_index_ GUARDED_BY(mu_);
+  int next_pool_ GUARDED_BY(mu_);
+
   WorkerThread* alarm_worker_;
-  size_t next_worker_index_;
-  int next_pool_;
 
   Lock periodic_closure_id_mu_;
-  PeriodicClosureId next_periodic_closure_id_;
+  PeriodicClosureId next_periodic_closure_id_
+      GUARDED_BY(periodic_closure_id_mu_);
 
   DISALLOW_COPY_AND_ASSIGN(WorkerThreadManager);
 };
@@ -228,7 +229,7 @@ class WorkerThreadRunner {
 
   mutable Lock mu_;
   ConditionVariable cond_;
-  bool done_;
+  bool done_ GUARDED_BY(mu_);
 
   DISALLOW_COPY_AND_ASSIGN(WorkerThreadRunner);
 };

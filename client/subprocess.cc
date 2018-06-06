@@ -21,10 +21,10 @@
 
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
-#include "env_flags.h"
 #include "compiler_flags.h"
 #include "compiler_specific.h"
-#include "file_id.h"
+#include "env_flags.h"
+#include "file_stat.h"
 #include "glog/logging.h"
 #include "ioutil.h"
 #include "path.h"
@@ -49,14 +49,14 @@ string GetPathExt(const std::vector<string>& envs ALLOW_UNUSED) {
 }
 #endif
 
-bool GetRealPrognameAndEnvs(const devtools_goma::FileId* gomacc_fileid,
+bool GetRealPrognameAndEnvs(const devtools_goma::FileStat* gomacc_filestat,
                             const string& prog,
                             const std::vector<string>& args,
                             std::vector<string>* envs,
                             string* real_progname) {
   static const char kPath[] = "PATH";
   *real_progname = prog;
-  if (gomacc_fileid != nullptr) {
+  if (gomacc_filestat != nullptr) {
     // We should set ReadCommand to avoid gomacc in GetRealExecutablePath.
 #ifndef _WIN32
     InstallReadCommandOutputFunc(devtools_goma::ReadCommandOutputByPopen);
@@ -66,11 +66,10 @@ bool GetRealPrognameAndEnvs(const devtools_goma::FileId* gomacc_fileid,
   }
 
   string no_goma_env_path;
-  if (!GetRealExecutablePath(gomacc_fileid, prog, ".",
-                             devtools_goma::GetEnvFromEnvIter(
-                                 envs->begin(), envs->end(), kPath),
-                             GetPathExt(*envs),
-                             real_progname, &no_goma_env_path, nullptr)) {
+  if (!GetRealExecutablePath(
+          gomacc_filestat, prog, ".",
+          devtools_goma::GetEnvFromEnvIter(envs->begin(), envs->end(), kPath),
+          GetPathExt(*envs), real_progname, &no_goma_env_path, nullptr)) {
     LOG(ERROR) << "failed to get executable path."
                << " prog=" << prog
                << " path=" << devtools_goma::GetEnvFromEnvIter(
@@ -102,11 +101,12 @@ int SpawnAndWait(const string& prog, const std::vector<string>& args,
   return SpawnAndWaitNonGomacc(nullptr, prog, args, envs);
 }
 
-int SpawnAndWaitNonGomacc(const FileId* gomacc_fileid, const string& prog,
+int SpawnAndWaitNonGomacc(const FileStat* gomacc_filestat,
+                          const string& prog,
                           const std::vector<string>& args,
                           std::vector<string> envs) {
   string real_progname;
-  GetRealPrognameAndEnvs(gomacc_fileid, prog, args, &envs, &real_progname);
+  GetRealPrognameAndEnvs(gomacc_filestat, prog, args, &envs, &real_progname);
 
   std::unique_ptr<SpawnerWin> spawner(new SpawnerWin);
   int status = spawner->Run(
@@ -126,11 +126,12 @@ int Execvpe(const string& prog, const std::vector<string>& args,
   return ExecvpeNonGomacc(nullptr, prog, args, envs);
 }
 
-int ExecvpeNonGomacc(const FileId* gomacc_fileid,
-                     const string& prog, const std::vector<string>& args,
+int ExecvpeNonGomacc(const FileStat* gomacc_filestat,
+                     const string& prog,
+                     const std::vector<string>& args,
                      std::vector<string> envs) {
   string real_progname;
-  GetRealPrognameAndEnvs(gomacc_fileid, prog, args, &envs, &real_progname);
+  GetRealPrognameAndEnvs(gomacc_filestat, prog, args, &envs, &real_progname);
 
   std::vector<const char*> argvp;
   std::vector<const char*> envp;

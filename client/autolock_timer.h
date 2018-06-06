@@ -6,13 +6,13 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_AUTOLOCK_TIMER_H_
 #define DEVTOOLS_GOMA_CLIENT_AUTOLOCK_TIMER_H_
 
+#include <memory>
 #include <sstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
 #include "basictypes.h"
-#include "glog/logging.h"
 #include "lockhelper.h"
 #include "simple_timer.h"
 
@@ -56,8 +56,7 @@ class AutoLockStat {
   }
 
  private:
-  FastLock lock_;  // protects member fields below
-
+  FastLock lock_;
   int count_ GUARDED_BY(lock_);
   int64_t total_wait_time_ns_ GUARDED_BY(lock_);
   int64_t max_wait_time_ns_ GUARDED_BY(lock_);
@@ -70,7 +69,6 @@ class AutoLockStat {
 class AutoLockStats {
  public:
   AutoLockStats() {}
-  ~AutoLockStats();
 
   // Return initialized AutoLockStat for |name|.
   // |name| should be string literal (it must not be released).
@@ -86,7 +84,7 @@ class AutoLockStats {
 
  private:
   mutable Lock mu_;
-  std::vector<AutoLockStat*> stats_ GUARDED_BY(mu_);
+  std::vector<std::unique_ptr<AutoLockStat>> stats_ GUARDED_BY(mu_);
   DISALLOW_COPY_AND_ASSIGN(AutoLockStats);
 };
 

@@ -1,0 +1,49 @@
+config("tensorflow_core_config") {
+  include_dirs = [ "." ]
+}
+
+# no .cc file so use source_set.
+source_set("flat_map") {
+  sources = [
+    "flat_map.h",
+    "flat_set.h",
+    "tensorflow/core/lib/gtl/flat_map.h",
+    "tensorflow/core/lib/gtl/flat_set.h",
+    "tensorflow/core/lib/gtl/flatrep.h",
+    "tensorflow/core/platform/platform.h",
+    "tensorflow/core/platform/prefetch.h",
+    "tensorflow/core/platform/types.h",
+  ]
+
+  public_deps = [
+    "//third_party:glog",
+  ]
+
+  public_configs = [ ":tensorflow_core_config" ]
+}
+
+executable("flat_map_unittest") {
+  testonly = true
+  sources = [
+    "flat_map_unittest.cc",
+  ]
+  deps = [
+    ":flat_map",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:gtest",
+    "//third_party:gtest_main",
+  ]
+}
+
+executable("flat_set_unittest") {
+  testonly = true
+  sources = [
+    "flat_set_unittest.cc",
+  ]
+  deps = [
+    ":flat_map",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:gtest",
+    "//third_party:gtest_main",
+  ]
+}

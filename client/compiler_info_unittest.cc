@@ -15,6 +15,7 @@
 
 #include "basictypes.h"
 #include "compiler_flags.h"
+#include "gcc_flags.h"
 #include "mypath.h"
 #include "path.h"
 #include "subprocess.h"
@@ -666,7 +667,7 @@ TEST_F(CompilerInfoTest, ParseFeatures) {
       "_Alignas)\n"
       "# 14\n"
       "asm)\n"
-      "# 15\n"         // cpp attributes.
+      "# 15\n"  // cpp attributes.
       "201304\n"
       "# 16\n"
       "0\n"
@@ -674,11 +675,11 @@ TEST_F(CompilerInfoTest, ParseFeatures) {
       "201301\n"
       "# 18\n"
       "0\n"
-      "# 19\n"         // declspec attributes.
+      "# 19\n"  // declspec attributes.
       "1\n"
       "# 20\n"
       "0\n"
-      "# 21\n"         // builtins
+      "# 21\n"  // builtins
       "1\n"
       "# 22\n"
       "0\n";
@@ -702,9 +703,9 @@ TEST_F(CompilerInfoTest, ParseFeatures) {
 
   std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
   EXPECT_TRUE(CompilerInfoBuilder::ParseFeatures(
-                kClangOutput, object_macros, function_macros,
-                features, extensions, attributes, cpp_attributes,
-                declspec_attributes, builtins, cid.get()));
+      kClangOutput, object_macros, function_macros, features, extensions,
+      attributes, cpp_attributes, declspec_attributes, builtins, cid.get()));
+
   CompilerInfo info(std::move(cid));
 
   EXPECT_EQ(2U, info.supported_predefined_macros().size());
@@ -730,11 +731,11 @@ TEST_F(CompilerInfoTest, ParseFeatures) {
   EXPECT_EQ(0U, info.has_attribute().count("asm"));
 
   EXPECT_EQ(2U, info.has_cpp_attribute().size());
-  EXPECT_EQ(201304, FindValue(info.has_cpp_attribute(),
-                              "dummy_cpp_attribute1"));
+  EXPECT_EQ(201304,
+            FindValue(info.has_cpp_attribute(), "dummy_cpp_attribute1"));
   EXPECT_EQ(0U, info.has_cpp_attribute().count("dummy_cpp_attribute2"));
-  EXPECT_EQ(201301, FindValue(info.has_cpp_attribute(),
-                              "clang::dummy_cpp_attribute1"));
+  EXPECT_EQ(201301,
+            FindValue(info.has_cpp_attribute(), "clang::dummy_cpp_attribute1"));
   EXPECT_EQ(0U, info.has_cpp_attribute().count("clang::dummy_cpp_attribute2"));
 
   EXPECT_EQ(1U, info.has_declspec_attribute().size());
@@ -745,6 +746,107 @@ TEST_F(CompilerInfoTest, ParseFeatures) {
 
   EXPECT_EQ(1, FindValue(info.has_builtin(), "dummy_builtin1"));
   EXPECT_EQ(0U, info.has_builtin().count("dummy_builtin2"));
+
+  // check `#line <number> "<filename>"` format.
+  static const char kClangClOutput[] =
+      "#line 1 \"a.c\"\n"
+      "#line 1 \"a.c\" 1\n"
+      "#line 1 \"<built-in>\" 1\n"
+      "#line 1 \"<built-in>\" 3\n"
+      "#line 132 \"<built-in>\" 3\n"
+      "#line 1 \"<command line>\" 1\n"
+      "#line 1 \"<built-in>\" 2\n"
+      "#line 1 \"a.c\" 2\n"
+      "#line 1 \"a.c\"\n"  // object macros.
+      "1\n"
+      "#line 2 \"a.c\"\n"
+      "0\n"
+      "#line 3 \"a.c\"\n"  // function macros.
+      "1\n"
+      "#line 4 \"a.c\"\n"
+      "0\n"
+      "#line 5 \"a.c\"\n"  // features.
+      "1\n"
+      "#line 6 \"a.c\"\n"
+      "0\n"
+      "#line 7 \"a.c\"\n"  // extensions.
+      "1\n"
+      "#line 8 \"a.c\"\n"
+      "0\n"
+      "#line 9 \"a.c\"\n"  // attributes.
+      "1\n"
+      "#line 10 \"a.c\"\n"
+      "0)\n"
+      "#line 11 \"a.c\"\n"
+      "1\n"
+      "#line 12\n"
+      "0\n"
+      "#line 13\n"
+      "_Alignas)\n"
+      "#line 14\n"
+      "asm)\n"
+      "#line 15\n"  // cpp attributes.
+      "201304\n"
+      "#line 16\n"
+      "0\n"
+      "#line 17\n"
+      "201301\n"
+      "#line 18\n"
+      "0\n"
+      "#line 19\n"  // declspec attributes.
+      "1\n"
+      "#line 20\n"
+      "0\n"
+      "#line 21\n"  // builtins
+      "1\n"
+      "#line 22\n"
+      "0\n";
+
+  std::unique_ptr<CompilerInfoData> cid_cl(new CompilerInfoData);
+  EXPECT_TRUE(CompilerInfoBuilder::ParseFeatures(
+      kClangClOutput, object_macros, function_macros, features, extensions,
+      attributes, cpp_attributes, declspec_attributes, builtins, cid_cl.get()));
+  CompilerInfo info_cl(std::move(cid_cl));
+
+  EXPECT_EQ(2U, info_cl.supported_predefined_macros().size());
+  EXPECT_EQ(1U, info_cl.supported_predefined_macros().count("dummy_macro1"));
+  EXPECT_EQ(0U, info_cl.supported_predefined_macros().count("dummy_macro2"));
+  EXPECT_EQ(1U, info_cl.supported_predefined_macros().count("dummy_func1"));
+  EXPECT_EQ(0U, info_cl.supported_predefined_macros().count("dummy_func2"));
+
+  EXPECT_EQ(1U, info_cl.has_feature().size());
+  EXPECT_EQ(1, FindValue(info_cl.has_feature(), "dummy_feature1"));
+  EXPECT_EQ(0U, info_cl.has_feature().count("dummy_feature2"));
+
+  EXPECT_EQ(1U, info_cl.has_extension().size());
+  EXPECT_EQ(1, FindValue(info_cl.has_extension(), "dummy_extension1"));
+  EXPECT_EQ(0U, info_cl.has_extension().count("dummy_extension2"));
+
+  EXPECT_EQ(2U, info_cl.has_attribute().size());
+  EXPECT_EQ(1, FindValue(info_cl.has_attribute(), "dummy_attribute1"));
+  EXPECT_EQ(0U, info_cl.has_attribute().count("dummy_attribute2"));
+  EXPECT_EQ(1, FindValue(info_cl.has_attribute(), "dummy_attribute3"));
+  EXPECT_EQ(0U, info_cl.has_attribute().count("dummy_attribute4"));
+  EXPECT_EQ(0U, info_cl.has_attribute().count("_Alignas"));
+  EXPECT_EQ(0U, info_cl.has_attribute().count("asm"));
+
+  EXPECT_EQ(2U, info_cl.has_cpp_attribute().size());
+  EXPECT_EQ(201304,
+            FindValue(info_cl.has_cpp_attribute(), "dummy_cpp_attribute1"));
+  EXPECT_EQ(0U, info_cl.has_cpp_attribute().count("dummy_cpp_attribute2"));
+  EXPECT_EQ(201301, FindValue(info_cl.has_cpp_attribute(),
+                              "clang::dummy_cpp_attribute1"));
+  EXPECT_EQ(0U,
+            info_cl.has_cpp_attribute().count("clang::dummy_cpp_attribute2"));
+
+  EXPECT_EQ(1U, info_cl.has_declspec_attribute().size());
+  EXPECT_EQ(1, FindValue(info_cl.has_declspec_attribute(),
+                         "dummy_declspec_attributes1"));
+  EXPECT_EQ(
+      0U, info_cl.has_declspec_attribute().count("dummy_declspec_attributes2"));
+
+  EXPECT_EQ(1, FindValue(info_cl.has_builtin(), "dummy_builtin1"));
+  EXPECT_EQ(0U, info_cl.has_builtin().count("dummy_builtin2"));
 }
 
 

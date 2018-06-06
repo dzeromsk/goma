@@ -10,7 +10,7 @@
 #include <unordered_map>
 
 #include "cpp_token.h"
-#include "file_id.h"
+#include "glog/logging.h"
 
 using std::string;
 
@@ -36,59 +36,74 @@ struct Macro {
   typedef Token (CppParser::*CallbackObj)();
   typedef Token (CppParser::*CallbackFunc)(const ArrayTokenList&);
   enum Type {
-    // UNDEFINED represents macro is referenced without define,
-    // or deleted by #undef
-    UNDEFINED,
     OBJ,
     FUNC,
     CBK,
     CBK_FUNC,
-    // UNUSED represents macro in macro cache is not referenced and defined in
-    // current preprocessing.
-    UNUSED,
   };
-  explicit Macro(int id)
-      : id(id), type(UNDEFINED), callback(NULL),
-        callback_func(NULL), num_args(0), is_vararg(false),
-        has_identifier_in_replacement(false), macro_pos(0) {}
-  Macro(int id, Type type)
-      : id(id), type(type),
-        callback(NULL), callback_func(NULL), num_args(0), is_vararg(false),
-        has_identifier_in_replacement(false), macro_pos(0) {}
 
-  bool IsMatch(const FileId& fid, size_t pos) const {
-    return fileid.IsValid() && fid == fileid && pos == macro_pos;
+  // OBJ or FUNC
+  Macro(string name,
+        Type type,
+        ArrayTokenList replacement,
+        size_t num_args,
+        bool is_vararg)
+      : name(std::move(name)),
+        type(type),
+        replacement(std::move(replacement)),
+        callback(nullptr),
+        callback_func(nullptr),
+        num_args(num_args),
+        is_vararg(is_vararg),
+        is_hidden(false),
+        is_paren_balanced(IsParenBalanced(this->replacement)) {
+    DCHECK(type == OBJ || type == FUNC) << type;
   }
-  string DebugString(CppParser* parser, const string& name) const;
 
-  int id;
-  Type type;
-  ArrayTokenList replacement;
-  CallbackObj callback;
-  CallbackFunc callback_func;
-  size_t num_args;
-  bool is_vararg;
-  bool has_identifier_in_replacement;
+  // CBK
+  Macro(string name, Type type, CallbackObj obj)
+      : name(std::move(name)),
+        type(type),
+        callback(obj),
+        callback_func(nullptr),
+        num_args(0),
+        is_vararg(false),
+        is_hidden(false),
+        is_paren_balanced(true) {
+    DCHECK_EQ(type, CBK);
+  }
 
-  // fileid and macro_pos represent position and fileid of file
-  // that macro is defined. This is used to check validness of cached macro.
-  FileId fileid;
-  size_t macro_pos;
+  // CBK_FUNC
+  Macro(string name, Type type, CallbackFunc func, bool is_hidden)
+      : name(std::move(name)),
+        type(type),
+        callback(nullptr),
+        callback_func(func),
+        num_args(1),  // CallbackFunc takes always 1 argument.
+        is_vararg(false),
+        is_hidden(is_hidden),
+        is_paren_balanced(true) {
+    DCHECK_EQ(type, CBK_FUNC);
+  }
+
+  static bool IsParenBalanced(const ArrayTokenList& tokens);
+
+  string DebugString(CppParser* parser) const;
+  bool IsPredefinedMacro() const { return type == CBK || type == CBK_FUNC; }
+
+  const string name;
+  const Type type;
+  const ArrayTokenList replacement;
+  const CallbackObj callback;
+  const CallbackFunc callback_func;
+  const size_t num_args;
+  const bool is_vararg;
+  // We say a macro is "hidden" when it is not "defined" but
+  // callable. e.g. On GCC 5, defined(__has_include__) is 0
+  // but __has_include__ can be used.
+  const bool is_hidden;
+  const bool is_paren_balanced;
 };
-
-
-// MacroEnv is a map from macro name to macro. It includes parsed macro set.
-// CppParser will take one instance of MacroEnv.
-// At first, type of each macro is UNUSED, but it's updated while parsing.
-// Before returning this to macro env pool,
-// every macro type is marked as UNUSED.
-using MacroEnv = std::unordered_map<string, Macro>;
-
-void InitMacroEnvCache();
-void QuitMacroEnvCache();
-
-std::unique_ptr<MacroEnv> GetMacroEnvFromCache();
-void ReleaseMacroEnvToCache(std::unique_ptr<MacroEnv> macro);
 
 }  // namespace devtools_goma
 

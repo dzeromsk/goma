@@ -37,7 +37,7 @@ class SpawnerPosix : public Spawner {
   int ChildTermSignal() const override { return signal_; }
 
  private:
-  pid_t pid_;
+  pid_t monitor_pid_;
   pid_t prog_pid_;
   ScopedFd exit_fd_;
   // true once it emits log message of killing the subprocess.

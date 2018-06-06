@@ -35,6 +35,7 @@ message ExecLog {
     UNKNOWN_CACHE = 0;
     MEM_CACHE = 1;
     STORAGE_CACHE = 2;
+    LOCAL_OUTPUT_CACHE = 3;
   };
   // optional string compiler_proxy_id = 1;
   optional string username = 46;

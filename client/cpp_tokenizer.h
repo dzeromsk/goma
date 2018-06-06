@@ -5,7 +5,6 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_CPP_TOKENIZER_H_
 #define DEVTOOLS_GOMA_CLIENT_CPP_TOKENIZER_H_
 
-#include <set>
 #include <string>
 
 #include "cpp_input_stream.h"
@@ -20,12 +19,16 @@ class CppTokenizer {
   CppTokenizer(const CppTokenizer&) = delete;
   void operator=(const CppTokenizer&) = delete;
 
-  static void InitializeStaticOnce();
-
   static bool NextTokenFrom(CppInputStream* stream,
                             bool skip_space,
                             CppToken* token,
                             std::string* error_reason);
+
+  // utility function to get all tokens
+  // Returns true if succeeds, false otherwise.
+  static bool TokenizeAll(const std::string& str,
+                          bool skip_space,
+                          ArrayTokenList* result);
 
   // Reads string CppToken.
   static bool ReadString(CppInputStream* stream,
@@ -60,9 +63,12 @@ class CppTokenizer {
   static bool IsAfterEndOfLine(const char* cur, const char* begin);
 
  private:
-  static std::set<std::string>* integer_suffixes_;
+  static bool IsValidIntegerSuffix(const std::string& s);
+  static CppToken::Type TypeFrom(int c1, int c2);
 
+  FRIEND_TEST(CppTokenizerTest, IntegerSuffixes);
   FRIEND_TEST(CppTokenizerTest, IsAfterEndOfLine);
+  FRIEND_TEST(CppTokenizerTest, TypeFrom);
 };
 
 }  // namespace devtools_goma

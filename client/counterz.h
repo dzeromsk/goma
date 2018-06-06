@@ -87,8 +87,8 @@ class Counterz {
 class ScopedCounter {
  public:
   explicit ScopedCounter(CounterInfo* counter_info)
-      : counter_info_(counter_info), timer_(SimpleTimer::START) {
-  }
+      : counter_info_(counter_info),
+        timer_(counter_info ? SimpleTimer::START : SimpleTimer::NO_START) {}
 
   ~ScopedCounter() {
     if (counter_info_ != nullptr) {

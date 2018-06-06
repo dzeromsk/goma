@@ -74,6 +74,8 @@ def CheckChangeOnUpload(input_api, output_api):
       input_api, output_api,
       black_list=(r'third_party[\\/].*',
                   r'build[\\/]tools[\\/].*',
+                  r'build[\\/]vs_toolchain.py',
+                  r'buildtools[\\/]clang_format[\\/]script[\\/].*',
                   r'tools[\\/].*',
                   r'out[\\/].*',
                   r'build[\\/](Debug|Release).*'))

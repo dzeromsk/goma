@@ -22,14 +22,14 @@
 #include "config_win.h"
 #include "file.h"
 #include "file_dir.h"
+#include "filesystem.h"
 #include "mypath.h"
 #include "path.h"
 #include "vsvars.h"
 
-
 int RunWithVSVars(std::string vsvars_path, int argv0, int argc, char** argv) {
   std::string tmpdir = devtools_goma::GetGomaTmpDir();
-  devtools_goma::RecursivelyDelete(tmpdir);
+  file::RecursivelyDelete(tmpdir, file::Defaults());
   std::string batchfile = file::JoinPath(tmpdir, "vsrun.bat");
   std::ofstream batch;
   batch.open(batchfile.c_str());

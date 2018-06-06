@@ -35,7 +35,8 @@
 #include "basictypes.h"
 #include "file.h"
 #include "file_dir.h"
-#include "file_id.h"
+#include "file_stat.h"
+#include "filesystem.h"
 #include "glog/logging.h"
 #include "path_util.h"
 #include "scoped_fd.h"
@@ -223,10 +224,10 @@ string GetCurrentDirNameOrDie(void) {
       !HasPrefixDir(pwd, "/proc/self/cwd")) {
     // Align with llvm current_path().
     // llvm checking PWD id and "." id are the same.
-    FileId pwd_id(pwd);
-    FileId dot_id(".");
-    if (pwd_id.IsValid() && dot_id.IsValid() &&
-        pwd_id.is_directory && pwd_id == dot_id) {
+    FileStat pwd_stat(pwd);
+    FileStat dot_stat(".");
+    if (pwd_stat.IsValid() && dot_stat.IsValid() && pwd_stat.is_directory &&
+        pwd_stat == dot_stat) {
       return pwd;
     }
   }
@@ -298,7 +299,7 @@ bool ParseHttpResponse(absl::string_view response,
 }
 
 void DeleteRecursivelyOrDie(const string& dirname) {
-  CHECK(RecursivelyDelete(dirname)) << dirname;
+  CHECK(file::RecursivelyDelete(dirname, file::Defaults()).ok()) << dirname;
 }
 
 string EscapeString(const string& str) {
@@ -408,7 +409,8 @@ bool ParseChunkedBody(absl::string_view response,
       // reached the end of response.
       *remaining_chunk_length = chunk_length + 4;
       return false;
-    } else if (*endptr != '\r' && *endptr != ';') {
+    }
+    if (*endptr != '\r' && *endptr != ';') {
       LOG(ERROR) << "Unexpected character after length:"
                  << *endptr;
       return true;
@@ -480,7 +482,8 @@ bool ParseChunkedBody(absl::string_view response,
       // 4 comes from \r\n<chunk>\r\n.
       *remaining_chunk_length = chunk_length + 4;
       return false;
-    } else if (response.size() < crlf_pos + chunk_length + 4) {
+    }
+    if (response.size() < crlf_pos + chunk_length + 4) {
       // need more data.
       // 4 comes from \r\n<chunk>\r\n.
       *remaining_chunk_length = crlf_pos + chunk_length + 4 - response.size();

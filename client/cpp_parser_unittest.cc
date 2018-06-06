@@ -11,72 +11,17 @@
 #include <glog/stl_logging.h>
 #include <gtest/gtest.h>
 
+#include "absl/strings/match.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
 #include "compiler_specific.h"
+#include "cpp_directive_parser.h"
 #include "cpp_parser.h"
+#include "cpp_tokenizer.h"
 #include "timestamp.h"
-#include "unittest_util.h"
+#include "include_guard_detector.h"
 
 namespace devtools_goma {
-
-using Token = CppToken;
-using ArrayTokenList = std::vector<Token>;
-using TokenList = std::list<Token>;
-
-class CppParserTest : public testing::Test {
- protected:
-
-  void SetUp() override {
-    tmpdir_.reset(new TmpdirUtil("cpp_parser_test"));
-  }
-
-  void TearDown() override {
-    tmpdir_.reset();
-  }
-
-  ArrayTokenList GetAllTokens(CppParser* parser) const {
-    ArrayTokenList tokens;
-    for (;;) {
-      Token token = parser->NextToken(false);
-      if (token.type == Token::END) {
-        break;
-      }
-      tokens.push_back(std::move(token));
-    }
-    return tokens;
-  }
-
-  void CheckExpand(const std::string& defines, const std::string& expand,
-                   const ArrayTokenList& expected) {
-    CppParser cpp_parser;
-    cpp_parser.AddStringInput(defines, "(string)");
-    EXPECT_TRUE(cpp_parser.ProcessDirectives());
-
-    cpp_parser.AddStringInput(expand, "(string)");
-
-    auto tokens = GetAllTokens(&cpp_parser);
-
-    ArrayTokenList expanded;
-    cpp_parser.Expand0(tokens, &expanded, true);
-
-    EXPECT_EQ(expanded.size(), expected.size());
-    EXPECT_EQ(expanded, expected)
-        << "defines: " << defines << '\n'
-        << "expand: " << expand << '\n'
-        << "expanded: " << CppParser::DebugString(
-            TokenList(expanded.begin(), expanded.end()));
-
-    expanded.clear();
-    EXPECT_TRUE(cpp_parser.Expand0Fastpath(tokens, true, &expanded));
-    EXPECT_EQ(expanded.size(), expected.size());
-    EXPECT_EQ(expanded, expected)
-        << "defines: " << defines << '\n'
-        << "expand: " << expand << '\n'
-        << "expanded: " << CppParser::DebugString(
-            TokenList(expanded.begin(), expanded.end()));
-  }
-
-  std::unique_ptr<TmpdirUtil> tmpdir_;
-};
 
 class CppIncludeObserver : public CppParser::IncludeObserver {
  public:
@@ -100,7 +45,15 @@ class CppIncludeObserver : public CppParser::IncludeObserver {
     }
 
     ++included_[path];
-    parser_->AddStringInput(p->second, p->first);
+
+    SharedCppDirectives directives =
+        CppDirectiveParser().ParseFromString(p->second);
+    string include_guard_ident = IncludeGuardDetector::Detect(*directives);
+
+    parser_->AddFileInput(IncludeItem(directives, include_guard_ident),
+                          p->first,
+                          ".",
+                          CppParser::kCurrentDirIncludeDirIndex);
     return true;
   }
 
@@ -155,48 +108,7 @@ class CppErrorObserver : public CppParser::ErrorObserver {
   DISALLOW_COPY_AND_ASSIGN(CppErrorObserver);
 };
 
-TEST_F(CppParserTest, MacroSet) {
-  MacroSet a, b, c;
-  EXPECT_TRUE(a.empty());
-  a.Set(4);
-  a.Set(10);
-  b.Set(80);
-  EXPECT_FALSE(a.empty());
-  EXPECT_FALSE(b.empty());
-  EXPECT_TRUE(a.Get(4));
-  EXPECT_FALSE(a.Get(80));
-  EXPECT_FALSE(b.Get(4));
-  EXPECT_TRUE(b.Get(80));
-  a.Union(b);
-  EXPECT_FALSE(a.Get(0));
-  EXPECT_TRUE(a.Get(4));
-  EXPECT_TRUE(a.Get(80));
-}
-
-TEST_F(CppParserTest, TokenizeDefineString) {
-  CppParser cpp_parser;
-  cpp_parser.AddStringInput("#define KOTORI \"piyo\\\"piyo\"", "(string)");
-
-  CppParser::Token t = cpp_parser.NextToken(true);
-  EXPECT_EQ(t.type, CppParser::Token::SHARP);
-
-  t = cpp_parser.NextToken(true);
-  EXPECT_EQ(t.type, CppParser::Token::IDENTIFIER);
-  EXPECT_EQ(t.string_value, "define");
-
-  t = cpp_parser.NextToken(true);
-  EXPECT_EQ(t.type, CppParser::Token::IDENTIFIER);
-  EXPECT_EQ(t.string_value, "KOTORI");
-
-  t = cpp_parser.NextToken(true);
-  EXPECT_EQ(t.type, CppParser::Token::STRING);
-  EXPECT_EQ(t.string_value, "piyo\\\"piyo");
-
-  t = cpp_parser.NextToken(true);
-  EXPECT_EQ(t.type, CppParser::Token::END);
-}
-
-TEST_F(CppParserTest, DontCrashWithEmptyInclude) {
+TEST(CppParserTest, DontCrashWithEmptyInclude) {
   CppParser cpp_parser;
   cpp_parser.AddStringInput("#include\n", "(string)");
   CppErrorObserver err_observer;
@@ -208,29 +120,27 @@ TEST_F(CppParserTest, DontCrashWithEmptyInclude) {
             err_observer.errors()[0]);
 }
 
-TEST_F(CppParserTest, DontCrashWithEmptyHasInclude) {
+TEST(CppParserTest, DontCrashWithEmptyHasInclude) {
   CppParser cpp_parser;
-  cpp_parser.EnablePredefinedMacro("__has_include");
-  cpp_parser.AddStringInput("#if __has_include()\n#endif\n"
-                            "#if __has_include(\n#endif\n"
-                            "#if __has_include",
-                            "(string)");
+  ASSERT_TRUE(cpp_parser.EnablePredefinedMacro("__has_include", false));
+  cpp_parser.AddStringInput(
+      "#if __has_include()\n#endif\n"
+      "#if __has_include(\n#endif\n"
+      "#if __has_include\n",
+      "(string)");
   CppErrorObserver err_observer;
   cpp_parser.set_error_observer(&err_observer);
   cpp_parser.ProcessDirectives();
   ASSERT_EQ(3U, err_observer.errors().size());
-  EXPECT_EQ("CppParser((string):2) "
-            "__has_include expects \"filename\" or <filename>",
-            err_observer.errors()[0]);
-  EXPECT_EQ("CppParser((string):4) "
-            "__has_include expects \"filename\" or <filename>",
-            err_observer.errors()[1]);
-  EXPECT_EQ("CppParser((string):5) "
-            "macro is referred without any arguments:__has_include",
-            err_observer.errors()[2]);
+  EXPECT_TRUE(
+      absl::StartsWith(err_observer.errors()[0], "CppParser((string):2) "));
+  EXPECT_TRUE(
+      absl::StartsWith(err_observer.errors()[1], "CppParser((string):4) "));
+  EXPECT_TRUE(
+      absl::StartsWith(err_observer.errors()[2], "CppParser((string):6) "));
 }
 
-TEST_F(CppParserTest, HasFeatureResultValue) {
+TEST(CppParserTest, HasFeatureResultValue) {
   std::unique_ptr<CompilerInfoData> info_data(new CompilerInfoData);
   info_data->add_supported_predefined_macros("__has_feature");
   info_data->add_supported_predefined_macros("__has_extension");
@@ -439,38 +349,7 @@ TEST_F(CppParserTest, HasFeatureResultValue) {
   EXPECT_TRUE(cpp_parser.IsMacroDefined("BUILTIN_BUILTIN_SPACE_OK"));
 }
 
-TEST_F(CppParserTest, PredefinedNoCache) {
-  InitMacroEnvCache();
-
-  for (int i = 0; i < 2; ++i) {
-    std::unique_ptr<CompilerInfoData> info_data(new CompilerInfoData);
-    info_data->add_supported_predefined_macros("__has_builtin");
-    CompilerInfo info(std::move(info_data));
-
-    CppParser cpp_parser;
-    cpp_parser.SetCompilerInfo(&info);
-
-    CppIncludeObserver include_observer(&cpp_parser);
-    include_observer.SetInclude("a.h", "");
-    cpp_parser.set_include_observer(&include_observer);
-
-    cpp_parser.AddStringInput("#ifdef __has_builtin\n"
-                              "# include \"a.h\"\n"
-                              "#endif\n", "");
-    cpp_parser.ProcessDirectives();
-
-    EXPECT_EQ(1, include_observer.IncludedCount("a.h"));
-
-    EXPECT_EQ(0, cpp_parser.obj_cache_hit());
-    EXPECT_EQ(0, cpp_parser.func_cache_hit());
-  }
-
-  QuitMacroEnvCache();
-}
-
-TEST_F(CppParserTest, ClangExtendedCheckMacro) {
-  InitMacroEnvCache();
-
+TEST(CppParserTest, ClangExtendedCheckMacro) {
   std::unique_ptr<CompilerInfoData> info_data(new CompilerInfoData);
   info_data->add_supported_predefined_macros("__has_cpp_attribute");
 
@@ -509,11 +388,9 @@ TEST_F(CppParserTest, ClangExtendedCheckMacro) {
   EXPECT_EQ("CppParser((string):5) "
             "__has_cpp_attribute expects an identifier",
             err_observer.errors()[0]);
-
-  QuitMacroEnvCache();
 }
 
-TEST_F(CppParserTest, DontCrashWithEmptyTokenInCheckMacro) {
+TEST(CppParserTest, DontCrashWithEmptyTokenInCheckMacro) {
   std::unique_ptr<CompilerInfoData> info_data(new CompilerInfoData);
   info_data->add_supported_predefined_macros("__has_feature");
   info_data->add_supported_predefined_macros("__has_extension");
@@ -569,63 +446,13 @@ TEST_F(CppParserTest, DontCrashWithEmptyTokenInCheckMacro) {
   cpp_parser.set_error_observer(&err_observer);
   cpp_parser.ProcessDirectives();
   ASSERT_EQ(18U, err_observer.errors().size()) << err_observer.errors();
-  EXPECT_EQ("CppParser((string):2) "
-            "__has_feature expects an identifier",
-            err_observer.errors()[0]);
-  EXPECT_EQ("CppParser((string):4) "
-            "__has_feature expects an identifier",
-            err_observer.errors()[1]);
-  EXPECT_EQ("CppParser((string):6) "
-            "macro is referred without any arguments:__has_feature",
-            err_observer.errors()[2]);
-  EXPECT_EQ("CppParser((string):8) "
-            "__has_extension expects an identifier",
-            err_observer.errors()[3]);
-  EXPECT_EQ("CppParser((string):10) "
-            "__has_extension expects an identifier",
-            err_observer.errors()[4]);
-  EXPECT_EQ("CppParser((string):12) "
-            "macro is referred without any arguments:__has_extension",
-            err_observer.errors()[5]);
-  EXPECT_EQ("CppParser((string):14) "
-            "__has_attribute expects an identifier",
-            err_observer.errors()[6]);
-  EXPECT_EQ("CppParser((string):16) "
-            "__has_attribute expects an identifier",
-            err_observer.errors()[7]);
-  EXPECT_EQ("CppParser((string):18) "
-            "macro is referred without any arguments:__has_attribute",
-            err_observer.errors()[8]);
-  EXPECT_EQ("CppParser((string):20) "
-            "__has_cpp_attribute expects an identifier",
-            err_observer.errors()[9]);
-  EXPECT_EQ("CppParser((string):22) "
-            "__has_cpp_attribute expects an identifier",
-            err_observer.errors()[10]);
-  EXPECT_EQ("CppParser((string):24) "
-            "macro is referred without any arguments:__has_cpp_attribute",
-            err_observer.errors()[11]);
-  EXPECT_EQ("CppParser((string):26) "
-            "__has_declspec_attribute expects an identifier",
-            err_observer.errors()[12]);
-  EXPECT_EQ("CppParser((string):28) "
-            "__has_declspec_attribute expects an identifier",
-            err_observer.errors()[13]);
-  EXPECT_EQ("CppParser((string):30) "
-            "macro is referred without any arguments:__has_declspec_attribute",
-            err_observer.errors()[14]);
-  EXPECT_EQ("CppParser((string):32) "
-            "__has_builtin expects an identifier",
-            err_observer.errors()[15]);
-  EXPECT_EQ("CppParser((string):34) "
-            "__has_builtin expects an identifier",
-            err_observer.errors()[16]);
-  EXPECT_EQ("CppParser((string):36) "
-            "macro is referred without any arguments:__has_builtin",
-            err_observer.errors()[17]);
+  for (int i = 0; i < 18; ++i) {
+    string error_prefix(absl::StrCat("CppParser((string):", (i + 1) * 2, ") "));
+    EXPECT_TRUE(absl::StartsWith(err_observer.errors()[i], error_prefix));
+  }
 }
 
-TEST_F(CppParserTest, ExpandMacro) {
+TEST(CppParserTest, ExpandMacro) {
   CppParser cpp_parser;
   cpp_parser.AddStringInput("#define M() 1\n"
                             "#if M()\n"
@@ -654,7 +481,8 @@ TEST_F(CppParserTest, ExpandMacro) {
   CppErrorObserver err_observer;
   cpp_parser.set_error_observer(&err_observer);
   cpp_parser.ProcessDirectives();
-  ASSERT_EQ(4U, err_observer.errors().size());
+  ASSERT_EQ(4U, err_observer.errors().size())
+      << absl::StrJoin(err_observer.errors(), "\n");
   // TODO: line number is #endif line that just after #if that
   // error happened?
   EXPECT_EQ("CppParser((string):5) "  // M(x)
@@ -669,10 +497,9 @@ TEST_F(CppParserTest, ExpandMacro) {
   EXPECT_EQ("CppParser((string):23) "  // M2(1,,1)
             "macro argument number mismatching with the parameter list",
             err_observer.errors()[3]);
-
 }
 
-TEST_F(CppParserTest, IncludeMoreThanOnce) {
+TEST(CppParserTest, IncludeMoreThanOnce) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
   include_observer.SetInclude("foo.h",
@@ -689,7 +516,7 @@ TEST_F(CppParserTest, IncludeMoreThanOnce) {
   EXPECT_EQ(0, cpp_parser.skipped_files());
 }
 
-TEST_F(CppParserTest, ImportOnlyOnce) {
+TEST(CppParserTest, ImportOnlyOnce) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
   include_observer.SetInclude("foo.h",
@@ -706,7 +533,7 @@ TEST_F(CppParserTest, ImportOnlyOnce) {
   EXPECT_EQ(1, cpp_parser.skipped_files());
 }
 
-TEST_F(CppParserTest, BoolShouldBeTreatedAsBoolOnCplusplus) {
+TEST(CppParserTest, BoolShouldBeTreatedAsBoolOnCplusplus) {
   CppParser cpp_parser;
   cpp_parser.set_is_cplusplus(true);
   cpp_parser.AddStringInput("#if true\n"
@@ -721,7 +548,7 @@ TEST_F(CppParserTest, BoolShouldBeTreatedAsBoolOnCplusplus) {
   EXPECT_FALSE(cpp_parser.IsMacroDefined("bar"));
 }
 
-TEST_F(CppParserTest, BoolShouldNotBeTreatedAsBoolOnNonCplusplus) {
+TEST(CppParserTest, BoolShouldNotBeTreatedAsBoolOnNonCplusplus) {
   CppParser cpp_parser;
   cpp_parser.AddStringInput("#if true\n"
                             "#define foo\n"
@@ -735,7 +562,7 @@ TEST_F(CppParserTest, BoolShouldNotBeTreatedAsBoolOnNonCplusplus) {
   EXPECT_FALSE(cpp_parser.IsMacroDefined("bar"));
 }
 
-TEST_F(CppParserTest, BoolShouldNotBeTreatedAsDefined) {
+TEST(CppParserTest, BoolShouldNotBeTreatedAsDefined) {
   CppParser cpp_parser;
   cpp_parser.set_is_cplusplus(true);
   cpp_parser.AddStringInput("#if true\n"
@@ -758,7 +585,7 @@ TEST_F(CppParserTest, BoolShouldNotBeTreatedAsDefined) {
   EXPECT_FALSE(cpp_parser.IsMacroDefined("qux"));
 }
 
-TEST_F(CppParserTest, BoolShouldBeOverriddenByMacroInTrueToTrueCase) {
+TEST(CppParserTest, BoolShouldBeOverriddenByMacroInTrueToTrueCase) {
   CppParser cpp_parser;
   cpp_parser.set_is_cplusplus(true);
   cpp_parser.AddStringInput("#define true true\n"
@@ -774,7 +601,7 @@ TEST_F(CppParserTest, BoolShouldBeOverriddenByMacroInTrueToTrueCase) {
   EXPECT_TRUE(cpp_parser.IsMacroDefined("bar"));
 }
 
-TEST_F(CppParserTest, BoolShouldBeOverriddenByMacroInTrueToFalseCase) {
+TEST(CppParserTest, BoolShouldBeOverriddenByMacroInTrueToFalseCase) {
   CppParser cpp_parser;
   cpp_parser.set_is_cplusplus(true);
   cpp_parser.AddStringInput("#define true false\n"
@@ -790,7 +617,7 @@ TEST_F(CppParserTest, BoolShouldBeOverriddenByMacroInTrueToFalseCase) {
   EXPECT_TRUE(cpp_parser.IsMacroDefined("bar"));
 }
 
-TEST_F(CppParserTest, BoolShouldBeOverriddenByMacroInFalseToTrueCase) {
+TEST(CppParserTest, BoolShouldBeOverriddenByMacroInFalseToTrueCase) {
   CppParser cpp_parser;
   cpp_parser.set_is_cplusplus(true);
   cpp_parser.AddStringInput("#define false true\n"
@@ -806,7 +633,7 @@ TEST_F(CppParserTest, BoolShouldBeOverriddenByMacroInFalseToTrueCase) {
   EXPECT_TRUE(cpp_parser.IsMacroDefined("bar"));
 }
 
-TEST_F(CppParserTest, BoolShouldBeOverriddenByMacroInFalseToFalseCase) {
+TEST(CppParserTest, BoolShouldBeOverriddenByMacroInFalseToFalseCase) {
   CppParser cpp_parser;
   cpp_parser.set_is_cplusplus(true);
   cpp_parser.AddStringInput("#define false false\n"
@@ -822,7 +649,7 @@ TEST_F(CppParserTest, BoolShouldBeOverriddenByMacroInFalseToFalseCase) {
   EXPECT_TRUE(cpp_parser.IsMacroDefined("bar"));
 }
 
-TEST_F(CppParserTest, BoolShouldBeOverriddenAndPossibleToUndefOnTrueCase) {
+TEST(CppParserTest, BoolShouldBeOverriddenAndPossibleToUndefOnTrueCase) {
   CppParser cpp_parser;
   cpp_parser.set_is_cplusplus(true);
   cpp_parser.AddStringInput("#define true false\n"
@@ -839,7 +666,7 @@ TEST_F(CppParserTest, BoolShouldBeOverriddenAndPossibleToUndefOnTrueCase) {
   EXPECT_TRUE(cpp_parser.IsMacroDefined("bar"));
 }
 
-TEST_F(CppParserTest, BoolShouldBeOverriddenAndPossibleToUndefOnFalseCase) {
+TEST(CppParserTest, BoolShouldBeOverriddenAndPossibleToUndefOnFalseCase) {
   CppParser cpp_parser;
   cpp_parser.set_is_cplusplus(true);
   cpp_parser.AddStringInput("#define false true\n"
@@ -856,7 +683,7 @@ TEST_F(CppParserTest, BoolShouldBeOverriddenAndPossibleToUndefOnFalseCase) {
   EXPECT_FALSE(cpp_parser.IsMacroDefined("bar"));
 }
 
-TEST_F(CppParserTest, CharToken) {
+TEST(CppParserTest, CharToken) {
   CppParser cpp_parser;
 
   // non-ASCII system is not supported.
@@ -920,7 +747,7 @@ TEST_F(CppParserTest, CharToken) {
   EXPECT_TRUE(cpp_parser.IsMacroDefined("INCLUDE_LLIMITS"));
 }
 
-TEST_F(CppParserTest, MacroSetChanged) {
+TEST(CppParserTest, MacroSetChanged) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
   include_observer.SetInclude("a.h",
@@ -949,7 +776,7 @@ TEST_F(CppParserTest, MacroSetChanged) {
   EXPECT_TRUE(cpp_parser.IsMacroDefined("Y"));
 }
 
-TEST_F(CppParserTest, TopFileMacroDefinitionUpdate) {
+TEST(CppParserTest, TopFileMacroDefinitionUpdate) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
   include_observer.SetInclude("a.h",
@@ -973,7 +800,7 @@ TEST_F(CppParserTest, TopFileMacroDefinitionUpdate) {
   EXPECT_TRUE(cpp_parser.IsMacroDefined("B"));
 }
 
-TEST_F(CppParserTest, SkippedByIncludeGuard) {
+TEST(CppParserTest, SkippedByIncludeGuard) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
 
@@ -1009,7 +836,7 @@ TEST_F(CppParserTest, SkippedByIncludeGuard) {
   EXPECT_EQ(0, include_observer.SkipCount("c.h"));
 }
 
-TEST_F(CppParserTest, SkippedByIncludeGuardIfDefinedCase) {
+TEST(CppParserTest, SkippedByIncludeGuardIfDefinedCase) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
 
@@ -1045,7 +872,7 @@ TEST_F(CppParserTest, SkippedByIncludeGuardIfDefinedCase) {
   EXPECT_EQ(0, include_observer.SkipCount("c.h"));
 }
 
-TEST_F(CppParserTest, SkippedByIncludeGuardIfDefinedInvalidCase) {
+TEST(CppParserTest, SkippedByIncludeGuardIfDefinedInvalidCase) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
 
@@ -1106,7 +933,7 @@ TEST_F(CppParserTest, SkippedByIncludeGuardIfDefinedInvalidCase) {
   EXPECT_EQ(0, include_observer.SkipCount("e.h"));
 }
 
-TEST_F(CppParserTest, DontSkipdByIncludeGuardIfndefButNotDefined) {
+TEST(CppParserTest, DontSkipdByIncludeGuardIfndefButNotDefined) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
 
@@ -1138,7 +965,7 @@ TEST_F(CppParserTest, DontSkipdByIncludeGuardIfndefButNotDefined) {
   EXPECT_EQ(0, include_observer.SkipCount("c.h"));
 }
 
-TEST_F(CppParserTest, DontSkipdIncludeGuardAndUndefined) {
+TEST(CppParserTest, DontSkipdIncludeGuardAndUndefined) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
 
@@ -1160,7 +987,7 @@ TEST_F(CppParserTest, DontSkipdIncludeGuardAndUndefined) {
   EXPECT_EQ(0, include_observer.SkipCount("a.h"));
 }
 
-TEST_F(CppParserTest, ColonPercentShouldBeTreatedAsSharp) {
+TEST(CppParserTest, ColonPercentShouldBeTreatedAsSharp) {
   CppParser cpp_parser;
   cpp_parser.AddStringInput("#define  a  b  %:%: c \n"
                             "#define bc 1\n"
@@ -1176,7 +1003,7 @@ TEST_F(CppParserTest, ColonPercentShouldBeTreatedAsSharp) {
   EXPECT_FALSE(cpp_parser.IsMacroDefined("wrong"));
 }
 
-TEST_F(CppParserTest, SpaceInMacroShouldBeTreatedAsIs) {
+TEST(CppParserTest, SpaceInMacroShouldBeTreatedAsIs) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
 
@@ -1202,7 +1029,7 @@ TEST_F(CppParserTest, SpaceInMacroShouldBeTreatedAsIs) {
   EXPECT_EQ(0, include_observer.IncludedCount("foo  bar"));
 }
 
-TEST_F(CppParserTest, SpaceNearDoubleSharpShouldBeTreatedCorrectly) {
+TEST(CppParserTest, SpaceNearDoubleSharpShouldBeTreatedCorrectly) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
 
@@ -1219,7 +1046,7 @@ TEST_F(CppParserTest, SpaceNearDoubleSharpShouldBeTreatedCorrectly) {
   EXPECT_EQ(1, include_observer.IncludedCount("hogefuga"));
 }
 
-TEST_F(CppParserTest, DirectiveWithSpaces) {
+TEST(CppParserTest, DirectiveWithSpaces) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
 
@@ -1244,7 +1071,7 @@ TEST_F(CppParserTest, DirectiveWithSpaces) {
   EXPECT_EQ(1, include_observer.IncludedCount("y.h"));
 }
 
-TEST_F(CppParserTest, MultiAddMacroByString) {
+TEST(CppParserTest, MultiAddMacroByString) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
 
@@ -1271,138 +1098,7 @@ TEST_F(CppParserTest, MultiAddMacroByString) {
   EXPECT_EQ(1, include_observer.IncludedCount("y.h"));
 }
 
-TEST_F(CppParserTest, Expand0) {
-  // This test does not pass slow test.
-  // TODO: remove slow path or fix slow path.
-  CheckExpand("#define e(x) ee(x)\n"
-              "#define ee(x) x(y)\n"
-              "#define f(x) f\n"
-              "#define foo e(f(x))\n",
-              "foo",
-              {Token(Token::IDENTIFIER, "f"),
-               Token(Token::PUNCTUATOR, '('),
-               Token(Token::IDENTIFIER, "y"),
-               Token(Token::PUNCTUATOR, ')')});
-
-  CheckExpand("#define f(x) f\n"
-              "#define foo f(x)(y)\n",
-              "foo",
-              {Token(Token::IDENTIFIER, "f"), Token(Token::PUNCTUATOR, '('),
-               Token(Token::IDENTIFIER, "y"), Token(Token::PUNCTUATOR, ')')});
-
-  CheckExpand("#define a 1\n", "a", {Token(1)});
-
-  CheckExpand("#define a b\n"
-              "#define b 1\n",
-              "a", {Token(1)});
-
-  CheckExpand("#define a a\n", "a", {Token(Token::IDENTIFIER, "a")});
-
-  CheckExpand("#define a",
-              "a",
-              ArrayTokenList());
-
-  CheckExpand("#define a b\n"
-              "#define b c\n"
-              "#define c a\n", "a", {Token(Token::IDENTIFIER, "a")});
-
-  CheckExpand("#define id(x) x\n",
-              "id(id(a))", {Token(Token::IDENTIFIER, "a")});
-
-  CheckExpand("",
-              "a",
-              {Token(Token::IDENTIFIER, "a")});
-
-  CheckExpand("#define f(x)",
-              "f",
-              {Token(Token::IDENTIFIER, "f")});
-
-  CheckExpand("#define f",
-              "f(x)",
-              {Token(Token::PUNCTUATOR, '('),
-               Token(Token::IDENTIFIER, "x"),
-               Token(Token::PUNCTUATOR, ')'),});
-
-  CheckExpand("#define f(...) __VA_ARGS__",
-              "f()",
-              ArrayTokenList());
-
-  CheckExpand("#define f(...) __VA_ARGS__",
-              "f(x)",
-              {Token(Token::IDENTIFIER, "x")});
-
-  CheckExpand("#define f(...) __VA_ARGS__",
-              "f(x,y)",
-              {Token(Token::IDENTIFIER, "x"),
-               Token(Token::PUNCTUATOR, ','),
-               Token(Token::IDENTIFIER, "y")});
-
-  CheckExpand("#define f(...) __VA_ARGS__\n"
-              "#define x 1\n"
-              "#define y 2\n",
-              "f(x,y)",
-              {Token(1),
-               Token(Token::PUNCTUATOR, ','),
-               Token(2)});
-
-  CheckExpand("#define f(x, y, ...) __VA_ARGS__, y, x\n",
-              "f(1, 2)",
-              {Token(Token::PUNCTUATOR, ','),
-               Token(2),
-               Token(Token::PUNCTUATOR, ','),
-               Token(1)});
-
-  CheckExpand("#define f(x, y, ...) __VA_ARGS__, y, x\n",
-              "f(1, 2, 3, 4)",
-              {Token(3),
-               Token(Token::PUNCTUATOR, ','),
-               Token(4),
-               Token(Token::PUNCTUATOR, ','),
-               Token(2),
-               Token(Token::PUNCTUATOR, ','),
-               Token(1)});
-
-  CheckExpand("#define X(a, b, c, ...) c\n",
-              "X(\"a\", \"b\", \"c\", \"d\", \"e\")",
-              {Token(Token::STRING, "c")});
-
-  CheckExpand("#define g(x, y, ...) f(x, y, __VA_ARGS__)\n"
-              "#define f(x, y, ...) g(0, x, y, __VA_ARGS__)\n",
-              "f(1, 2)",
-              {
-               Token(Token::IDENTIFIER, "f"),
-               Token(Token::PUNCTUATOR, '('),
-               Token(0),
-               Token(Token::PUNCTUATOR, ','),
-               Token(1),
-               Token(Token::PUNCTUATOR, ','),
-               Token(2),
-               Token(Token::PUNCTUATOR, ','),
-               Token(Token::PUNCTUATOR, ')'),
-              });
-
-  CheckExpand("#define two(...) __VA_ARGS__, __VA_ARGS__\n",
-              "two(two(1), two(2))",
-              {
-               Token(1),
-               Token(Token::PUNCTUATOR, ','),
-               Token(1),
-               Token(Token::PUNCTUATOR, ','),
-               Token(2),
-               Token(Token::PUNCTUATOR, ','),
-               Token(2),
-               Token(Token::PUNCTUATOR, ','),
-               Token(1),
-               Token(Token::PUNCTUATOR, ','),
-               Token(1),
-               Token(Token::PUNCTUATOR, ','),
-               Token(2),
-               Token(Token::PUNCTUATOR, ','),
-               Token(2),
-              });
-}
-
-TEST_F(CppParserTest, LimitIncludeDepth) {
+TEST(CppParserTest, LimitIncludeDepth) {
   CppParser cpp_parser;
   CppIncludeObserver include_observer(&cpp_parser);
 
@@ -1417,84 +1113,22 @@ TEST_F(CppParserTest, LimitIncludeDepth) {
   EXPECT_EQ(1024, include_observer.IncludedCount("bar.h"));
 }
 
-TEST_F(CppParserTest, MacroCache) {
-  InitMacroEnvCache();
+// Regression test from android source (b/78436008)
+TEST(CppParserTest, GluingInteger) {
+  CppParser cpp_parser;
 
-  const string& ah = tmpdir_->FullPath("a.h");
-  tmpdir_->CreateTmpFile("a.h", R"(
-#define a 1
-#ifdef a
-# define b 2
-#endif
-#define two 1
-)");
+  cpp_parser.AddStringInput(
+      "#define _WIN32_WINNT 0x0600\n"
+      "#define NV_FROM_WIN32_WINNT2(V) V##0000\n"
+      "#define NV_FROM_WIN32_WINNT(V) NV_FROM_WIN32_WINNT2(V)\n"
+      "#define NV NV_FROM_WIN32_WINNT(_WIN32_WINNT)\n"
+      "#if NV >= 0x06000000\n"
+      "# define OK 1\n"
+      "#endif\n",
+      "foo.cc");
 
-  for (int i = 0; i < 2; ++i) {
-    CppParser cpp_parser;
-    cpp_parser.AddFileInput(Content::CreateFromFile(ah), FileId(ah),
-                            "a.h", "a", 0);
-
-    EXPECT_TRUE(cpp_parser.ProcessDirectives());
-
-    EXPECT_TRUE(cpp_parser.IsMacroDefined("a"));
-    EXPECT_TRUE(cpp_parser.IsMacroDefined("b"));
-    EXPECT_TRUE(cpp_parser.IsMacroDefined("two"));
-
-    if (i == 0) {
-      EXPECT_EQ(0, cpp_parser.obj_cache_hit());
-    } else {
-      // cache hit for "a", "b" and "two".
-      EXPECT_EQ(3, cpp_parser.obj_cache_hit());
-    }
-  }
-
-  const string& bh = tmpdir_->FullPath("b.h");
-  tmpdir_->CreateTmpFile("b.h", R"(
-#ifdef a
-# define b 3
-#endif
-
-#ifdef two
-# define NOT_REACHABLE1 1
-#endif
-
-#if two == 1
-# define NOT_REACHABLE2 1
-#endif
-
-#define two 2
-
-#if two == 2
-# define OK 1
-#endif
-)");
-
-  for (int i = 0; i < 2; ++i) {
-    CppParser cpp_parser;
-    cpp_parser.AddFileInput(Content::CreateFromFile(bh), FileId(bh),
-                            "b.h", "b", 0);
-
-    EXPECT_TRUE(cpp_parser.ProcessDirectives());
-
-
-    EXPECT_FALSE(cpp_parser.IsMacroDefined("a"));
-    EXPECT_FALSE(cpp_parser.IsMacroDefined("b"));
-
-    EXPECT_FALSE(cpp_parser.IsMacroDefined("NOT_REACHABLE1"));
-    EXPECT_FALSE(cpp_parser.IsMacroDefined("NOT_REACHABLE2"));
-
-    EXPECT_TRUE(cpp_parser.IsMacroDefined("OK"));
-    EXPECT_TRUE(cpp_parser.IsMacroDefined("two"));
-
-    if (i == 0) {
-      EXPECT_EQ(0, cpp_parser.obj_cache_hit());
-    } else {
-      // cache hit for "two" and "OK".
-      EXPECT_EQ(2, cpp_parser.obj_cache_hit());
-    }
-  }
-
-  QuitMacroEnvCache();
+  EXPECT_TRUE(cpp_parser.ProcessDirectives());
+  EXPECT_TRUE(cpp_parser.IsMacroDefined("OK"));
 }
 
 }  // namespace devtools_goma

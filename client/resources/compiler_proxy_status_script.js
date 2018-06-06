@@ -762,6 +762,8 @@ GomaTaskView.prototype = {
     add('output_file_rpc_resp_parse_time');
     addLineBreak();
 
+    add('local_delay_ms');
+
     /* local run */
     if (('local_pending_ms' in task) || 'local_run_ms' in task) {
       add('local_pending_ms');

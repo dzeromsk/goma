@@ -53,23 +53,6 @@ class SHA256HashValue {
   unsigned char data_[32];
 };
 
-// OptionalSHA256HashValue is SHA256HashValue + valid bit.
-// TODO: Remove this when we can have something like std::option<T> in
-// client code.
-class OptionalSHA256HashValue {
- public:
-  OptionalSHA256HashValue() : value_{}, valid_(false) {}
-  explicit OptionalSHA256HashValue(const SHA256HashValue& value)
-      : value_(value), valid_(true) {}
-
-  const SHA256HashValue& value() const { return value_; }
-  bool valid() const { return valid_; }
-
- private:
-  SHA256HashValue value_;
-  bool valid_;
-};
-
 void ComputeDataHashKeyForSHA256HashValue(absl::string_view data,
                                           SHA256HashValue* hash_value);
 

@@ -229,6 +229,7 @@ message ExecResp {
     NO_CACHE = 0;
     MEM_CACHE = 1;
     STORAGE_CACHE = 2;
+    LOCAL_OUTPUT_CACHE = 3;
   };
   optional ExecResult result = 1;
   optional ExecError error = 2 [default=OK];
@@ -310,8 +311,6 @@ message LookupFileReq {
 }
 
 message LookupFileResp {
-  // The goma client assumes blob_type=FILE_CHUNK or possibly
-  // blob_type=FILE here.
   repeated FileBlob blob = 2;
 }
 

@@ -7,8 +7,11 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "absl/memory/memory.h"
+#include "absl/synchronization/notification.h"
 #include "basictypes.h"
 #include "callback.h"
 #include "lockhelper.h"
@@ -24,16 +27,6 @@
 
 using std::string;
 
-namespace {
-
-const bool kDontKillSubProcess =
-#ifdef __MACH__
-    true;
-#else
-    false;
-#endif
-}
-
 namespace devtools_goma {
 
 class SubProcessTaskTest : public ::testing::Test {
@@ -43,16 +36,15 @@ class SubProcessTaskTest : public ::testing::Test {
  protected:
   class SubProcessContext {
    public:
-    SubProcessContext(const string& trace_id,
+    SubProcessContext(string trace_id,
                       const char* prog,
-                      const char* const *argv)
-        : trace_id_(trace_id),
+                      const char* const* argv)
+        : trace_id_(std::move(trace_id)),
           prog_(prog),
           argv_(argv),
           s_(nullptr),
           status_(-256),
-          done_(false) {
-    }
+          done_(false) {}
     ~SubProcessContext() {
     }
 
@@ -60,6 +52,7 @@ class SubProcessTaskTest : public ::testing::Test {
     const char* prog_;
     const char* const * argv_;
     SubProcessTask* s_;
+    absl::Notification started_;
     int status_;
     bool done_;
 
@@ -70,11 +63,10 @@ class SubProcessTaskTest : public ::testing::Test {
   void SetUp() override {
     CheckTempDirectory(GetGomaTmpDir());
     SubProcessController::Options options;
-    options.dont_kill_subprocess = kDontKillSubProcess;
     SubProcessController::Initialize(
         "subprocess_task_unittest", options);
-    wm_.reset(new WorkerThreadManager);
-    wm_->Start(2);
+    wm_ = absl::make_unique<WorkerThreadManager>();
+    wm_->Start(1);
     SubProcessControllerClient::Initialize(wm_.get(), GetGomaTmpDir());
     int max_wait = 100;
     while (!SubProcessControllerClient::IsRunning() ||
@@ -207,8 +199,13 @@ class SubProcessTaskTest : public ::testing::Test {
         NewCallback(
             this, &SubProcessTaskTest::TestSubProcess, &c),
         WorkerThreadManager::PRIORITY_LOW);
-    PlatformThread::Sleep(10000);
-    EXPECT_NE(SubProcessState::RUN, c.s_->state());
+
+    ASSERT_TRUE(c.started_.WaitForNotificationWithTimeout(absl::Seconds(10)));
+    while (SubProcessState::PENDING == c.s_->state()) {
+      PlatformThread::Sleep(100);
+    }
+
+    EXPECT_EQ(SubProcessState::RUN, c.s_->state());
     wm_->RunClosure(
         FROM_HERE,
         NewCallback(
@@ -235,6 +232,8 @@ class SubProcessTaskTest : public ::testing::Test {
         NewCallback(
             this, &SubProcessTaskTest::TestSubProcessDone, c));
     EXPECT_NE(SubProcessState::SETUP, c->s_->state());
+
+    c->started_.Notify();
   }
 
   void TestSubProcessDone(SubProcessContext* c) {
@@ -274,6 +273,10 @@ TEST_F(SubProcessTaskTest, RunTrue) {
 
 TEST_F(SubProcessTaskTest, RunFalse) {
   RunTestSubProcessFalse();
+}
+
+TEST_F(SubProcessTaskTest, SubProcessKill) {
+  RunTestSubProcessKill();
 }
 
 }  // namespace devtools_goma

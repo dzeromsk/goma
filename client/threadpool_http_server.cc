@@ -30,6 +30,7 @@
 #include <iterator>
 #include <memory>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 #include "absl/strings/str_split.h"
@@ -61,18 +62,22 @@ namespace devtools_goma {
 // TODO: make it flag?
 const int kDefaultTimeoutSec = 900;
 
-ThreadpoolHttpServer::ThreadpoolHttpServer(const string& listen_addr,
+ThreadpoolHttpServer::ThreadpoolHttpServer(string listen_addr,
                                            int port,
                                            int num_find_ports,
                                            WorkerThreadManager* wm,
                                            int num_threads,
-                                           HttpHandler *http_handler,
+                                           HttpHandler* http_handler,
                                            int max_num_sockets)
-    : listen_addr_(listen_addr),
-      port_(port), port_ready_(false), num_find_ports_(num_find_ports),
-      wm_(wm), pool_(WorkerThreadManager::kFreePool),
+    : listen_addr_(std::move(listen_addr)),
+      port_(port),
+      port_ready_(false),
+      num_find_ports_(num_find_ports),
+      wm_(wm),
+      pool_(WorkerThreadManager::kFreePool),
       num_http_threads_(num_threads),
-      http_handler_(http_handler), monitor_(nullptr),
+      http_handler_(http_handler),
+      monitor_(nullptr),
       trustedipsmanager_(nullptr),
       max_num_sockets_(max_num_sockets),
       idle_counting_(true),
@@ -230,6 +235,8 @@ void ThreadpoolHttpServer::SetAcceptLimit(int n, SocketType socket_type) {
   CHECK_LT(socket_type, NUM_SOCKET_TYPES);
   CHECK_GE(n, 0);
   CHECK_LE(n, max_num_sockets_);
+
+  AUTOLOCK(lock, &mu_);
   max_sockets_[socket_type] = n;
 }
 
@@ -562,8 +569,8 @@ void ThreadpoolHttpServer::RequestFromSocket::DoRead() {
     if (request_.size() < request_offset_ + request_content_length_) {
       request_.resize(request_offset_ + request_content_length_);
     }
-  } else if (buf_size < kBufSize / 2) {
-    request_.resize(request_.size() + kBufSize);
+  } else if (buf_size < kNetworkBufSize / 2) {
+    request_.resize(request_.size() + kNetworkBufSize);
   }
   char* buf = &request_[request_len_];
   buf_size = request_.size() - request_len_;
@@ -962,7 +969,8 @@ int ThreadpoolHttpServer::Loop() {
         UpdateSocketIdleUnlocked(static_cast<SocketType>(i));
       }
       continue;
-    } else if (r == -1) {
+    }
+    if (r == -1) {
       PLOG(WARNING) << "select";
       continue;
     }

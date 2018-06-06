@@ -45,7 +45,8 @@
 #include "file.h"
 #include "file_dir.h"
 #include "file_helper.h"
-#include "file_id.h"
+#include "file_stat.h"
+#include "filesystem.h"
 #include "glog/logging.h"
 #include "goma_hash.h"
 #include "histogram.h"
@@ -168,10 +169,10 @@ void LocalOutputCache::StartLoadCacheEntries(WorkerThreadManager* wm) {
 void LocalOutputCache::LoadCacheEntries() {
   // For fine load time measurement.
   Histogram list_directory_histogram;
-  Histogram file_id_histogram;
+  Histogram file_stat_histogram;
 
   list_directory_histogram.SetName("LocalOutputCache ListDirectory");
-  file_id_histogram.SetName("LocalOutputCache FileId");
+  file_stat_histogram.SetName("LocalOutputCache FileStat");
 
   SimpleTimer walk_timer(SimpleTimer::START);
   size_t total_file_size = 0;
@@ -227,7 +228,7 @@ void LocalOutputCache::LoadCacheEntries() {
       if (key_entry.is_dir) {
         // Probably old style cache. remove this.
         LOG(INFO) << "directory found. remove: " << cache_file_path;
-        if (!RecursivelyDelete(cache_file_path)) {
+        if (!file::RecursivelyDelete(cache_file_path, file::Defaults()).ok()) {
           LOG(ERROR) << "failed to remove: " << cache_file_path;
         }
         continue;
@@ -243,24 +244,25 @@ void LocalOutputCache::LoadCacheEntries() {
         continue;
       }
 
-      FileId id;
+      FileStat file_stat;
       {
         SimpleTimer timer(SimpleTimer::START);
-        id = FileId(cache_file_path);
-        file_id_histogram.Add(timer.GetInNanoSeconds());
+        file_stat = FileStat(cache_file_path);
+        file_stat_histogram.Add(timer.GetInNanoSeconds());
         if (timer.Get() >= 1.0) {
-          LOG(WARNING) << "SLOW FileId: " << cache_file_path;
+          LOG(WARNING) << "SLOW FileStat: " << cache_file_path;
         }
       }
 
-      if (!id.IsValid()) {
+      if (!file_stat.IsValid()) {
         LOG(ERROR) << "unexpectedly file is removed? "
                    << "path=" << cache_file_path;
         continue;
       }
 
-      total_file_size += id.size;
-      cache_entries.emplace_back(key, CacheEntry(id.mtime, id.size));
+      total_file_size += file_stat.size;
+      cache_entries.emplace_back(key,
+                                 CacheEntry(file_stat.mtime, file_stat.size));
     }
   }
 
@@ -272,8 +274,8 @@ void LocalOutputCache::LoadCacheEntries() {
   if (list_directory_histogram.count() > 0) {
     LOG(INFO) << list_directory_histogram.DebugString();
   }
-  if (file_id_histogram.count() > 0) {
-    LOG(INFO) << file_id_histogram.DebugString();
+  if (file_stat_histogram.count() > 0) {
+    LOG(INFO) << file_stat_histogram.DebugString();
   }
 
   // Sort by mtime. Older cache entry comes first for GC.
@@ -606,7 +608,7 @@ bool LocalOutputCache::Lookup(const string& key, ExecResp* resp,
   UpdateCacheEntry(key_hash);
 
   // Create dummy ExecResp from LocalOutputCacheEntry.
-  resp->set_cache_hit(ExecResp::MEM_CACHE);  // TODO: Make LOCAL_CACHE.
+  resp->set_cache_hit(ExecResp::LOCAL_OUTPUT_CACHE);
   ExecResult* result = resp->mutable_result();
   result->set_exit_status(0);
   for (auto&& file : cache_entry.files()) {

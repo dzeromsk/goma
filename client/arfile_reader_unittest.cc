@@ -165,7 +165,7 @@ TEST(ArFileReaderTest, Read) {
     len = 0;
     buf[0] = '\0';
     copied = reader->Read(buf, len);
-    EXPECT_EQ(0U, copied);
+    EXPECT_EQ(0, copied);
     EXPECT_EQ(kDummyValue, reader->read_buffer_);
     EXPECT_EQ('\0', buf[0]);
   }

@@ -101,14 +101,13 @@ ScopedSocket SocketPool::NewSocket() {
                 << ", socket pool size: " << socket_pool_.size();
         socket_pool_.pop_front();
         break;
-      } else {
-        const int fd = socket_pool_.front().first;
-        VLOG(1) << "Expiring too old socket: " << fd
-                << ", socket pool size: " << socket_pool_.size();
-        close_sockets.push_back(fd);
-        fd_addrs_.erase(fd);
-        socket_pool_.pop_front();
       }
+      const int fd = socket_pool_.front().first;
+      VLOG(1) << "Expiring too old socket: " << fd
+              << ", socket pool size: " << socket_pool_.size();
+      close_sockets.push_back(fd);
+      fd_addrs_.erase(fd);
+      socket_pool_.pop_front();
     }
   }
   for (const auto& fd : close_sockets) {
@@ -224,14 +223,6 @@ void SocketPool::CloseSocket(ScopedSocket&& sock, bool err) {
   sock.Close();
   SetErrorTimestampUnlocked(sock_fd, (err ? time(nullptr) : 0));
   fd_addrs_.erase(sock_fd);
-}
-
-void SocketPool::ClearErrors() {
-  LOG(INFO) << "Clear all errors associated to addresses.";
-  AUTOLOCK(lock, &mu_);
-  for (auto& addr : addrs_) {
-    addr.error_timestamp = 0;
-  }
 }
 
 void SocketPool::SetErrorTimestampUnlocked(int sock, time_t t) {

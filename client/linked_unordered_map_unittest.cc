@@ -11,6 +11,7 @@
 #include <glog/stl_logging.h>
 #include <gtest/gtest.h>
 
+#include "absl/memory/memory.h"
 #include "goma_hash.h"
 #include "sha256hash_hasher.h"
 
@@ -69,8 +70,8 @@ TEST(LinkedUnorderedMap, Basic) {
 
 TEST(LinkedUnorderedMap, NonCopyableType) {
   LinkedUnorderedMap<int, std::unique_ptr<int>> m;
-  m.emplace_back(1, std::unique_ptr<int>(new int(100)));
-  m.emplace_back(2, std::unique_ptr<int>(new int(200)));
+  m.emplace_back(1, absl::make_unique<int>(100));
+  m.emplace_back(2, absl::make_unique<int>(200));
 
   EXPECT_EQ(m.size(), 2U);
   EXPECT_EQ(100, *m.find(1)->second);
@@ -86,9 +87,9 @@ TEST(LinkedUnorderedMap, NonCopyableType) {
 TEST(LinkedUnorderedMap, MoveToBack) {
   // Intentionally use move-only type in value to prove it works.
   LinkedUnorderedMap<int, std::unique_ptr<int>> m;
-  m.emplace_back(1, std::unique_ptr<int>(new int(100)));
-  m.emplace_back(2, std::unique_ptr<int>(new int(200)));
-  m.emplace_back(3, std::unique_ptr<int>(new int(300)));
+  m.emplace_back(1, absl::make_unique<int>(100));
+  m.emplace_back(2, absl::make_unique<int>(200));
+  m.emplace_back(3, absl::make_unique<int>(300));
 
   {
     auto it = m.find(2);

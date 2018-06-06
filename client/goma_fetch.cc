@@ -15,6 +15,7 @@
 #include "callback.h"
 #include "compiler_specific.h"
 #include "env_flags.h"
+#include "glog/logging.h"
 #include "goma_init.h"
 #include "http.h"
 #include "http_init.h"

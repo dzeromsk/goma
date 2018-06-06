@@ -15,6 +15,8 @@
 #include <locale>
 
 
+#include "absl/container/inlined_vector.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "glog/logging.h"
@@ -30,10 +32,6 @@ void trim(string* s) {
   s->erase(std::find_if(s->rbegin(), s->rend(),
                         std::not1(std::ptr_fun<int, int>(std::isspace))).base(),
                         s->end());
-}
-
-bool IsSeparator(char c, const string& sep_chars) {
-  return sep_chars.find(c) != string::npos;
 }
 
 // Get the separator position where the UNC/drive letters end and the path
@@ -147,10 +145,10 @@ void PathResolver::PlatformConvertToString(
   }
 
   if (case_type == PathResolver::kLowerCase)
-    std::transform(OUTPUT->begin(), OUTPUT->end(), OUTPUT->begin(), ::tolower);
+    absl::AsciiStrToLower(OUTPUT);
 }
 
-string PathResolver::ResolvePath(const string& path) {
+string PathResolver::ResolvePath(absl::string_view path) {
 #ifndef _WIN32
   return PathResolver::ResolvePath(path, kPosixPathSep);
 #else
@@ -161,20 +159,27 @@ string PathResolver::ResolvePath(const string& path) {
 // TODO: This does similar path conversion to PlatformConvert inline.
 // Probably we should also (or rather) improve the method too.
 /* static */
-string PathResolver::ResolvePath(
-    const string& path, PathSeparatorType sep_type) {
+string PathResolver::ResolvePath(absl::string_view path,
+                                 PathSeparatorType sep_type) {
   // Note: Windows PathCanonicalize() API has different behavior than
   //       what's expected, so we'll do a lot of due dilligence here.
   absl::string_view buf(path);
+  absl::InlinedVector<char, 1024> ibuf;
+
+  if (sep_type == kWin32PathSep && path.find('/') != string::npos) {
+    // Normalize path separator.
+    ibuf.assign(path.begin(), path.end());
+    std::replace(ibuf.begin(), ibuf.end(), '/', '\\');
+    buf = absl::string_view(ibuf.begin(), ibuf.size());
+  }
+
   string resolved_path;
   resolved_path.reserve(path.size());
 
-  string sep_chars;
+  char sep_char = '/';
   if (sep_type == kPosixPathSep) {
-    sep_chars = "/";
   } else if (sep_type == kWin32PathSep) {
-    sep_chars = "\\/";
-
+    sep_char = '\\';
     // Split UNC paths and drive letter.
     string::size_type drive_position = GetDrivePrefixPosition(buf);
     resolved_path.append(buf.begin(), drive_position);
@@ -184,16 +189,15 @@ string PathResolver::ResolvePath(
     buf = absl::ClippedSubstr(buf, drive_position);
   } else {
     LOG(ERROR) << "Unknown sep_type=" << sep_type;
-    return path;
+    return string(path);
   }
 
   size_t found = 0;
-  bool is_absolute = IsSeparator(buf[0], sep_chars);
-  std::vector<absl::string_view> components;
-  components.reserve(32);
+  bool is_absolute = buf[0] == sep_char;
+  absl::InlinedVector<absl::string_view, 32> components;
 
   do {
-    found = buf.find_first_of(sep_chars);
+    found = buf.find(sep_char);
     absl::string_view component = buf.substr(0, found);
     buf.remove_prefix(found + 1);
     if (component.empty() || component == ".") {

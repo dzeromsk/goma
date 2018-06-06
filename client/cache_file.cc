@@ -6,6 +6,7 @@
 #include "cache_file.h"
 
 #include <fstream>
+#include <utility>
 
 #include "file.h"
 #include "file_helper.h"
@@ -19,8 +20,7 @@ namespace devtools_goma {
 
 using std::string;
 
-CacheFile::CacheFile(const string& filename) : filename_(filename) {
-}
+CacheFile::CacheFile(string filename) : filename_(std::move(filename)) {}
 
 CacheFile::~CacheFile() {}
 

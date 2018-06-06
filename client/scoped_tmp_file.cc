@@ -11,6 +11,7 @@
 
 #include "file.h"
 #include "file_dir.h"
+#include "filesystem.h"
 #include "glog/logging.h"
 #include "mypath.h"
 #include "path.h"
@@ -103,7 +104,7 @@ ScopedTmpDir::~ScopedTmpDir() {
   if (!valid()) {
     return;
   }
-  if (!RecursivelyDelete(dirname_)) {
+  if (!file::RecursivelyDelete(dirname_, file::Defaults()).ok()) {
     LOG(ERROR) << "Failed to delete temporary directory: " << dirname_;
   }
 }

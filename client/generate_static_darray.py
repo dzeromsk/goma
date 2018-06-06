@@ -140,7 +140,7 @@ def PrintKeywordEnumAndArray(keywords, prefix, out, values=None,
     out.write('\n};\n')
 
   if print_keywords:
-    out.write('const char* k%sKeywords[] = {\n  ' % prefix)
+    out.write('const char* const k%sKeywords[] = {\n  ' % prefix)
     out.write(',\n  '.join(('"%s"' % k for k in keywords)))
     out.write('\n};\n')
 

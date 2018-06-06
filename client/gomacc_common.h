@@ -39,8 +39,10 @@ class GomaClient {
     IPC_REJECTED = -2,
   };
 
-  GomaClient(int pid, std::unique_ptr<CompilerFlags> flags, const char** envp,
-             const string& local_compiler_path);
+  GomaClient(int pid,
+             std::unique_ptr<CompilerFlags> flags,
+             const char** envp,
+             string local_compiler_path);
   ~GomaClient();
   void OutputResp();
 

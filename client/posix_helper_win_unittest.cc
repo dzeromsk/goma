@@ -21,6 +21,8 @@ TEST(PosixHelperWin, mkdtemp) {
   DeleteRecursivelyOrDie(to_change);
 }
 
+#if GTEST_HAS_DEATH_TEST
+
 TEST(PosixHelperWin, mkdtemp_insufficient_Xs) {
   const char kTemplate[] = "abc_XXXXX";  // expect at least 6 Xs but 5.
   string original = file::JoinPath(GetGomaTmpDir(), kTemplate);
@@ -38,5 +40,7 @@ TEST(PosixHelperWin, mkdtemp_no_Xs) {
   EXPECT_EQ(original, to_change);
   EXPECT_DEATH(DeleteRecursivelyOrDie(to_change), "");
 }
+
+#endif  // GTEST_HAS_DEATH_TEST
 
 }  // namespace devtools_goma

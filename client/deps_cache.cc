@@ -25,9 +25,9 @@
 #include "content.h"
 #include "directive_filter.h"
 #include "file.h"
+#include "gcc_flags.h"
 #include "goma_hash.h"
 #include "include_cache.h"
-#include "include_processor.h"
 #include "path.h"
 #include "path_resolver.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
@@ -35,6 +35,7 @@ MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_stats.pb.h"
 MSVC_POP_WARNING()
 #include "util.h"
+#include "vc_flags.h"
 
 using std::string;
 
@@ -123,7 +124,7 @@ void DepsCache::Quit() {
 
 void DepsCache::Clear() {
   {
-    AUTOLOCK(lock, &mu_);
+    AUTO_EXCLUSIVE_LOCK(lock, &mu_);
     deps_table_.clear();
   }
   filename_id_table_.Clear();
@@ -139,8 +140,8 @@ bool DepsCache::SetDependencies(const DepsCache::Identifier& identifier,
                                 const std::string& cwd,
                                 const string& input_file,
                                 const std::set<string>& dependencies,
-                                FileIdCache* file_id_cache) {
-  DCHECK(identifier.valid());
+                                FileStatCache* file_stat_cache) {
+  DCHECK(identifier.has_value());
   DCHECK(file::IsAbsolutePath(cwd)) << cwd;
 
   std::vector<DepsHashId> deps_hash_ids;
@@ -161,26 +162,26 @@ bool DepsCache::SetDependencies(const DepsCache::Identifier& identifier,
       break;
     }
 
-    FileId file_id(file_id_cache->Get(abs_filename));
-    if (!file_id.IsValid()) {
+    FileStat file_stat(file_stat_cache->Get(abs_filename));
+    if (!file_stat.IsValid()) {
       all_ok = false;
       LOG(WARNING) << "invalid file id: " << abs_filename;
       break;
     }
 
-    OptionalSHA256HashValue directive_hash =
-        IncludeCache::instance()->GetDirectiveHash(abs_filename, file_id);
-    if (!directive_hash.valid()) {
+    absl::optional<SHA256HashValue> directive_hash =
+        IncludeCache::instance()->GetDirectiveHash(abs_filename, file_stat);
+    if (!directive_hash.has_value()) {
       all_ok = false;
       LOG(WARNING) << "invalid directive hash: " << abs_filename;
       break;
     }
 
-    DCHECK(DepsHashId(id, file_id, directive_hash.value()).IsValid());
-    deps_hash_ids.push_back(DepsHashId(id, file_id, directive_hash.value()));
+    DCHECK(DepsHashId(id, file_stat, directive_hash.value()).IsValid());
+    deps_hash_ids.push_back(DepsHashId(id, file_stat, directive_hash.value()));
   }
 
-  AUTOLOCK(lock, &mu_);
+  AUTO_EXCLUSIVE_LOCK(lock, &mu_);
   if (!all_ok) {
     deps_table_.erase(identifier.value());
     return false;
@@ -195,13 +196,13 @@ bool DepsCache::GetDependencies(const DepsCache::Identifier& identifier,
                                 const std::string& cwd,
                                 const string& input_file,
                                 std::set<string>* dependencies,
-                                FileIdCache* file_id_cache) {
-  DCHECK(identifier.valid());
+                                FileStatCache* file_stat_cache) {
+  DCHECK(identifier.has_value());
   DCHECK(file::IsAbsolutePath(cwd)) << cwd;
 
   std::vector<DepsHashId> deps_hash_ids;
   {
-    AUTOLOCK(lock, &mu_);
+    AUTO_SHARED_LOCK(lock, &mu_);
     auto it = deps_table_.find(identifier.value());
     if (it == deps_table_.end()) {
       IncrMissedCount();
@@ -222,9 +223,8 @@ bool DepsCache::GetDependencies(const DepsCache::Identifier& identifier,
     }
 
     if (IsDirectiveModified(file::JoinPathRespectAbsolute(cwd, filename),
-                            deps_hash_id.file_id,
-                            deps_hash_id.directive_hash,
-                            file_id_cache)) {
+                            deps_hash_id.file_stat, deps_hash_id.directive_hash,
+                            file_stat_cache)) {
       IncrMissedByUpdatedCount();
       return false;
     }
@@ -241,9 +241,9 @@ bool DepsCache::GetDependencies(const DepsCache::Identifier& identifier,
 }
 
 void DepsCache::RemoveDependency(const DepsCache::Identifier& identifier) {
-  DCHECK(identifier.valid());
+  DCHECK(identifier.has_value());
 
-  AUTOLOCK(lock, &mu_);
+  AUTO_EXCLUSIVE_LOCK(lock, &mu_);
   deps_table_.erase(identifier.value());
 }
 
@@ -264,7 +264,7 @@ void DepsCache::IncrHitCount() {
 
 void DepsCache::DumpStatsToProto(DepsCacheStats* stat) const {
   {
-    AUTOLOCK(lock, &mu_);
+    AUTO_SHARED_LOCK(lock, &mu_);
     stat->set_deps_table_size(deps_table_.size());
     size_t max_entries = 0;
     size_t total_entries = 0;
@@ -287,21 +287,21 @@ void DepsCache::DumpStatsToProto(DepsCacheStats* stat) const {
 
 // static
 bool DepsCache::IsDirectiveModified(const string& filename,
-                                    const FileId& old_file_id,
+                                    const FileStat& old_file_stat,
                                     const SHA256HashValue& old_directive_hash,
-                                    FileIdCache* file_id_cache) {
-  FileId file_id(file_id_cache->Get(filename));
+                                    FileStatCache* file_stat_cache) {
+  FileStat file_stat(file_stat_cache->Get(filename));
 
-  if (!file_id.IsValid()) {
+  if (!file_stat.IsValid()) {
     // When file doesn't exist, let's consider a directive is changed.
     return true;
   }
-  if (file_id == old_file_id)
+  if (file_stat == old_file_stat)
     return false;
 
-  OptionalSHA256HashValue directive_hash =
-      IncludeCache::instance()->GetDirectiveHash(filename, file_id);
-  if (!directive_hash.valid()) {
+  absl::optional<SHA256HashValue> directive_hash =
+      IncludeCache::instance()->GetDirectiveHash(filename, file_stat);
+  if (!directive_hash.has_value()) {
     // The file couldn't be read or the file is removed during the build.
     LOG(ERROR) << "couldn't read a file in deps: " << filename;
     return true;
@@ -311,6 +311,35 @@ bool DepsCache::IsDirectiveModified(const string& filename,
   }
 
   return true;
+}
+
+bool DepsCache::UpdateLastUsedTime(const Identifier& identifier,
+                                   time_t last_used_time) {
+  AUTO_SHARED_LOCK(lock, &mu_);
+  auto it = deps_table_.find(identifier.value());
+  if (it == deps_table_.end())
+    return false;
+
+  it->second.last_used_time = last_used_time;
+  return true;
+}
+
+bool DepsCache::GetDepsHashId(const Identifier& identifier,
+                              const FilenameIdTable::Id& id,
+                              DepsHashId* deps_hash_id) const {
+  AUTO_SHARED_LOCK(lock, &mu_);
+  auto it = deps_table_.find(identifier.value());
+  if (it == deps_table_.end())
+    return false;
+
+  for (const auto& dhi : it->second.deps_hash_ids) {
+    if (dhi.id == id) {
+      *deps_hash_id = dhi;
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool DepsCache::LoadGomaDeps() {
@@ -348,11 +377,11 @@ bool DepsCache::LoadGomaDeps() {
   }
 
   // Load DepsIdTable
-  std::unordered_map<FilenameIdTable::Id,
-                     std::pair<FileId, string>> deps_hash_id_map;
+  std::unordered_map<FilenameIdTable::Id, std::pair<FileStat, string>>
+      deps_hash_id_map;
   {
     const GomaDepsIdTable& table = goma_deps.deps_id_table();
-    UnorderedMapReserve(table.record_size(), &deps_hash_id_map);
+    deps_hash_id_map.reserve(table.record_size());
     for (const auto& record : table.record()) {
       if (!valid_ids.count(record.filename_id())) {
         LOG(ERROR) << "DepsIdTable contains unexpected filename_id: "
@@ -368,25 +397,22 @@ bool DepsCache::LoadGomaDeps() {
         return false;
       }
 
-      FileId file_id;
-#ifndef _WIN32
-      file_id.dev = record.dev();
-      file_id.inode = record.inode();
-#endif
-      file_id.mtime = record.mtime();
-      file_id.size = record.size();
+      FileStat file_stat;
+      file_stat.mtime = record.mtime();
+      file_stat.size = record.size();
 
       deps_hash_id_map[record.filename_id()] =
-          std::make_pair(file_id, record.directive_hash());
+          std::make_pair(file_stat, record.directive_hash());
     }
   }
 
   LOG(INFO) << "Loading DepsTable OK.";
 
   // Load Dependencies
+  AUTO_EXCLUSIVE_LOCK(lock, &mu_);
   {
     const GomaDependencyTable& table = goma_deps.dependency_table();
-    UnorderedMapReserve(table.record_size(), &deps_table_);
+    deps_table_.reserve(table.record_size());
     for (const auto& record : table.record()) {
       if (identifier_alive_duration_ >= 0 &&
           record.last_used_time() < time_threshold) {
@@ -441,9 +467,7 @@ bool DepsCache::LoadGomaDeps() {
 }
 
 bool DepsCache::SaveGomaDeps() {
-  // We don't take lock here since this should be called from Quit() only.
-  // It should be single-threaded.
-
+  AUTO_SHARED_LOCK(lock, &mu_);
   const time_t time_threshold = time(nullptr) - identifier_alive_duration_;
 
   GomaDeps goma_deps;
@@ -470,8 +494,7 @@ bool DepsCache::SaveGomaDeps() {
     std::vector<std::pair<time_t, Key>> keys_by_time;
     keys_by_time.reserve(deps_table_.size());
     for (const auto& entry : deps_table_) {
-      keys_by_time.push_back(
-          std::make_pair(entry.second.last_used_time, entry.first));
+      keys_by_time.emplace_back(entry.second.last_used_time, entry.first);
     }
     std::sort(keys_by_time.begin(), keys_by_time.end(),
          std::greater<std::pair<time_t, Key>>());
@@ -481,16 +504,17 @@ bool DepsCache::SaveGomaDeps() {
   }
 
   // We create a map:
-  //   FilenameIdTable::Id -> pair<FileId, directive-hash>.
+  //   FilenameIdTable::Id -> pair<FileStat, directive-hash>.
   // When we saw multiple DepsHashId for one FilenameIdTable::Id,
   // we choose the one whose mtime is the latest.
-  std::unordered_map<FilenameIdTable::Id, std::pair<FileId, SHA256HashValue>> m;
+  std::unordered_map<FilenameIdTable::Id, std::pair<FileStat, SHA256HashValue>>
+      m;
   for (const auto& deps_table_entry : deps_table_) {
     for (const auto& deps_hash_id : deps_table_entry.second.deps_hash_ids) {
       FilenameIdTable::Id id = deps_hash_id.id;
-      if (!m.count(id) || m[id].first.mtime < deps_hash_id.file_id.mtime) {
-        m[id] = std::make_pair(deps_hash_id.file_id,
-                               deps_hash_id.directive_hash);
+      if (!m.count(id) || m[id].first.mtime < deps_hash_id.file_stat.mtime) {
+        m[id] =
+            std::make_pair(deps_hash_id.file_stat, deps_hash_id.directive_hash);
       }
     }
   }
@@ -534,10 +558,6 @@ bool DepsCache::SaveGomaDeps() {
         continue;
       GomaDepsIdTableRecord* record = table->add_record();
       record->set_filename_id(entry.first);
-#ifndef _WIN32
-      record->set_dev(entry.second.first.dev);
-      record->set_inode(entry.second.first.inode);
-#endif
       record->set_mtime(entry.second.first.mtime);
       record->set_size(entry.second.first.size);
       record->set_directive_hash(entry.second.second.ToHexString());
@@ -569,7 +589,7 @@ DepsCache::Identifier DepsCache::MakeDepsIdentifier(
   ss << ":compiler_path=" << compiler_info.real_compiler_path();
 
   // Some buildbot always copies nacl-gcc compiler to target directory.
-  // In that case, FileId is different per build. So, we'd like to use
+  // In that case, FileStat is different per build. So, we'd like to use
   // compiler hash.
   ss << ":compiler_hash=" << compiler_info.real_compiler_hash();
 
@@ -594,10 +614,10 @@ DepsCache::Identifier DepsCache::MakeDepsIdentifier(
   }
   ss << ":predefined_macros=" << compiler_info.predefined_macros();
 
-  if (compiler_flags.is_gcc()) {
+  if (compiler_flags.type() == CompilerType::Gcc) {
     const GCCFlags& flags = static_cast<const GCCFlags&>(compiler_flags);
     AppendCompilerFlagsInfo(flags, &ss);
-  } else if (compiler_flags.is_vc()) {
+  } else if (compiler_flags.type() == CompilerType::Clexe) {
     const VCFlags& flags = static_cast<const VCFlags&>(compiler_flags);
     AppendCompilerFlagsInfo(flags, &ss);
   } else {

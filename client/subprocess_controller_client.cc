@@ -16,8 +16,10 @@
 
 #include <memory>
 #include <sstream>
+#include <utility>
 #include <vector>
 
+#include "absl/base/call_once.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
@@ -45,18 +47,10 @@ namespace {
 Lock* g_mu;
 SubProcessControllerClient* g_client_instance GUARDED_BY(*g_mu);
 
-#ifndef _WIN32
-pthread_once_t g_init_once = PTHREAD_ONCE_INIT;
-void InitializePthreadOnce() {
+absl::once_flag g_init_once;
+void InitializeOnce() {
   g_mu = new Lock();
 }
-#else
-INIT_ONCE g_init_once = INIT_ONCE_STATIC_INIT;
-BOOL WINAPI InitializeWinOnce(PINIT_ONCE, PVOID, PVOID*) {
-  g_mu = new Lock();
-  return TRUE;
-}
-#endif  // _WIN32
 
 }  // anonymous namespace
 
@@ -65,11 +59,7 @@ SubProcessControllerClient* SubProcessControllerClient::Create(
     int fd, pid_t pid, const Options& options) {
   // Must be called before starting threads.
 
-#ifndef _WIN32
-  pthread_once(&g_init_once, InitializePthreadOnce);
-#else
-  InitOnceExecuteOnce(&g_init_once, InitializeWinOnce, nullptr, nullptr);
-#endif  // _WIN32
+  absl::call_once(g_init_once, InitializeOnce);
 
   AUTOLOCK(lock, g_mu);
 
@@ -103,18 +93,17 @@ void SubProcessControllerClient::Initialize(
 
 SubProcessControllerClient::SubProcessControllerClient(int fd,
                                                        pid_t pid,
-                                                       const Options& options)
+                                                       Options options)
     : wm_(nullptr),
       thread_id_(0),
       d_(nullptr),
       fd_(fd),
       server_pid_(pid),
       next_id_(0),
-      current_options_(options),
+      current_options_(std::move(options)),
       periodic_closure_id_(kInvalidPeriodicClosureId),
       quit_(false),
-      initialized_(false) {
-}
+      initialized_(false) {}
 
 SubProcessControllerClient::~SubProcessControllerClient() {
   CHECK(quit_);

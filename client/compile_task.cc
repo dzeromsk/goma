@@ -18,14 +18,20 @@
 #include <memory>
 #include <sstream>
 #include <unordered_map>
+#include <utility>
 
 #include <google/protobuf/text_format.h>
 #include <json/json.h>
 
+#include "absl/base/call_once.h"
+#include "absl/memory/memory.h"
 #include "absl/strings/match.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
 #include "autolock_timer.h"
 #include "callback.h"
+#include "clang_tidy_flags.h"
 #include "compilation_database_reader.h"
 #include "compile_service.h"
 #include "compile_stats.h"
@@ -34,10 +40,14 @@
 #include "compiler_info.h"
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
+#include "cpp_include_processor.h"
 #include "file.h"
 #include "file_dir.h"
 #include "file_hash_cache.h"
 #include "file_helper.h"
+#include "filesystem.h"
+#include "flat_map.h"
+#include "gcc_flags.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "goma_data_util.h"
@@ -46,9 +56,9 @@
 #include "goma_file_http.h"
 #include "http_rpc.h"
 #include "include_file_utils.h"
-#include "include_processor.h"
 #include "ioutil.h"
-#include "jar_parser.h"
+#include "java/jar_parser.h"
+#include "java_flags.h"
 #include "linker_input_processor.h"
 #include "local_output_cache.h"
 #include "lockhelper.h"
@@ -57,15 +67,18 @@
 #include "path.h"
 #include "path_resolver.h"
 #include "path_util.h"
+#include "simple_timer.h"
+#include "subprocess_task.h"
+#include "thinlto_import_processor.h"
+#include "timestamp.h"
+#include "util.h"
+#include "vc_flags.h"
+#include "worker_thread_manager.h"
+
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_data.pb.h"
 #include "prototmp/subprocess.pb.h"
 MSVC_POP_WARNING()
-#include "simple_timer.h"
-#include "subprocess_task.h"
-#include "timestamp.h"
-#include "util.h"
-#include "worker_thread_manager.h"
 
 #ifdef _WIN32
 # include "posix_helper_win.h"
@@ -154,11 +167,7 @@ static void ReleaseMemoryForExecReqInput(ExecReq* req) {
   *req = new_req;
 }
 
-#ifndef _WIN32
-pthread_once_t CompileTask::init_once_ = PTHREAD_ONCE_INIT;
-#else
-INIT_ONCE CompileTask::init_once_ = INIT_ONCE_STATIC_INIT;
-#endif
+absl::once_flag CompileTask::init_once_;
 Lock CompileTask::global_mu_;
 
 std::deque<CompileTask*>* CompileTask::link_file_req_tasks_ = nullptr;
@@ -251,7 +260,7 @@ class CompileTask::InputFileTask {
       WorkerThreadManager* wm,
       std::unique_ptr<FileServiceHttpClient> file_service_client,
       FileHashCache* file_hash_cache,
-      const FileId& file_id,
+      const FileStat& file_stat,
       const string& filename,
       bool missed_content,
       bool linking,
@@ -261,14 +270,8 @@ class CompileTask::InputFileTask {
       ExecReq_Input* input) {
     DCHECK(file::IsAbsolutePath(filename)) << filename;
 
-#ifndef _WIN32
-    pthread_once(&init_once_,
-                 &CompileTask::InputFileTask::InitializeStaticOnce);
-#else
-    InitOnceExecuteOnce(&init_once_,
-                        &CompileTask::InputFileTask::InitializeWinOnce,
-                        nullptr, nullptr);
-#endif
+    absl::call_once(init_once_,
+                    &CompileTask::InputFileTask::InitializeStaticOnce);
 
     InputFileTask* input_file_task = nullptr;
     {
@@ -276,11 +279,9 @@ class CompileTask::InputFileTask {
       std::pair<std::unordered_map<string, InputFileTask*>::iterator, bool> p =
           task_by_filename_->insert(std::make_pair(filename, input_file_task));
       if (p.second) {
-        p.first->second = new InputFileTask(wm, std::move(file_service_client),
-                                            file_hash_cache, file_id,
-                                            filename, missed_content,
-                                            linking, is_new_file,
-                                            old_hash_key);
+        p.first->second = new InputFileTask(
+            wm, std::move(file_service_client), file_hash_cache, file_stat,
+            filename, missed_content, linking, is_new_file, old_hash_key);
       }
       input_file_task = p.first->second;
       DCHECK(input_file_task != nullptr);
@@ -314,7 +315,7 @@ class CompileTask::InputFileTask {
       }
     }
 
-    blob_.reset(new FileBlob);
+    blob_ = absl::make_unique<FileBlob>();
     if (missed_content_) {
       LOG(INFO) << task->trace_id() << " (" << num_tasks() << " tasks)"
                 << " input " << filename_ << " [missed content]";
@@ -341,7 +342,7 @@ class CompileTask::InputFileTask {
                      << " (" << num_tasks() << " tasks)"
                      << " reload:" << filename_
                      << " file changed";
-        blob_.reset(new FileBlob);
+        blob_ = absl::make_unique<FileBlob>();
         success_ = file_service_->CreateFileBlob(
             filename_, true, blob_.get());
         if (success_) {
@@ -382,11 +383,11 @@ class CompileTask::InputFileTask {
         const millitime_t upload_timestamp_ms =
             blob_.get() == nullptr ? GetCurrentTimestampMs() : 0LL;
 
-        if (file_id_.IsValid()) {
-          mtime_ = file_id_.mtime;
+        if (file_stat_.IsValid()) {
+          mtime_ = file_stat_.mtime;
         }
         new_cache_key_ = file_hash_cache_->StoreFileCacheKey(
-            filename_, hash_key_, upload_timestamp_ms, file_id_);
+            filename_, hash_key_, upload_timestamp_ms, file_stat_);
         VLOG(1) << task->trace_id() << " (" << num_tasks() << " tasks)"
                 << " input file ok: " << filename_
                 << (blob_.get() == nullptr ? " upload" : " hash only");
@@ -520,23 +521,23 @@ class CompileTask::InputFileTask {
   InputFileTask(WorkerThreadManager* wm,
                 std::unique_ptr<FileServiceHttpClient> file_service,
                 FileHashCache* file_hash_cache,
-                const FileId& file_id,
-                const string& filename,
+                const FileStat& file_stat,
+                string filename,
                 bool missed_content,
                 bool linking,
                 bool is_new_file,
-                const string& old_hash_key)
+                string old_hash_key)
       : wm_(wm),
         file_service_(std::move(file_service)),
         file_hash_cache_(file_hash_cache),
-        file_id_(file_id),
-        filename_(filename),
+        file_stat_(file_stat),
+        filename_(std::move(filename)),
         state_(INIT),
         missed_content_(missed_content),
         need_hash_only_(linking),  // we need hash key only in linking.
         is_new_file_(is_new_file),
         mtime_(0),
-        old_hash_key_(old_hash_key),
+        old_hash_key_(std::move(old_hash_key)),
         file_size_(0),
         success_(false),
         new_cache_key_(false) {
@@ -551,28 +552,23 @@ class CompileTask::InputFileTask {
     tasks_.insert(std::make_pair(task, input));
   }
 
-#ifdef _WIN32
-  static BOOL WINAPI InitializeWinOnce(PINIT_ONCE, PVOID, PVOID*) {
-    InitializeStaticOnce();
-    return TRUE;
-  }
-#endif
   static void InitializeStaticOnce() {
+    AUTOLOCK(lock, &global_mu_);
     task_by_filename_ = new std::unordered_map<string, InputFileTask*>;
   }
 
   WorkerThreadManager* wm_;
   std::unique_ptr<FileServiceHttpClient> file_service_;
   FileHashCache* file_hash_cache_;
-  const FileId file_id_;
+  const FileStat file_stat_;
 
   const string filename_;
   State state_;
 
-  mutable Lock mu_;  // protects tasks_ and callbacks_.
-  std::map<CompileTask*, ExecReq_Input*> tasks_;
-  std::vector<std::pair<WorkerThreadManager::ThreadId,
-                        OneshotClosure*>> callbacks_;
+  mutable Lock mu_;
+  std::map<CompileTask*, ExecReq_Input*> tasks_ GUARDED_BY(mu_);
+  std::vector<std::pair<WorkerThreadManager::ThreadId, OneshotClosure*>>
+      callbacks_ GUARDED_BY(mu_);
 
   // true if goma servers couldn't find the content, so we must upload it.
   const bool missed_content_;
@@ -603,24 +599,17 @@ class CompileTask::InputFileTask {
   // true if the hash_key_ is first inserted in file hash cache.
   bool new_cache_key_;
 
-#ifndef _WIN32
-  static pthread_once_t init_once_;
-#else
-  static INIT_ONCE init_once_;
-#endif
+  static absl::once_flag init_once_;
 
-  // protects task_by_filename_.
   static Lock global_mu_;
-  static std::unordered_map<string, InputFileTask*>* task_by_filename_;
+  static std::unordered_map<string, InputFileTask*>* task_by_filename_
+      GUARDED_BY(global_mu_);
 
   DISALLOW_COPY_AND_ASSIGN(InputFileTask);
 };
 
-#ifndef _WIN32
-pthread_once_t CompileTask::InputFileTask::init_once_ = PTHREAD_ONCE_INIT;
-#else
-INIT_ONCE CompileTask::InputFileTask::init_once_;
-#endif
+
+absl::once_flag CompileTask::InputFileTask::init_once_;
 Lock CompileTask::InputFileTask::global_mu_;
 
 std::unordered_map<string, CompileTask::InputFileTask*>*
@@ -746,16 +735,16 @@ class CompileTask::LocalOutputFileTask {
   LocalOutputFileTask(WorkerThreadManager* wm,
                       std::unique_ptr<FileServiceClient> file_service,
                       FileHashCache* file_hash_cache,
-                      const FileId& file_id,
+                      const FileStat& file_stat,
                       CompileTask* task,
-                      const string& filename)
+                      string filename)
       : wm_(wm),
         thread_id_(wm_->GetCurrentThreadId()),
         file_service_(std::move(file_service)),
         file_hash_cache_(file_hash_cache),
-        file_id_(file_id),
+        file_stat_(file_stat),
         task_(task),
-        filename_(filename),
+        filename_(std::move(filename)),
         success_(false) {
     timer_.Start();
     task_->StartLocalOutputFileTask();
@@ -773,7 +762,7 @@ class CompileTask::LocalOutputFileTask {
       CHECK(FileServiceClient::IsValidFileBlob(blob_)) << filename_;
       string hash_key = FileServiceClient::ComputeHashKey(blob_);
       bool new_cache_key = file_hash_cache_->StoreFileCacheKey(
-          filename_, hash_key, GetCurrentTimestampMs(), file_id_);
+          filename_, hash_key, GetCurrentTimestampMs(), file_stat_);
       if (new_cache_key) {
         LOG(INFO) << task_->trace_id()
                   << " local output store:" << filename_
@@ -800,7 +789,7 @@ class CompileTask::LocalOutputFileTask {
   WorkerThreadManager::ThreadId thread_id_;
   std::unique_ptr<FileServiceClient> file_service_;
   FileHashCache* file_hash_cache_;
-  const FileId file_id_;
+  const FileStat file_stat_;
   CompileTask* task_;
   const string filename_;
   FileBlob blob_;
@@ -810,15 +799,9 @@ class CompileTask::LocalOutputFileTask {
   DISALLOW_COPY_AND_ASSIGN(LocalOutputFileTask);
 };
 
-#ifdef _WIN32
-BOOL WINAPI CompileTask::InitializeWinOnce(PINIT_ONCE, PVOID, PVOID*) {
-  CompileTask::InitializeStaticOnce();
-  return TRUE;
-}
-#endif
-
 /* static */
 void CompileTask::InitializeStaticOnce() {
+  AUTOLOCK(lock, &global_mu_);
   link_file_req_tasks_ = new std::deque<CompileTask*>;
 }
 
@@ -860,16 +843,11 @@ CompileTask::CompileTask(CompileService* service, int id)
       output_file_success_(false),
       local_output_file_callback_(nullptr),
       num_local_output_file_task_(0),
-      localoutputcache_lookup_succeeded_(false),
       refcnt_(0),
       frozen_timestamp_ms_(0),
       last_req_timestamp_ms_(0) {
   thread_id_ = GetCurrentThreadId();
-#ifndef _WIN32
-  pthread_once(&init_once_, InitializeStaticOnce);
-#else
-  InitOnceExecuteOnce(&init_once_, InitializeWinOnce, nullptr, nullptr);
-#endif
+  absl::call_once(init_once_, InitializeStaticOnce);
   Ref();
   std::ostringstream ss;
   ss << "Task:" << id_;
@@ -924,8 +902,8 @@ void CompileTask::Start() {
   DCHECK(!BelongsToCurrentThread());
   thread_id_ = GetCurrentThreadId();
 
-  input_file_id_cache_.reset(new FileIdCache);
-  output_file_id_cache_.reset(new FileIdCache);
+  input_file_stat_cache_ = absl::make_unique<FileStatCache>();
+  output_file_stat_cache_ = absl::make_unique<FileStatCache>();
 
   rpc_->NotifyWhenClosed(NewCallback(this, &CompileTask::GomaccClosed));
 
@@ -1043,13 +1021,15 @@ void CompileTask::Start() {
     service_->RecordForcedFallbackInSetup(CompileService::kRequestedByUser);
     // we run both local and goma backend.
     return;
-  } else if (should_fallback_) {
+  }
+  if (should_fallback_) {
     VLOG(1) << trace_id_ << " should fallback";
     SetupSubProcess();
     RunSubProcess("should fallback");
     // we don't call goma rpc.
     return;
-  } else if ((rand() % 100) >= ramp_up) {
+  }
+  if ((rand() % 100) >= ramp_up) {
     LOG(WARNING) << trace_id_ << " http disabled "
                  << " ramp_up=" << ramp_up;
     should_fallback_ = true;
@@ -1058,7 +1038,8 @@ void CompileTask::Start() {
     RunSubProcess("http disabled");
     // we don't call goma rpc.
     return;
-  } else if (precompiling_ && service_->enable_gch_hack()) {
+  }
+  if (precompiling_ && service_->enable_gch_hack()) {
     VLOG(1) << trace_id_ << " gch hack";
     SetupSubProcess();
     RunSubProcess("gch hack");
@@ -1190,8 +1171,8 @@ void CompileTask::ProcessSetup() {
 void CompileTask::TryProcessFileRequest() {
   file_request_timer_.Start();
   if (linking_) {
-    DCHECK(link_file_req_tasks_ != nullptr);
     AUTOLOCK(lock, &global_mu_);
+    DCHECK(link_file_req_tasks_ != nullptr);
     link_file_req_tasks_->push_back(this);
     if (link_file_req_tasks_->front() != this) {
       VLOG(1) << trace_id_ << " pending file req "
@@ -1284,12 +1265,12 @@ void CompileTask::ProcessFileRequest() {
     // the timestamp of file upload and execution to identify this condition.
     // If upload time is later than execution time (last_req_timestamp_ms_),
     // we can assume the file is uploaded by others.
-    const FileId& input_file_id = input_file_id_cache_->Get(abs_filename);
-    if (input_file_id.IsValid()) {
-      mtime = input_file_id.mtime;
+    const FileStat& input_file_stat = input_file_stat_cache_->Get(abs_filename);
+    if (input_file_stat.IsValid()) {
+      mtime = input_file_stat.mtime;
     }
     hash_key_is_ok = service_->file_hash_cache()->GetFileCacheKey(
-        abs_filename, missed_timestamp, input_file_id, &hash_key);
+        abs_filename, missed_timestamp, input_file_stat, &hash_key);
     if (missed_content) {
       if (hash_key_is_ok) {
         VLOG(2) << trace_id_ << " interleave uploaded: "
@@ -1328,16 +1309,13 @@ void CompileTask::ProcessFileRequest() {
     if (service_->need_to_send_content())
       is_new_file = true;
 
-    InputFileTask* input_file_task =
-        InputFileTask::NewInputFileTask(
-            service_->wm(),
-            service_->file_service()->WithRequesterInfoAndTraceId(
-                requester_info_, trace_id_),
-            service_->file_hash_cache(),
-            input_file_id_cache_->Get(abs_filename),
-            abs_filename, missed_content,
-            linking_, is_new_file, hash_key,
-            this, input);
+    InputFileTask* input_file_task = InputFileTask::NewInputFileTask(
+        service_->wm(),
+        service_->file_service()->WithRequesterInfoAndTraceId(requester_info_,
+                                                              trace_id_),
+        service_->file_hash_cache(), input_file_stat_cache_->Get(abs_filename),
+        abs_filename, missed_content, linking_, is_new_file, hash_key, this,
+        input);
     closures.push_back(
         NewCallback(
             input_file_task,
@@ -1439,8 +1417,8 @@ void CompileTask::ProcessFileRequestDone() {
                                              resp_.get(),
                                              trace_id_)) {
       LOG(INFO) << trace_id_ << " lookup succeeded";
-      localoutputcache_lookup_succeeded_ = true;
-
+      stats_->set_cache_hit(true);
+      stats_->set_cache_source(ExecLog::LOCAL_OUTPUT_CACHE);
       ReleaseMemoryForExecReqInput(req_.get());
       state_ = LOCAL_OUTPUT;
       ProcessFileResponse();
@@ -1455,10 +1433,10 @@ void CompileTask::ProcessPendingFileRequest() {
   if (!linking_)
     return;
 
-  DCHECK_EQ(this, link_file_req_tasks_->front());
   CompileTask* pending_task = nullptr;
   {
     AUTOLOCK(lock, &global_mu_);
+    DCHECK_EQ(this, link_file_req_tasks_->front());
     link_file_req_tasks_->pop_front();
     if (!link_file_req_tasks_->empty()) {
       pending_task = link_file_req_tasks_->front();
@@ -1498,13 +1476,13 @@ void CompileTask::ProcessCallExec() {
           << " request string to send:" << req_->DebugString();
   {
     AUTOLOCK(lock, &mu_);
-    http_rpc_status_.reset(new HttpRPC::Status());
+    http_rpc_status_ = absl::make_unique<HttpRPC::Status>();
     http_rpc_status_->trace_id = trace_id_;
     copy(service_->timeout_secs().begin(), service_->timeout_secs().end(),
          back_inserter(http_rpc_status_->timeout_secs));
   }
 
-  exec_resp_.reset(new ExecResp);
+  exec_resp_ = absl::make_unique<ExecResp>();
   service_->exec_service_client()->ExecAsync(
       req_.get(), exec_resp_.get(), http_rpc_status_.get(),
       NewCallback(this, &CompileTask::ProcessCallExecDone));
@@ -1557,10 +1535,9 @@ void CompileTask::ProcessCallExecDone() {
   stats_->add_rpc_master_trace_id(http_rpc_status_->master_trace_id);
 
 
-  stats_->set_cache_hit(
-    http_rpc_status_->finished &&
-    resp_->has_cache_hit() &&
-    resp_->cache_hit() != ExecResp::NO_CACHE);
+  stats_->set_cache_hit(resp_->cache_hit() == ExecResp::LOCAL_OUTPUT_CACHE ||
+                        (http_rpc_status_->finished && resp_->has_cache_hit() &&
+                         resp_->cache_hit() != ExecResp::NO_CACHE));
 
   if (stats_->cache_hit()) {
     if (!resp_->has_cache_hit()) {
@@ -1576,6 +1553,9 @@ void CompileTask::ProcessCallExecDone() {
           break;
         case ExecResp::STORAGE_CACHE:
           stats_->set_cache_source(ExecLog::STORAGE_CACHE);
+          break;
+        case ExecResp::LOCAL_OUTPUT_CACHE:
+          stats_->set_cache_source(ExecLog::LOCAL_OUTPUT_CACHE);
           break;
         default:
           LOG(ERROR) << trace_id_ << " unknown cache_source="
@@ -1685,9 +1665,10 @@ void CompileTask::ProcessCallExecDone() {
             NewCallback(this, &CompileTask::ProcessCallExec),
             WorkerThreadManager::PRIORITY_LOW);
         return;
-      } else if (service_->should_fail_for_unsupported_compiler_flag() &&
-                 resp_->bad_request_reason_code() ==
-                     ExecResp::UNSUPPORTED_COMPILER_FLAGS) {
+      }
+      if (service_->should_fail_for_unsupported_compiler_flag() &&
+          resp_->bad_request_reason_code() ==
+              ExecResp::UNSUPPORTED_COMPILER_FLAGS) {
         // TODO: Make a simple test for this after goma server has
         // started returning bad request reason code.
         string msg = "compile request was rejected by goma server. "
@@ -1992,9 +1973,8 @@ void CompileTask::ProcessFileResponseDone() {
         resp_->clear_error_message();
         TryProcessFileRequest();
         return;
-      } else {
-        AddErrorToResponse(TO_LOG, no_retry_reason.str(), true);
       }
+      AddErrorToResponse(TO_LOG, no_retry_reason.str(), true);
     }
     VLOG(2) << trace_id_
             << " Failed to process file response (second time):"
@@ -2165,7 +2145,7 @@ void CompileTask::ProcessReply() {
       msg = "goma success, but local used";
     } else {
       CommitOutput(true);
-      if (localoutputcache_lookup_succeeded_) {
+      if (local_cache_hit()) {
         msg = "goma success (local cache hit)";
       } else if (cache_hit()) {
         msg = "goma success (cache hit)";
@@ -2175,9 +2155,7 @@ void CompileTask::ProcessReply() {
     }
 
     if (LocalOutputCache::IsEnabled()) {
-      if (!localoutputcache_lookup_succeeded_ &&
-          !local_output_cache_key_.empty() &&
-          success()) {
+      if (!local_cache_hit() && !local_output_cache_key_.empty() && success()) {
         // Here, local or remote output has been performed,
         // and output cache key exists.
         // Note: we need to save output before ReplyResponse. Otherwise,
@@ -2499,7 +2477,8 @@ void CompileTask::CommitOutput(bool use_remote) {
     // According to our measurement, this doesn't have
     // measureable performance penalty.
     // see b/24388745
-    if (use_remote && stats_->cache_hit() && flags_->is_vc()) {
+    if (use_remote && stats_->cache_hit() &&
+        flags_->type() == CompilerType::Clexe) {
       // We should not rewrite coff if /Brepro or something similar is set.
       // See b/72768585
       const VCFlags& vc_flag = static_cast<const VCFlags&>(*flags_);
@@ -2513,7 +2492,7 @@ void CompileTask::CommitOutput(bool use_remote) {
     // is valid.  It would be used in link phase.
     service_->file_hash_cache()->StoreFileCacheKey(
         filename, hash_key, GetCurrentTimestampMs(),
-        output_file_id_cache_->Get(filename));
+        output_file_stat_cache_->Get(filename));
     VLOG(1) << trace_id_ << " "
             << tmp_filename << " -> " << filename
             << " " << hash_key;
@@ -2527,11 +2506,11 @@ void CompileTask::CommitOutput(bool use_remote) {
     absl::string_view output_base = file::Basename(info.filename);
     output_bases.push_back(string(output_base));
     absl::string_view ext = file::Extension(output_base);
-    if (flags_->is_gcc() && ext == "o") {
+    if (flags_->type() == CompilerType::Gcc && ext == "o") {
       has_obj = true;
-    } else if (flags_->is_vc() && ext == "obj") {
+    } else if (flags_->type() == CompilerType::Clexe && ext == "obj") {
       has_obj = true;
-    } else if (flags_->is_javac() && ext == "class") {
+    } else if (flags_->type() == CompilerType::Javac && ext == "class") {
       has_obj = true;
     }
 
@@ -2665,10 +2644,9 @@ void CompileTask::ProcessLocalFileOutput() {
     if (!absl::EndsWith(filename, ".o"))
       continue;
     string hash_key;
-    const FileId& output_file_id = output_file_id_cache_->Get(filename);
-    bool found_in_cache =
-        service_->file_hash_cache()->GetFileCacheKey(
-            filename, 0ULL, output_file_id, &hash_key);
+    const FileStat& output_file_stat = output_file_stat_cache_->Get(filename);
+    bool found_in_cache = service_->file_hash_cache()->GetFileCacheKey(
+        filename, 0ULL, output_file_stat, &hash_key);
     if (found_in_cache) {
       VLOG(1) << "file:" << filename << " already on cache: " << hash_key;
       continue;
@@ -2679,8 +2657,8 @@ void CompileTask::ProcessLocalFileOutput() {
             service_->wm(),
             service_->file_service()->WithRequesterInfoAndTraceId(
                 requester_info_, trace_id_),
-            service_->file_hash_cache(),
-            output_file_id_cache_->Get(filename), this, filename));
+            service_->file_hash_cache(), output_file_stat_cache_->Get(filename),
+            this, filename));
 
     LocalOutputFileTask* local_output_file_task_pointer =
         local_output_file_task.get();
@@ -2745,7 +2723,7 @@ void CompileTask::Done() {
 
   // If compile failed, delete deps cache entry here.
   if (DepsCache::IsEnabled()) {
-    if ((failed() || fail_fallback_) && deps_identifier_.valid()) {
+    if ((failed() || fail_fallback_) && deps_identifier_.has_value()) {
       DepsCache::instance()->RemoveDependency(deps_identifier_);
       LOG(INFO) << trace_id_ << " remove deps cache entry.";
     }
@@ -2777,7 +2755,7 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
   if (gomacc_pid_ != SubProcessState::kInvalidPid)
     (*root)["pid"] = gomacc_pid_;
   if (!flag_dump_.empty()) (*root)["flag"] = flag_dump_;
-  if (localoutputcache_lookup_succeeded_) {
+  if (local_cache_hit()) {
     (*root)["cache"] = "local hit";
   } else if (stats_->cache_hit()) {
     (*root)["cache"] = "hit";
@@ -2958,6 +2936,8 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
       (*root)["local_run_reason"] =
           stats_->local_run_reason();
     }
+    if (stats_->local_delay_time() > 0)
+      (*root)["local_delay_ms"] = stats_->local_delay_time();
     if (stats_->local_pending_time() > 0)
       (*root)["local_pending_ms"] = stats_->local_pending_time();
     if (stats_->local_run_time() > 0)
@@ -3134,28 +3114,31 @@ bool CompileTask::IsLocalCompilerPathValid(
 // static
 void CompileTask::RemoveDuplicateFiles(const std::string& cwd,
                                        std::set<std::string>* filenames) {
-  std::map<std::string, std::string> path_map;
+  FlatMap<std::string, std::string> path_map;
+  path_map.reserve(filenames->size());
+
   std::set<std::string> unique_files;
   for (const auto& filename : *filenames) {
-    const std::string& abs_filename = file::JoinPathRespectAbsolute(
-        cwd, filename);
-    auto it = path_map.find(abs_filename);
-    if (it == path_map.end()) {
-      path_map.emplace(abs_filename, filename);
+    std::string abs_filename = file::JoinPathRespectAbsolute(cwd, filename);
+    auto p = path_map.emplace(std::move(abs_filename), filename);
+    if (p.second) {
       unique_files.insert(filename);
       continue;
     }
 
     // If there is already registered filename, compare and take shorter one.
-    // If lenght is same, take lexicographically smaller one.
-    if (std::make_pair(filename.size(), filename) <
-        std::make_pair(it->second.size(), it->second)) {
-      unique_files.erase(it->second);
+    // If length is same, take lexicographically smaller one.
+    const std::string& existing_filename = p.first->second;
+    if (filename.size() < existing_filename.size() ||
+        (filename.size() == existing_filename.size() &&
+         filename < existing_filename)) {
+      unique_files.erase(existing_filename);
       unique_files.insert(filename);
-      it->second = filename;
+      p.first->second = filename;
     }
   }
-  filenames->swap(unique_files);
+
+  *filenames = std::move(unique_files);
 }
 
 void CompileTask::InitCompilerFlags() {
@@ -3167,13 +3150,13 @@ void CompileTask::InitCompilerFlags() {
     return;
   }
   flag_dump_ = flags_->DebugString();
-  if (flags_->is_gcc()) {
+  if (flags_->type() == CompilerType::Gcc) {
     const GCCFlags& gcc_flag = static_cast<const GCCFlags&>(*flags_);
     linking_ = (gcc_flag.mode() == GCCFlags::LINK);
     precompiling_ = gcc_flag.is_precompiling_header();
-  } else if (flags_->is_vc()) {
+  } else if (flags_->type() == CompilerType::Clexe) {
     // TODO: check linking_ etc.
-  } else if (flags_->is_clang_tidy()) {
+  } else if (flags_->type() == CompilerType::ClangTidy) {
     // Sets the actual gcc_flags for clang_tidy_flags here.
     ClangTidyFlags& clang_tidy_flags = static_cast<ClangTidyFlags&>(*flags_);
     if (clang_tidy_flags.input_filenames().size() != 1) {
@@ -3292,7 +3275,7 @@ bool CompileTask::ShouldFallback() const {
               << " force fallback. no input files give.";
     return true;
   }
-  if (flags_->is_gcc()) {
+  if (flags_->type() == CompilerType::Gcc) {
     const GCCFlags& gcc_flag = static_cast<const GCCFlags&>(*flags_);
     if (gcc_flag.is_stdin_input()) {
       service_->RecordForcedFallbackInSetup(
@@ -3338,7 +3321,7 @@ bool CompileTask::ShouldFallback() const {
                 << " force fallback. assembler should be light-weight.";
       return true;
     }
-  } else if (flags_->is_vc()) {
+  } else if (flags_->type() == CompilerType::Clexe) {
     const VCFlags& vc_flag = static_cast<const VCFlags&>(*flags_);
     // GOMA doesn't work with PCH so we generate it only for local builds.
     if (!vc_flag.creating_pch().empty()) {
@@ -3355,7 +3338,7 @@ bool CompileTask::ShouldFallback() const {
                 << " force fallback. cannot run mspdbserv in goma backend.";
       return true;
     }
-  } else if (flags_->is_javac()) {
+  } else if (flags_->type() == CompilerType::Javac) {
     const JavacFlags& javac_flag = static_cast<const JavacFlags&>(*flags_);
     // TODO: remove following code when goma backend get ready.
     // Force fallback a compile request with -processor (b/38215808)
@@ -3367,7 +3350,7 @@ bool CompileTask::ShouldFallback() const {
                 << " goma backend (b/38215808)";
       return true;
     }
-  } else if (flags_->is_java()) {
+  } else if (flags_->type() == CompilerType::Java) {
     LOG(INFO) << trace_id_
               << " force fallback to avoid running java program in"
               << " goma backend";
@@ -3476,7 +3459,7 @@ void CompileTask::FillCompilerInfo() {
 #ifdef _WIN32
   if (!pathext_.empty())
     run_envs.push_back("PATHEXT=" + pathext_);
-  if (flags_->is_vc()) {
+  if (flags_->type() == CompilerType::Clexe) {
     run_envs.push_back("TMP=" + service_->tmp_dir());
     run_envs.push_back("TEMP=" + service_->tmp_dir());
   }
@@ -3588,8 +3571,18 @@ void CompileTask::UpdateRequiredFiles() {
   CHECK_EQ(SETUP, state_);
   include_timer_.Start();
   include_wait_timer_.Start();
-  if (flags_->is_gcc()) {
+  if (flags_->type() == CompilerType::Gcc) {
     const GCCFlags& gcc_flag = static_cast<const GCCFlags&>(*flags_);
+    if (gcc_flag.lang() == "ir") {
+      if (gcc_flag.thinlto_index().empty()) {
+        // No need to read .imports file.
+        UpdateRequiredFilesDone(true);
+        return;
+      }
+      // ThinLTO backend phase.
+      GetThinLTOImports();
+      return;
+    }
     if (gcc_flag.mode() != GCCFlags::LINK) {
       CHECK(!linking_);
       GetIncludeFiles();
@@ -3609,18 +3602,18 @@ void CompileTask::UpdateRequiredFiles() {
     return;
   }
 
-  if (flags_->is_vc()) {
+  if (flags_->type() == CompilerType::Clexe) {
     // TODO: fix for linking_ mode.
     GetIncludeFiles();
     return;
   }
 
-  if (flags_->is_javac()) {
+  if (flags_->type() == CompilerType::Javac) {
     GetJavaRequiredFiles();
     return;
   }
 
-  if (flags_->is_clang_tidy()) {
+  if (flags_->type() == CompilerType::ClangTidy) {
     GetIncludeFiles();
     return;
   }
@@ -3776,11 +3769,11 @@ static void FixCommandSpec(const CompilerInfo& compiler_info,
   // might be wrong. For C program, cxx_system_include_paths would be empty.
   // c.f. b/25675250
   bool is_cplusplus = false;
-  if (flags.is_gcc()) {
+  if (flags.type() == CompilerType::Gcc) {
     is_cplusplus = static_cast<const GCCFlags&>(flags).is_cplusplus();
-  } else if (flags.is_vc()) {
+  } else if (flags.type() == CompilerType::Clexe) {
     is_cplusplus = static_cast<const VCFlags&>(flags).is_cplusplus();
-  } else if (flags.is_clang_tidy()) {
+  } else if (flags.type() == CompilerType::ClangTidy) {
     is_cplusplus = static_cast<const ClangTidyFlags&>(flags).is_cplusplus();
   }
 
@@ -3820,10 +3813,9 @@ void CompileTask::ModifyRequestArgs() {
     }
   }
 
-  if (flags_->is_gcc()) {
-    GCCFlags* gcc_flags = static_cast<GCCFlags*>(flags_.get());
-    if (!gcc_flags->has_fno_sanitize_blacklist()) {
-      // clang has default blacklist files.
+  if (flags_->type() == CompilerType::Gcc) {
+    if (GCCFlags::IsClangCommand(flags_->compiler_name())) {
+      // clang has default blacklist files. (gcc seems not)
       // c.f. http://llvm.org/viewvc/llvm-project/cfe/trunk/lib/Driver/SanitizerArgs.cpp?revision=242286&view=markup#l82
       // It's in clang resource directory.
       //
@@ -3833,6 +3825,12 @@ void CompileTask::ModifyRequestArgs() {
       // Note that -fsanitize=cfi-* implies -fsanitize=cfi basically, but
       // as of 9 Sep, 2015, -fsanitize=cfi-cast-strict doesn't imply
       // -fsanitize=cfi.
+
+      // clang has started putting blacklist files in {resource_dir}/share
+      // from Jan 2018. See
+      // http://llvm.org/viewvc/llvm-project/cfe/trunk/lib/Driver/SanitizerArgs.cpp?r1=322260&r2=322452
+      // To support both versions (with or without share/),
+      // we have to check both paths.
 
       static const struct {
         const char* sanitize_value;
@@ -3849,6 +3847,7 @@ void CompileTask::ModifyRequestArgs() {
         { "dataflow", "dfsan_abilist.txt" },
       };
 
+      GCCFlags* gcc_flags = static_cast<GCCFlags*>(flags_.get());
       std::set<string> added_blacklist;
       bool needs_resource_dir = false;
       for (const auto& checker : kSanitizerCheckers) {
@@ -3864,23 +3863,34 @@ void CompileTask::ModifyRequestArgs() {
         string blacklist = file::JoinPathRespectAbsolute(
             flags_->cwd(),
             compiler_info.data().resource_dir(),
+            "share",
             checker.blacklist_filename);
-        if (!input_file_id_cache_->Get(blacklist).IsValid()) {
-          // -fsanitize is specified, but no default blacklist is found.
-          // current clang has only asan_blacklist.txt and msan_blacklist.txt,
-          // so this case will often happen.
-          continue;
+        if (!input_file_stat_cache_->Get(blacklist).IsValid()) {
+          // Not found. Try without "share".
+          blacklist = file::JoinPathRespectAbsolute(
+              flags_->cwd(),
+              compiler_info.data().resource_dir(),
+              checker.blacklist_filename);
+          if (!input_file_stat_cache_->Get(blacklist).IsValid()) {
+            // -fsanitize is specified, but no default blacklist is found.
+            // As of 7 May 2018, there is no default dfsan_abilist.txt.
+            // So this can happen.
+            continue;
+          }
         }
 
         req_->add_input()->set_filename(blacklist);
-        LOG(INFO) << "input automatically added: " << blacklist;
+        LOG(INFO) << trace_id_ << "input automatically added: " << blacklist;
         needs_resource_dir = true;
       }
 
       if (gcc_flags->has_resource_dir()) {
         // Here, -resource-dir is specified by user.
         if (gcc_flags->resource_dir() != compiler_info.data().resource_dir()) {
-          LOG(WARNING) << "user specified non default -resource-dir:"
+          // This should not happen because we set -resource-dir specified by
+          // user to compiler_info_flags.
+          LOG(WARNING) << trace_id_
+                       << "user specified non default -resource-dir:"
                        << " default=" << compiler_info.data().resource_dir()
                        << " user=" << gcc_flags->resource_dir();
         }
@@ -3893,30 +3903,29 @@ void CompileTask::ModifyRequestArgs() {
         string resource_dir_arg =
             "-resource-dir=" + compiler_info.data().resource_dir();
         req_->add_arg(resource_dir_arg);
-        LOG(INFO) << "automatically added: " << resource_dir_arg;
+        LOG(INFO) << trace_id_ << " automatically added: " << resource_dir_arg;
         bool use_expanded_args = (req_->expanded_arg_size() > 0);
         if (use_expanded_args) {
           req_->add_expanded_arg(resource_dir_arg);
         }
       }
     }
+  } else if (flags_->type() == CompilerType::Clexe) {
+    // If /Yu is specified, we add /Y- to tell the backend compiler not
+    // to try using PCH. We add this here because we don't want to show
+    // this flag in compiler_proxy's console.
+    const string& using_pch = static_cast<const VCFlags&>(*flags_).using_pch();
+    if (using_pch.empty()) {
+      // No modification is needed.
+      return;
+    }
+
+    req_->add_arg("/Y-");
+    req_->add_expanded_arg("/Y-");
   }
 
-  if (!flags_->is_vc())
-    return;
-
-  // If /Yu is specified, we add /Y- to tell the backend compiler not
-  // to try using PCH. We add this here because we don't want to show
-  // this flag in compiler_proxy's console.
-  const string& using_pch = static_cast<const VCFlags&>(*flags_).using_pch();
-  if (using_pch.empty())
-    return;
-
-  req_->add_arg("/Y-");
-  req_->add_expanded_arg("/Y-");
-
-  string joined = absl::StrJoin(req_->arg(), " ");
-  LOG(INFO) << "Modified args: " << joined;
+  LOG(INFO) << trace_id_ << " modified args: "
+            << absl::StrJoin(req_->arg(), " ");
 }
 
 void CompileTask::ModifyRequestEnvs() {
@@ -3934,7 +3943,7 @@ void CompileTask::ModifyRequestEnvs() {
   for (const auto& env : envs) {
     req_->add_env(env);
   }
-  LOG(INFO) << "Modified env: " << envs;
+  LOG(INFO) << trace_id_ << " modified env: " << envs;
 }
 
 void CompileTask::UpdateCommandSpec() {
@@ -3984,10 +3993,9 @@ void CompileTask::MayUpdateSubprogramSpec() {
   }
 }
 
-struct CompileTask::RunIncludeProcessorParam {
-  RunIncludeProcessorParam() : result_status(false),
-                               total_files(0),
-                               skipped_files(0) {}
+struct CompileTask::RunCppIncludeProcessorParam {
+  RunCppIncludeProcessorParam()
+      : result_status(false), total_files(0), skipped_files(0) {}
   // request
   string input_filename;
   string abs_input_filename;
@@ -3996,15 +4004,17 @@ struct CompileTask::RunIncludeProcessorParam {
   std::set<string> required_files;
   int total_files;
   int skipped_files;
-  std::unique_ptr<FileIdCache> file_id_cache;
+  std::unique_ptr<FileStatCache> file_stat_cache;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(RunIncludeProcessorParam);
+  DISALLOW_COPY_AND_ASSIGN(RunCppIncludeProcessorParam);
 };
 
 void CompileTask::GetIncludeFiles() {
   CHECK_EQ(SETUP, state_);
-  DCHECK(flags_->is_gcc() || flags_->is_vc() || flags_->is_clang_tidy());
+  DCHECK(flags_->type() == CompilerType::Gcc ||
+         flags_->type() == CompilerType::Clexe ||
+         flags_->type() == CompilerType::ClangTidy);
   DCHECK(compiler_info_state_.get() != nullptr);
 
   // We don't support multiple input files.
@@ -4025,12 +4035,9 @@ void CompileTask::GetIncludeFiles() {
     DepsCache* dc = DepsCache::instance();
     deps_identifier_ = DepsCache::MakeDepsIdentifier(
         compiler_info_state_.get()->info(), *flags_);
-    if (deps_identifier_.valid() &&
-        dc->GetDependencies(deps_identifier_,
-                            flags_->cwd(),
-                            abs_input_filename,
-                            &required_files_,
-                            input_file_id_cache_.get())) {
+    if (deps_identifier_.has_value() &&
+        dc->GetDependencies(deps_identifier_, flags_->cwd(), abs_input_filename,
+                            &required_files_, input_file_stat_cache_.get())) {
       LOG(INFO) << trace_id_ << " use deps cache. required_files="
                 << required_files_.size();
       depscache_used_ = true;
@@ -4038,27 +4045,27 @@ void CompileTask::GetIncludeFiles() {
       return;
     }
   }
-  std::unique_ptr<RunIncludeProcessorParam> param(new RunIncludeProcessorParam);
+  std::unique_ptr<RunCppIncludeProcessorParam> param(
+      new RunCppIncludeProcessorParam);
   param->input_filename = input_filename;
   param->abs_input_filename = abs_input_filename;
-  input_file_id_cache_->ReleaseOwner();
-  param->file_id_cache = std::move(input_file_id_cache_);
+  input_file_stat_cache_->ReleaseOwner();
+  param->file_stat_cache = std::move(input_file_stat_cache_);
 
   OneshotClosure* closure =
-      NewCallback(
-          this, &CompileTask::RunIncludeProcessor, std::move(param));
+      NewCallback(this, &CompileTask::RunCppIncludeProcessor, std::move(param));
   service_->wm()->RunClosureInPool(
       FROM_HERE, service_->include_processor_pool(),
       closure,
       WorkerThreadManager::PRIORITY_LOW);
 }
 
-void CompileTask::RunIncludeProcessor(
-    std::unique_ptr<RunIncludeProcessorParam> param) {
+void CompileTask::RunCppIncludeProcessor(
+    std::unique_ptr<RunCppIncludeProcessorParam> param) {
   DCHECK(compiler_info_state_.get() != nullptr);
 
   // Pass ownership temporary to IncludeProcessor thread.
-  param->file_id_cache->AcquireOwner();
+  param->file_stat_cache->AcquireOwner();
 
   stats_->set_include_processor_wait_time(include_wait_timer_.GetInMs());
   LOG_IF(WARNING, stats_->include_processor_wait_time() > 1000)
@@ -4066,14 +4073,11 @@ void CompileTask::RunIncludeProcessor(
       << " in " << stats_->include_processor_wait_time() << " msec";
 
   SimpleTimer include_timer(SimpleTimer::START);
-  IncludeProcessor include_processor;
+  CppIncludeProcessor include_processor;
   param->result_status = include_processor.GetIncludeFiles(
-      param->input_filename,
-      flags_->cwd_for_include_processor(),
-      *flags_,
-      compiler_info_state_.get()->info(),
-      &param->required_files,
-      param->file_id_cache.get());
+      param->input_filename, flags_->cwd_for_include_processor(), *flags_,
+      compiler_info_state_.get()->info(), &param->required_files,
+      param->file_stat_cache.get());
   stats_->set_include_processor_run_time(include_timer.GetInMs());
 
   if (!param->result_status) {
@@ -4086,33 +4090,31 @@ void CompileTask::RunIncludeProcessor(
   param->skipped_files = include_processor.skipped_files();
 
   // Back ownership from IncludeProcessor thread to CompileTask thread.
-  param->file_id_cache->ReleaseOwner();
+  param->file_stat_cache->ReleaseOwner();
   service_->wm()->RunClosureInThread(
       FROM_HERE, thread_id_,
-      NewCallback(
-          this, &CompileTask::RunIncludeProcessorDone, std::move(param)),
+      NewCallback(this, &CompileTask::RunCppIncludeProcessorDone,
+                  std::move(param)),
       WorkerThreadManager::PRIORITY_LOW);
 }
 
-void CompileTask::RunIncludeProcessorDone(
-    std::unique_ptr<RunIncludeProcessorParam> param) {
+void CompileTask::RunCppIncludeProcessorDone(
+    std::unique_ptr<RunCppIncludeProcessorParam> param) {
   DCHECK(BelongsToCurrentThread());
 
-  input_file_id_cache_ = std::move(param->file_id_cache);
-  input_file_id_cache_->AcquireOwner();
+  input_file_stat_cache_ = std::move(param->file_stat_cache);
+  input_file_stat_cache_->AcquireOwner();
   required_files_.swap(param->required_files);
 
   stats_->set_include_preprocess_total_files(param->total_files);
   stats_->set_include_preprocess_skipped_files(param->skipped_files);
 
   if (DepsCache::IsEnabled()) {
-    if (param->result_status && deps_identifier_.valid()) {
+    if (param->result_status && deps_identifier_.has_value()) {
       DepsCache* dc = DepsCache::instance();
-      if (!dc->SetDependencies(deps_identifier_,
-                               flags_->cwd(),
-                               param->abs_input_filename,
-                               required_files_,
-                               input_file_id_cache_.get())) {
+      if (!dc->SetDependencies(deps_identifier_, flags_->cwd(),
+                               param->abs_input_filename, required_files_,
+                               input_file_stat_cache_.get())) {
         LOG(INFO) << trace_id_ << " failed to save dependencies.";
       }
     }
@@ -4207,7 +4209,7 @@ void CompileTask::GetJavaRequiredFiles() {
 
 void CompileTask::RunJarParser(std::unique_ptr<RunJarParserParam> param) {
   JarParser jar_parser;
-  DCHECK(flags_->is_javac());
+  DCHECK_EQ(CompilerType::Javac, flags_->type());
   jar_parser.GetJarFiles(static_cast<JavacFlags*>(flags_.get())->jar_files(),
                          stats_->cwd(),
                          &param->required_files);
@@ -4218,6 +4220,57 @@ void CompileTask::RunJarParser(std::unique_ptr<RunJarParserParam> param) {
 }
 
 void CompileTask::RunJarParserDone(std::unique_ptr<RunJarParserParam> param) {
+  DCHECK(BelongsToCurrentThread());
+
+  required_files_.swap(param->required_files);
+  UpdateRequiredFilesDone(true);
+}
+
+struct CompileTask::ReadThinLTOImportsParam {
+  ReadThinLTOImportsParam() {}
+
+  ReadThinLTOImportsParam(ReadThinLTOImportsParam&&) = delete;
+  ReadThinLTOImportsParam(const ReadThinLTOImportsParam&) = delete;
+  ReadThinLTOImportsParam& operator=(const ReadThinLTOImportsParam&) = delete;
+  ReadThinLTOImportsParam& operator=(ReadThinLTOImportsParam&&) = delete;
+
+  // request
+  // response
+  std::set<string> required_files;
+};
+
+void CompileTask::GetThinLTOImports() {
+  CHECK_EQ(SETUP, state_);
+
+  std::unique_ptr<ReadThinLTOImportsParam> param(new ReadThinLTOImportsParam);
+
+  OneshotClosure* closure = NewCallback(
+      this, &CompileTask::ReadThinLTOImports, std::move(param));
+  service_->wm()->RunClosureInPool(
+      FROM_HERE, service_->include_processor_pool(),
+      closure,
+      WorkerThreadManager::PRIORITY_LOW);
+}
+
+void CompileTask::ReadThinLTOImports(
+    std::unique_ptr<ReadThinLTOImportsParam> param) {
+  DCHECK_EQ(CompilerType::Gcc, flags_->type());
+  const GCCFlags& gcc_flags = static_cast<const GCCFlags&>(*flags_);
+
+  ThinLTOImportProcessor processor;
+  if (!processor.GetIncludeFiles(gcc_flags.thinlto_index(),
+                                 gcc_flags.cwd(), &param->required_files)) {
+    LOG(ERROR) << trace_id_ << " failed to get ThinLTO imports";
+  }
+
+  service_->wm()->RunClosureInThread(
+      FROM_HERE, thread_id_,
+      NewCallback(this, &CompileTask::ReadThinLTOImportsDone, std::move(param)),
+      WorkerThreadManager::PRIORITY_LOW);
+}
+
+void CompileTask::ReadThinLTOImportsDone(
+    std::unique_ptr<ReadThinLTOImportsParam> param) {
   DCHECK(BelongsToCurrentThread());
 
   required_files_.swap(param->required_files);
@@ -4353,8 +4406,8 @@ void CompileTask::CheckCommandSpec() {
     is_target_mismatch = true;
     std::ostringstream ss;
     ss << trace_id_ << " compiler target mismatch:"
-       << " local:" << req_command_spec.name()
-       << " remote:" << resp_command_spec.name();
+       << " local:" << req_command_spec.target()
+       << " remote:" << resp_command_spec.target();
     AddErrorToResponse(TO_LOG, ss.str(), false);
     stats_->set_exec_command_target_mismatch(message_on_mismatch);
   }
@@ -4658,7 +4711,7 @@ void CompileTask::StoreEmbeddedUploadInformationIfNeeded() {
         flags_->cwd(), input.filename());
     bool new_cache_key = service_->file_hash_cache()->StoreFileCacheKey(
         abs_filename, input.hash_key(), upload_timestamp_ms,
-        input_file_id_cache_->Get(abs_filename));
+        input_file_stat_cache_->Get(abs_filename));
     VLOG(1) << trace_id_
             << " store file cache key for embedded upload: "
             << abs_filename
@@ -4990,11 +5043,16 @@ void CompileTask::SaveInfoFromInputOutput() {
       stderr_ = resp_->result().stderr_buffer();
     }
   }
+  // arg, env and expanded_arg are used for dumping ExecReq.
+  // We should keep what we actually used instead of what came from gomacc.
+  *stats_->mutable_arg() = std::move(*req_->mutable_arg());
+  *stats_->mutable_env() = std::move(*req_->mutable_env());
+  *stats_->mutable_expanded_arg() = std::move(*req_->mutable_expanded_arg());
   req_.reset();
   resp_.reset();
   flags_.reset();
-  input_file_id_cache_.reset();
-  output_file_id_cache_.reset();
+  input_file_stat_cache_.reset();
+  output_file_stat_cache_.reset();
 }
 
 // ----------------------------------------------------------------
@@ -5029,13 +5087,13 @@ void CompileTask::SetupSubProcess() {
   if (requester_env_.has_umask()) {
     req->set_umask(requester_env_.umask());
   }
-  if (flags_->is_gcc()) {
+  if (flags_->type() == CompilerType::Gcc) {
     const GCCFlags& gcc_flag = static_cast<const GCCFlags&>(*flags_);
     if (gcc_flag.is_stdin_input()) {
       CHECK_GE(req_->input_size(), 1) << req_->DebugString();
       req->set_stdin_filename(req_->input(0).filename());
     }
-  } else if (flags_->is_vc()) {
+  } else if (flags_->type() == CompilerType::Clexe) {
     // TODO: handle input is stdin case for VC++?
   }
   {
@@ -5315,7 +5373,8 @@ bool CompileTask::cache_hit() const {
 }
 
 bool CompileTask::local_cache_hit() const {
-  return localoutputcache_lookup_succeeded_;
+  return stats_->has_cache_source() &&
+         stats_->cache_source() == ExecLog::LOCAL_OUTPUT_CACHE;
 }
 
 void CompileTask::AddErrorToResponse(
@@ -5383,7 +5442,7 @@ void CompileTask::DumpRequest() const {
   std::ostringstream ss;
   ss << "task_request_" << id_;
   const string task_request_dir = file::JoinPath(service_->tmp_dir(), ss.str());
-  RecursivelyDelete(task_request_dir);
+  file::RecursivelyDelete(task_request_dir, file::Defaults());
 #ifndef _WIN32
   PCHECK(mkdir(task_request_dir.c_str(), 0755) == 0);
 #else

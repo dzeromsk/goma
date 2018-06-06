@@ -49,7 +49,8 @@ bool BuildGomaccArgv(int orig_argc, const char* orig_argv[],
         return false;
       }
       continue;
-    } else if (*orig_argv[i] == '-') {
+    }
+    if (*orig_argv[i] == '-') {
       // option found without having gcc or g++ as command name.
       break;
 #ifdef _WIN32

@@ -21,7 +21,7 @@ class SubProcessTask;
 
 class AutoUpdater {
  public:
-  explicit AutoUpdater(const string& goma_ctl);
+  explicit AutoUpdater(string goma_ctl);
   ~AutoUpdater();
 
   // Sets environments to run goma_ctl.
@@ -62,12 +62,12 @@ class AutoUpdater {
   ThreadpoolHttpServer* server_;
   ThreadpoolHttpServer::RegisteredClosureID pull_closure_id_;
 
-  // protect |subproc_|
   mutable Lock mu_;
   // signaled if subproc_ become nullptr.
   ConditionVariable cond_;
   // If subproc_ != nullptr, "goma_ctl pull" is running.
-  SubProcessTask* subproc_;
+  SubProcessTask* subproc_ GUARDED_BY(mu_);
+
   std::vector<string> env_;
   string goma_ctl_;
 

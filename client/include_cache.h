@@ -10,27 +10,28 @@
 #include <memory>
 #include <string>
 
+#include "absl/base/thread_annotations.h"
+#include "absl/types/optional.h"
 #include "atomic_stats_counter.h"
 #include "autolock_timer.h"
+#include "cpp_directive.h"
 #include "goma_hash.h"
+#include "include_item.h"
 #include "linked_unordered_map.h"
 
 using std::string;
 
 namespace devtools_goma {
 
-class Content;
-struct FileId;
+struct FileStat;
 class IncludeCacheStats;
 
 // IncludeCache stores include files which contains only directives.
 class IncludeCache {
  public:
-  static IncludeCache* instance() {
-    return instance_;
-  }
-
+  static IncludeCache* instance() { return instance_; }
   static bool IsEnabled() { return instance_ != NULL; }
+
   // Initializes IncludeCache.
   // |max_cache_size_in_mb| specifies the maximum amount of cache size. If cache
   // size exceeds this value, the oldest cache will be evicted.
@@ -39,23 +40,16 @@ class IncludeCache {
   static void Init(int max_cache_size_in_mb, bool calculates_directive_hash);
   static void Quit();
 
-  // Inserts content to cache. We store the content where non-direcitve lines
-  // are removed. Since |content| is copied, it's safe to remove |content| after
-  // insertion. Returned value is directive filtered |content|.
-  std::unique_ptr<Content> Insert(const string& key, const Content& content,
-                                  const FileId& content_file_id);
+  // Get IncludeItem from cache or file.
+  // If it does not exist in the cache, reat it from file and parse it.
+  IncludeItem GetIncludeItem(const string& filepath, const FileStat& file_stat);
 
-  // Gets a copy of the inserted content, only when the file_id of the stored
-  // content is the same as |file_id|.
-  std::unique_ptr<Content> GetCopyIfNotModified(const string& filepath,
-                                                const FileId& file_id);
-
-  // Get directive hash. If we have a cache and its FileId is the same as
-  // |file_id|, we return the cached one. Otherwise, we calculate the directive
-  // hash, and save it.
-  // If |filepath| is not found, invalid hash value is returned.
-  OptionalSHA256HashValue GetDirectiveHash(const string& filepath,
-                                           const FileId& file_id);
+  // Get directive hash. If we have a cache and its FileStat is the same as
+  // |file_stat|, we return the cached one. Otherwise, we calculate the
+  // directive hash, and save it. If |filepath| is not found, invalid hash value
+  // is returned.
+  absl::optional<SHA256HashValue> GetDirectiveHash(const string& filepath,
+                                                   const FileStat& file_stat);
 
   void Dump(std::ostringstream* ss);
   static void DumpAll(std::ostringstream* ss);
@@ -71,11 +65,14 @@ class IncludeCache {
   IncludeCache(size_t max_cache_size, bool calculates_directive_hash);
   ~IncludeCache();
 
-  std::unique_ptr<Content> InsertInternal(
-      const string& key, const Content& content, const FileId& content_file_id,
-      SHA256HashValue* directive_hash);
-  const Item* GetItemIfNotModifiedUnlocked(const string& key,
-                                           const FileId& file_id) const;
+  const IncludeCache::Item* GetItemIfNotModifiedUnlocked(
+      const string& key,
+      const FileStat& file_stat) const SHARED_LOCKS_REQUIRED(rwlock_);
+  void InsertUnlocked(const string& key,
+                      std::unique_ptr<Item> include_item,
+                      const FileStat& file_stat)
+      EXCLUSIVE_LOCKS_REQUIRED(rwlock_);
+  void EvictCacheUnlocked() EXCLUSIVE_LOCKS_REQUIRED(rwlock_);
 
   static IncludeCache* instance_;
 

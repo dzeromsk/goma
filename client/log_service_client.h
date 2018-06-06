@@ -26,7 +26,7 @@ class WorkerThreadManager;
 class LogServiceClient {
  public:
   LogServiceClient(HttpRPC* http_rpc,
-                   const string& save_log_path,
+                   string save_log_path,
                    size_t max_log_in_req,
                    int max_pending_ms,
                    WorkerThreadManager* wm);
@@ -64,17 +64,16 @@ class LogServiceClient {
 
   PeriodicClosureId periodic_callback_id_;
 
-  // mu_ protects save_log_job_, num_save_log_job_ and last_timestamp_ms_.
   mutable Lock mu_;
   // Condition to check num_save_log_job_ becomes 0.
   ConditionVariable cond_;
   // Current SaveLogJob accumulating logs.
-  SaveLogJob* save_log_job_;
+  SaveLogJob* save_log_job_ GUARDED_BY(mu_);
   // Number of SaveLogJobs sending to the server.
-  int num_save_log_job_;
+  int num_save_log_job_ GUARDED_BY(mu_);
   SimpleTimer timer_;
   // Time when Save*Log was called.
-  long long last_timestamp_ms_;
+  long long last_timestamp_ms_ GUARDED_BY(mu_);
 
   DISALLOW_COPY_AND_ASSIGN(LogServiceClient);
 };

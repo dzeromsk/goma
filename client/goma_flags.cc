@@ -67,6 +67,18 @@ static int MaxIncludeCacheSize() {
   return 32;
 }
 
+static int MaxSubProcsLow() {
+  int cpus = devtools_goma::GetNumCPUs();
+  if (cpus > 0)
+    return std::max(1, cpus / 5);
+  return 1;
+}
+
+static int MaxSubProcs() {
+  // +1 is for high priority task like local fallback.
+  return MaxSubProcsLow() + 1;
+}
+
 static int MaxBurstSubProcs() {
   int cpus = devtools_goma::GetNumCPUs();
   if (cpus > 0)
@@ -185,15 +197,17 @@ GOMA_DEFINE_string(PROXY_HOST, "",
                    "The hostname of an HTTP proxy.");
 GOMA_DEFINE_int32(PROXY_PORT, 0,
                   "The port of an HTTP proxy.");
-GOMA_DEFINE_string(SETTINGS_SERVER,
-                   "",
+
+#define DEFAULT_SETTINGS_SERVER "https://cxx-compiler-service.appspot.com/settings"
+#define DEFAULT_STUBBY_PROXY_IP_ADDRESS ""
+GOMA_DEFINE_string(SETTINGS_SERVER, DEFAULT_SETTINGS_SERVER,
                    "Settings server URL");
 GOMA_DEFINE_string(ASSERT_SETTINGS,
                    "",
                    "Assert settings name matches with this value, "
                    "if specified.");
-GOMA_DEFINE_string(STUBBY_PROXY_IP_ADDRESS, "clients5.google.com",
-                   "The IP address or hostname of the stubby proxy, or GFE.");
+GOMA_DEFINE_string(STUBBY_PROXY_IP_ADDRESS, DEFAULT_STUBBY_PROXY_IP_ADDRESS,
+                   "The IP address or hostname of the goma server");
 GOMA_DEFINE_int32(STUBBY_PROXY_PORT, 443,
                   "The port of the stubby proxy, or GFE.");
 GOMA_DEFINE_string(URL_PATH_PREFIX, "/cxx-compiler-service",
@@ -207,10 +221,6 @@ GOMA_DEFINE_int32(COMPILER_PROXY_PORT, 8088,
 
 GOMA_DEFINE_bool(COMPILER_PROXY_REUSE_CONNECTION, true,
                  "Connection is reused for multiple rpcs.");
-
-GOMA_DEFINE_bool(COMPILER_PROXY_FORCE_CONNECT_ERRORNEOUS_ADDRESS, false,
-                 "Retry a connection establishment"
-                 " if failed to get new socket.");
 
 // See  http://smallvoid.com/article/winnt-tcpip-max-limit.html
 // Remember to read the comments by the author.  For Vista/Win7 (where goma is
@@ -288,15 +298,22 @@ GOMA_DEFINE_bool(LOCAL_RUN_FOR_FAILED_INPUT, true,
                  "Prefer local run for previous failed input filename. ");
 GOMA_DEFINE_int32(LOCAL_RUN_DELAY_MSEC, 0,
                   "msec to delay for idle fallback.");
-GOMA_DEFINE_int32(MAX_SUBPROCS, 3,
-                  "Maximum number of subprocesses that run at the same time.");
-GOMA_DEFINE_int32(MAX_SUBPROCS_LOW, 1,
-                  "Maximum number of subprocesses with low priority "
-                  "(e.g. compile locally while requesting to goma). "
-                  "fallback process gets high priority.");
+GOMA_DEFINE_AUTOCONF_int32(
+    MAX_SUBPROCS,
+    MaxSubProcs,
+    "Maximum number of subprocesses that run at the same time.");
+GOMA_DEFINE_AUTOCONF_int32(MAX_SUBPROCS_LOW,
+                           MaxSubProcsLow,
+                           "Maximum number of subprocesses with low priority "
+                           "(e.g. compile locally while requesting to goma). "
+                           "fallback process gets high priority.");
 GOMA_DEFINE_int32(MAX_SUBPROCS_HEAVY, 1,
                   "Maximum number of subprocesses with heavy weight "
                   "(such as link).");
+GOMA_DEFINE_AUTOCONF_int32(COMPILER_INFO_POOL,
+                           MaxSubProcs,
+                           "Maximum number of subprocesses for compiler info "
+                           "that run at the same time.");
 GOMA_DEFINE_AUTOCONF_int32(BURST_MAX_SUBPROCS, MaxBurstSubProcs,
                            "Maximum number of subprocesses when remote server "
                            "is not available. When remote server is not "
@@ -352,6 +369,8 @@ GOMA_DEFINE_bool(ENABLE_GCH_HACK, false,
 GOMA_DEFINE_AUTOCONF_int32(MAX_INCLUDE_CACHE_SIZE,
                            MaxIncludeCacheSize,
                            "The size of include cache in MB.");
+GOMA_DEFINE_int32(MAX_LIST_DIR_CACHE_ENTRY_NUM, 32768,
+                  "The entry limit in list dir cache.");
 GOMA_DEFINE_string(CONTENT_TYPE_FOR_PROTOBUF, "binary/x-protocol-buffer",
                    "Content-Type for goma's HttpRPC requests.");
 GOMA_DEFINE_bool(BACKEND_SOFT_STICKINESS, false,
@@ -398,12 +417,15 @@ GOMA_DEFINE_int32(SSL_CRL_MAX_VALID_DURATION, -1,
                   "seconds. "
                   "We caches downloaded CRLs no more than this duration. "
                   "If negative, compiler_proxy follows nextUpdate in CRL.");
-GOMA_DEFINE_bool(PROVIDE_INFO, true,
+#define DEFAULT_PROVIDE_INFO false
+#define DEFAULT_SEND_USER_INFO false
+
+GOMA_DEFINE_bool(PROVIDE_INFO, DEFAULT_PROVIDE_INFO,
                  "Provide info. to Google for improving the service. "
                  "If enabled, compiler proxy sends timing stats and parameters "
                  "for both remote tasks and local tasks. It also sends "
                  "username and nodename if GOMA_SEND_USER_INFO is true.");
-GOMA_DEFINE_bool(SEND_USER_INFO, true,
+GOMA_DEFINE_bool(SEND_USER_INFO, DEFAULT_SEND_USER_INFO,
                  "Send username and nodename with each request."
                  "If false, it will use anonymized user info for "
                  "compiler_proxy_id.");
@@ -419,21 +441,30 @@ GOMA_DEFINE_int32(DEPS_CACHE_IDENTIFIER_ALIVE_DURATION, 3 * 24 * 3600,
                   "Deps cache older than this value (in second) will be "
                   "removed in saving/loading. If negative, any cache won't be "
                   "removed.");
-GOMA_DEFINE_int32(DEPS_CACHE_TABLE_THRESHOLD, 35000,
+GOMA_DEFINE_int32(DEPS_CACHE_TABLE_THRESHOLD, 70000,
                   "The max size of DepsCache table threshold. If the number of "
                   "DepsCache table exceeds this value, older DepsCache entry "
                   "will be removed in saving.");
 GOMA_DEFINE_int32(DEPS_CACHE_MAX_PROTO_SIZE_IN_MB, 128,
                   "The max size of DepsCache file. If the file size exceeds "
                   "this limit, loading will fail. Unit is MB.");
+// TODO: Remove this after ENABLE_MACRO_CACHE is removed from bots.
+// b/77247879
 GOMA_DEFINE_bool(ENABLE_MACRO_CACHE, false,
-                 "Enable cache for parsed define macro.");
+                 "(deprecated)");
 GOMA_DEFINE_string(COMPILER_INFO_CACHE_FILE, "compiler_info_cache",
                    "Filename of compiler_info's cache. "
                    "If empty, compiler_info cache file is not used. "
                    "If not absolute path, it will be in GOMA_CACHE_DIR.");
-GOMA_DEFINE_bool(ENABLE_GLOBAL_FILE_ID_CACHE, false,
-                 "Enable global file id cache. "
+GOMA_DEFINE_bool(ENABLE_GLOBAL_FILE_ID_CACHE,
+                 false,
+                 "(Deprecated) Use ENABLE_GLOBAL_FILE_STAT_CACHE instead. "
+                 "Enable global file stat cache. "
+                 "Do not enable this flag when any source file would be "
+                 "changed between compilations.");
+GOMA_DEFINE_bool(ENABLE_GLOBAL_FILE_STAT_CACHE,
+                 false,
+                 "Enable global file stat cache. "
                  "Do not enable this flag when any source file would be "
                  "changed between compilations.");
 GOMA_DEFINE_int32(COMPILER_INFO_CACHE_HOLDING_TIME_SEC, 60 * 60 * 24 * 30,
@@ -525,14 +556,7 @@ GOMA_DEFINE_string(COMPILER_PROXY_DAEMON_STDERR, "goma_compiler_proxy.stderr",
                    "Used only when COMPILER_PROXY_DAEMON_MODE is true.");
 #endif
 
-// On Windows, auto updater won't work well yet. b/73747988
-#ifdef _WIN32
-# define DEFAULT_ENABLE_AUTO_UPDATE false
-#else
-# define DEFAULT_ENABLE_AUTO_UPDATE true
-#endif
-GOMA_DEFINE_bool(ENABLE_AUTO_UPDATE, DEFAULT_ENABLE_AUTO_UPDATE,
-                 "Enable auto updater.");
+GOMA_DEFINE_bool(ENABLE_AUTO_UPDATE, true, "Enable auto updater.");
 GOMA_DEFINE_int32(AUTO_UPDATE_IDLE_COUNT, 4 * 60 * 60,
                   "Try to update to the latest version if compiler_proxy "
                   "has been idle for approx this number of seconds.");
@@ -579,6 +603,9 @@ GOMA_DEFINE_bool(FAIL_FOR_UNSUPPORTED_COMPILER_FLAGS, true,
                  "compile fails if a compile request is rejected by goma "
                  "server and the rejection reason is the compile request "
                  "contains unsupoprted compiler flags.");
+
+// TODO: remove this in the future release.
+GOMA_DEFINE_string(CLANG_NECESSARY_BLACKLIST_FILES, "", "(deprecated");
 
 GOMA_DEFINE_int32(MAX_ACTIVE_FAIL_FALLBACK_TASKS, -1,
                   "Compiler_proxy will make compile error without trying local "

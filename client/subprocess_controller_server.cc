@@ -5,9 +5,10 @@
 
 #include "subprocess_controller_server.h"
 
+#include <string.h>
 #include <memory>
 #include <set>
-#include <string.h>
+#include <utility>
 
 #ifndef _WIN32
 #include <errno.h>
@@ -17,6 +18,7 @@
 #include <unistd.h>
 #endif
 
+#include "absl/strings/ascii.h"
 #include "compiler_specific.h"
 #include "fileflag.h"
 #include "glog/logging.h"
@@ -39,7 +41,7 @@ static bool CanKillCommand(absl::string_view command,
                            const std::set<string>& dont_kill_commands) {
   string prog = string(file::Stem(command));
 #ifdef _WIN32
-  std::transform(prog.begin(), prog.end(), prog.begin(), ::tolower);
+  absl::AsciiStrToLower(&prog);
 #endif
   return dont_kill_commands.find(prog) == dont_kill_commands.end();
 }
@@ -68,13 +70,13 @@ void SigChldAction(int signo ALLOW_UNUSED,
 
 SubProcessControllerServer::SubProcessControllerServer(
     int sock_fd,
-    const SubProcessController::Options& options)
+    SubProcessController::Options options)
     : sock_fd_(sock_fd),
 #ifndef _WIN32
       signal_fd_(-1),
 #endif
       timeout_millisec_(kIdleIntervalMilliSec),
-      options_(options) {
+      options_(std::move(options)) {
   LOG(INFO) << "SubProcessControllerServer started fd=" << sock_fd
             << " " << options_.DebugString();
 #ifdef _WIN32

@@ -158,6 +158,7 @@ export GOMA_START_COMPILER_PROXY=false
 export GOMA_STORE_LOCAL_RUN_OUTPUT=true
 export GOMA_ENABLE_REMOTE_LINK=true
 export GOMA_HERMETIC=error
+export GOMA_FALLBACK_INPUT_FILES=""
 
 # Set service account JSON file if exists.
 CRED="/creds/service_accounts/service-account-goma-client.json"
@@ -401,6 +402,14 @@ expect_success "${CC}_hello_fallback_use_local" \
 GOMA_FALLBACK=false
 expect_success "${CC}_hello_use_local" "${GOMA_CC} test/hello.c -c -o out.o"
 GOMA_USE_LOCAL=false
+
+GOMA_FALLBACK_INPUT_FILES="test/hello.c"
+curl -s http://localhost:$GOMA_COMPILER_PROXY_PORT/statz | grep fallback > stat_before.txt
+expect_success "${CC}_hello_enforce_fallback" \
+  "${GOMA_CC} test/hello.c -c -o out.o"
+curl -s http://localhost:$GOMA_COMPILER_PROXY_PORT/statz | grep fallback > stat_after.txt
+expect_failure "check_fallback" "diff -u stat_before.txt stat_after.txt"
+GOMA_FALLBACK_INPUT_FILES=""
 
 rm -f a.out2
 expect_success "FAIL_${CC}_hello_remote_link" \

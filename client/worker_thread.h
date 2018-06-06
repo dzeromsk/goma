@@ -11,6 +11,7 @@
 #include <queue>
 #include <vector>
 
+#include "absl/base/call_once.h"
 #include "basictypes.h"
 #include "callback.h"
 #include "descriptor_poller.h"
@@ -54,7 +55,7 @@ class WorkerThreadManager::WorkerThread : public PlatformThread::Delegate {
   static void Initialize();
   static WorkerThread* GetCurrentWorker();
 
-  WorkerThread(WorkerThreadManager* wm, int pool, const std::string& name);
+  WorkerThread(WorkerThreadManager* wm, int pool, std::string name);
   ~WorkerThread() override;
 
   int pool() const { return pool_; }
@@ -151,11 +152,7 @@ class WorkerThreadManager::WorkerThread : public PlatformThread::Delegate {
   // Assert mu_ held.
   ClosureData GetClosure(WorkerThreadManager::Priority priority);
 
-#ifndef _WIN32
   static void InitializeWorkerKey();
-#else
-  static BOOL WINAPI InitializeWorkerKey(PINIT_ONCE, PVOID, PVOID*);
-#endif
 
   WorkerThreadManager* wm_;
   int pool_;
@@ -189,11 +186,10 @@ class WorkerThreadManager::WorkerThread : public PlatformThread::Delegate {
   std::unique_ptr<DescriptorPoller> poller_;
   int poll_interval_;
 
+  static absl::once_flag key_worker_once_;
 #ifndef _WIN32
-  static pthread_once_t key_worker_once_;
   static pthread_key_t key_worker_;
 #else
-  static INIT_ONCE key_worker_once_;
   static DWORD key_worker_;
 #endif
   DISALLOW_COPY_AND_ASSIGN(WorkerThread);

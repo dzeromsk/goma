@@ -13,7 +13,7 @@
 #include "absl/base/thread_annotations.h"
 #include "atomic_stats_counter.h"
 #include "basictypes.h"
-#include "file_id.h"
+#include "file_stat.h"
 #include "lockhelper.h"
 #include "timestamp.h"
 
@@ -39,14 +39,14 @@ class FileHashCache {
   // be valid if |missed_timestamp_ms| <= |last_uploaded_timestamp_ms|.
   // cache_key will be invalidated if |missed_timestamp_ms| >
   // |last_uploaded_timestamp_ms|.
-  // FileId for |filename| is |file_id|.
-  // We don't take |file_id_cache| ownership.
+  // FileStat for |filename| is |file_stat|.
+  // We don't take |file_stat_cache| ownership.
   // If |missed_timestamp_ms| is 0, this check won't be performed.
   // Returns false and *cache_key is empty if it doesn't know cache key of the
   // file at all.
   bool GetFileCacheKey(const string& filename,
                        millitime_t missed_timestamp_ms,
-                       const FileId& file_id,
+                       const FileStat& file_stat,
                        string* cache_key);
 
   // Stores hash code (cache key) of |filename|.
@@ -54,14 +54,15 @@ class FileHashCache {
   // in milliseconds.
   // Please set 0LL if you do not upload or download the file. It preserves
   // last_uploaded_timestamp_ms.
-  // |file_id| is a FileId of |filename|.
-  // If |file_id| is invalid, it clears the cache_key of the filename,
+  // |file_stat| is a FileStat of |filename|.
+  // If |file_stat| is invalid, it clears the cache_key of the filename,
   // and returns false.
   // Returns true if the cache_key is the first used in FileCacheKey.
-  // Returns false if the cache_key was used before or |file_id| is invalid.
-  bool StoreFileCacheKey(const string &filename, const string& cache_key,
+  // Returns false if the cache_key was used before or |file_stat| is invalid.
+  bool StoreFileCacheKey(const string& filename,
+                         const string& cache_key,
                          millitime_t upload_timestamp_ms,
-                         const FileId& file_id);
+                         const FileStat& file_stat);
 
   bool IsKnownCacheKey(const string& cache_key);
 
@@ -70,7 +71,7 @@ class FileHashCache {
  private:
   struct FileInfo {
     string cache_key;
-    FileId file_id;
+    FileStat file_stat;
     // time when hash key was stored in cache.
     // FileInfo represents valid hash key of local file if mtime < last_checked.
     time_t last_checked;

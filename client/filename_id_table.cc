@@ -7,6 +7,7 @@
 
 #include <algorithm>
 
+#include "glog/logging.h"
 #include "prototmp/deps_cache_data.pb.h"
 
 using std::string;

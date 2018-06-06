@@ -70,10 +70,6 @@ class SocketFactory {
 
   // Closes used socket. It will notify observer if the observer is set.
   virtual void CloseSocket(ScopedSocket&& sock, bool err) = 0;
-  // Clear errors associated with an address.
-  // SocketPool (subclass of this class) remembers avoid to use an address
-  // that CloseSocket with error, and this method clears such information.
-  virtual void ClearErrors() {}
 
   // Destination name in form of "host:port".
   virtual string DestName() const = 0;

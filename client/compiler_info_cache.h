@@ -7,12 +7,14 @@
 #define DEVTOOLS_GOMA_CLIENT_COMPILER_INFO_CACHE_H_
 
 #include <ctime>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include "autolock_timer.h"
 #include "basictypes.h"
 #include "cache_file.h"
 #include "compiler_info.h"
@@ -104,25 +106,34 @@ class CompilerInfoCache {
 
   // Takes the ownership of validator.
   // Use this for testing purpose.
-  void SetValidator(CompilerInfoValidator* validator);
-  CompilerInfoValidator* validator() const { return validator_.get(); }
+  void SetValidator(CompilerInfoValidator* validator) LOCKS_EXCLUDED(mu_);
+  CompilerInfoValidator* validator() const LOCKS_EXCLUDED(mu_) {
+    AUTO_SHARED_LOCK(lock, &mu_);
+    return validator_.get();
+  }
 
  private:
   CompilerInfoCache(const string& cache_filename, int cache_holding_time_sec);
 
   static string HashKey(const CompilerInfoData& data);
-  bool Load();
-  bool Unmarshal(const CompilerInfoDataTable& table);
-  bool Save();
-  bool Marshal(CompilerInfoDataTable* table);
-  void Clear();
+  bool Load() LOCKS_EXCLUDED(mu_);
+  bool Unmarshal(const CompilerInfoDataTable& table) LOCKS_EXCLUDED(mu_);
+  bool UnmarshalUnlocked(const CompilerInfoDataTable& table)
+      EXCLUSIVE_LOCKS_REQUIRED(mu_);
+  bool Save() LOCKS_EXCLUDED(mu_);
+  bool Marshal(CompilerInfoDataTable* table) LOCKS_EXCLUDED(mu_);
+  bool MarshalUnlocked(CompilerInfoDataTable* table) SHARED_LOCKS_REQUIRED(mu_);
+  void Clear() LOCKS_EXCLUDED(mu_);
+  void ClearUnlocked() EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   CompilerInfoState* LookupUnlocked(const string& compiler_info_key,
-                                    const string& abs_local_compiler_path);
+                                    const string& abs_local_compiler_path)
+      SHARED_LOCKS_REQUIRED(mu_);
 
   // Check CompilerInfo validity. CompilerInfo that does not match with the
   // current local compiler will be removed or updated.
-  void UpdateOlderCompilerInfo();
+  void UpdateOlderCompilerInfo() LOCKS_EXCLUDED(mu_);
+  void UpdateOlderCompilerInfoUnlocked() EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   friend class CompilerInfoCacheTest;
 
@@ -131,22 +142,24 @@ class CompilerInfoCache {
   const CacheFile cache_file_;
   const int cache_holding_time_sec_;
 
-  std::unique_ptr<CompilerInfoValidator> validator_;
+  std::unique_ptr<CompilerInfoValidator> validator_ GUARDED_BY(mu_);
 
   mutable ReadWriteLock mu_;
 
   // key: compiler_info_key
-  std::unordered_map<std::string, CompilerInfoState*> compiler_info_;
+  std::unordered_map<std::string, CompilerInfoState*> compiler_info_
+      GUARDED_BY(mu_);
 
   // key: hash of CompilerInfoData. value: compiler_info_key.
   std::unordered_map<std::string,
-                     std::unordered_set<std::string>*> keys_by_hash_;
+                     std::unique_ptr<std::unordered_set<std::string>>>
+      keys_by_hash_ GUARDED_BY(mu_);
 
-  int num_stores_;
-  int num_store_dups_;
-  int num_miss_;
-  int num_fail_;
-  int loaded_size_;
+  int num_stores_ GUARDED_BY(mu_);
+  int num_store_dups_ GUARDED_BY(mu_);
+  int num_miss_ GUARDED_BY(mu_);
+  int num_fail_ GUARDED_BY(mu_);
+  int loaded_size_ GUARDED_BY(mu_);
 
   DISALLOW_COPY_AND_ASSIGN(CompilerInfoCache);
 };

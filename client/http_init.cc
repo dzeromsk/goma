@@ -39,6 +39,15 @@ static bool LoadConfig(const string& filename,
   return true;
 }
 
+static string GetHomeDir() {
+#ifndef _WIN32
+  static const char *kHomeEnv = "HOME";
+#else
+  static const char *kHomeEnv = "USERPROFILE";
+#endif
+  return GetEnv(kHomeEnv);
+}
+
 }  // namespace
 
 static void InitOAuth2(HttpClient::Options* http_options) {
@@ -73,9 +82,6 @@ void InitHttpClientOptions(HttpClient::Options* http_options) {
 
   http_options->reuse_connection = FLAGS_COMPILER_PROXY_REUSE_CONNECTION;
 
-  http_options->force_connect_errorneous_address =
-      FLAGS_COMPILER_PROXY_FORCE_CONNECT_ERRORNEOUS_ADDRESS;
-
   // Attempt to load and interpret LUCI_CONTEXT. It may define options for an
   // ambient authentication in LUCI environment. We'll decide whether we will
   // use them few lines below. Note that LUCI_CONTEXT environment variable may
@@ -95,13 +101,14 @@ void InitHttpClientOptions(HttpClient::Options* http_options) {
   }
 
   // Preference order
-  // 1. GOMA_HTTP_AUTHORIZATION_FILE
+  // - GOMA_HTTP_AUTHORIZATION_FILE
   //     - probably debug purpose only, overrides other settings.
-  // 2. GOMA_OAUTH2_CONFIG_FILE
+  // - GOMA_OAUTH2_CONFIG_FILE
   //    - overrides service account setting for run buildbot locally to test.
-  // 3. GOMA_SERVICE_ACCOUNT_JSON_FILE (maybe used in buildbots)
-  // 4. GOMA_USE_GCE_SERVICE_ACCOUNT (maybe used in buildbots)
-  // 5. LUCI_CONTEXT (ambient in luci environment, if it is enabled)
+  // - GOMA_SERVICE_ACCOUNT_JSON_FILE (maybe used in buildbots)
+  // - GOMA_USE_GCE_SERVICE_ACCOUNT (maybe used in buildbots)
+  // - LUCI_CONTEXT (ambient in luci environment, if it is enabled)
+  // - default goma oauth2 config file
   //
   // Note: having OAuth2 config and LUCI_CONTEXT at once is valid.
   //       (crbug.com/684735#c14).
@@ -143,7 +150,6 @@ void InitHttpClientOptions(HttpClient::Options* http_options) {
     // TODO: fallback if the file doesn't exit?
     http_options->service_account_json_filename =
         FLAGS_SERVICE_ACCOUNT_JSON_FILE;
-
     LOG_IF(WARNING, !FLAGS_GCE_SERVICE_ACCOUNT.empty())
         << "GOMA_GCE_SERVICE_ACCOUNT is set but ignored. "
         << FLAGS_GCE_SERVICE_ACCOUNT;
@@ -161,13 +167,9 @@ void InitHttpClientOptions(HttpClient::Options* http_options) {
               << "  default_account_id="
               << luci_context_auth.default_account_id;
     http_options->luci_context_auth = luci_context_auth;
+
   } else {
-#ifndef _WIN32
-    static const char *kHomeEnv = "HOME";
-#else
-    static const char *kHomeEnv = "USERPROFILE";
-#endif
-    const string homedir = GetEnv(kHomeEnv);
+    const string homedir = GetHomeDir();
     if (!homedir.empty()) {
       FLAGS_OAUTH2_CONFIG_FILE =
           file::JoinPath(homedir, ".goma_oauth2_config");

@@ -39,26 +39,28 @@ config("using_proto") {
   if (os == "win") {
     # Suppress warnings on Windows.
     cflags += [
-      "/wd4512",  # assignment operator could not be generated
-      "/wd4244",  # '=': conversion from 'uint32' to 'uint8'.
-      "/wd4127",  # conditional expression is constant
-      "/wd4125",  # decimal digit terminates octal escape sequence
       "/wd4100",  # unreferenced formal parameter
+      "/wd4125",  # decimal digit terminates octal escape sequence
+      "/wd4127",  # conditional expression is constant
+      "/wd4146",  # unary minus operator applied to unsigned type
+      "/wd4244",  # '=': conversion from 'uint32' to 'uint8'.
       "/wd4309",  # truncation of constant value
-      "/wd4838",  # require narrowing conversion
-      "/wd4505",  # unreferenced local function has been removed
       "/wd4456",  # declaration hides previous local declaration
+      "/wd4505",  # unreferenced local function has been removed
+      "/wd4512",  # assignment operator could not be generated
+      "/wd4838",  # require narrowing conversion
     ]
   }
   if (is_posix || is_clang) {
     cflags += [
       # Not to warn for headers.
-      "-Wno-unused-parameter",
+      "-Wno-bitfield-width",
+      "-Wno-deprecated",
+      "-Wno-implicit-fallthrough",
+      "-Wno-missing-field-initializers",
       "-Wno-sign-compare",
       "-Wno-unused-local-typedef",
-      "-Wno-deprecated",
-      "-Wno-bitfield-width",
-      "-Wno-missing-field-initializers",
+      "-Wno-unused-parameter",
     ]
   }
 }
@@ -114,6 +116,8 @@ protobuf_lite_sources = [
   "protobuf/src/google/protobuf/stubs/hash.h",
   "protobuf/src/google/protobuf/stubs/int128.cc",
   "protobuf/src/google/protobuf/stubs/int128.h",
+  "protobuf/src/google/protobuf/stubs/io_win32.cc",
+  "protobuf/src/google/protobuf/stubs/io_win32.h",
   "protobuf/src/google/protobuf/stubs/logging.h",
   "protobuf/src/google/protobuf/stubs/macros.h",
   "protobuf/src/google/protobuf/stubs/map_util.h",
@@ -376,13 +380,18 @@ static_library("protoc_lib") {
     "protobuf/src/google/protobuf/compiler/cpp/cpp_message.h",
     "protobuf/src/google/protobuf/compiler/cpp/cpp_message_field.cc",
     "protobuf/src/google/protobuf/compiler/cpp/cpp_message_field.h",
+    "protobuf/src/google/protobuf/compiler/cpp/cpp_message_layout_helper.h",
     "protobuf/src/google/protobuf/compiler/cpp/cpp_options.h",
+    "protobuf/src/google/protobuf/compiler/cpp/cpp_padding_optimizer.cc",
+    "protobuf/src/google/protobuf/compiler/cpp/cpp_padding_optimizer.h",
     "protobuf/src/google/protobuf/compiler/cpp/cpp_primitive_field.cc",
     "protobuf/src/google/protobuf/compiler/cpp/cpp_primitive_field.h",
     "protobuf/src/google/protobuf/compiler/cpp/cpp_service.cc",
     "protobuf/src/google/protobuf/compiler/cpp/cpp_service.h",
     "protobuf/src/google/protobuf/compiler/cpp/cpp_string_field.cc",
     "protobuf/src/google/protobuf/compiler/cpp/cpp_string_field.h",
+    "protobuf/src/google/protobuf/compiler/cpp/cpp_test_bad_identifiers.proto",
+    "protobuf/src/google/protobuf/compiler/cpp/cpp_test_large_enum_value.proto",
     "protobuf/src/google/protobuf/compiler/csharp/csharp_doc_comment.cc",
     "protobuf/src/google/protobuf/compiler/csharp/csharp_doc_comment.h",
     "protobuf/src/google/protobuf/compiler/csharp/csharp_enum.cc",
@@ -401,6 +410,7 @@ static_library("protoc_lib") {
     "protobuf/src/google/protobuf/compiler/csharp/csharp_message.h",
     "protobuf/src/google/protobuf/compiler/csharp/csharp_message_field.cc",
     "protobuf/src/google/protobuf/compiler/csharp/csharp_message_field.h",
+    "protobuf/src/google/protobuf/compiler/csharp/csharp_names.h",
     "protobuf/src/google/protobuf/compiler/csharp/csharp_options.h",
     "protobuf/src/google/protobuf/compiler/csharp/csharp_primitive_field.cc",
     "protobuf/src/google/protobuf/compiler/csharp/csharp_primitive_field.h",
@@ -416,6 +426,8 @@ static_library("protoc_lib") {
     "protobuf/src/google/protobuf/compiler/csharp/csharp_source_generator_base.h",
     "protobuf/src/google/protobuf/compiler/csharp/csharp_wrapper_field.cc",
     "protobuf/src/google/protobuf/compiler/csharp/csharp_wrapper_field.h",
+    "protobuf/src/google/protobuf/compiler/importer.cc",
+    "protobuf/src/google/protobuf/compiler/importer.h",
     "protobuf/src/google/protobuf/compiler/java/java_context.cc",
     "protobuf/src/google/protobuf/compiler/java/java_context.h",
     "protobuf/src/google/protobuf/compiler/java/java_doc_comment.cc",
@@ -464,6 +476,8 @@ static_library("protoc_lib") {
     "protobuf/src/google/protobuf/compiler/java/java_message_lite.h",
     "protobuf/src/google/protobuf/compiler/java/java_name_resolver.cc",
     "protobuf/src/google/protobuf/compiler/java/java_name_resolver.h",
+    "protobuf/src/google/protobuf/compiler/java/java_names.h",
+    "protobuf/src/google/protobuf/compiler/java/java_options.h",
     "protobuf/src/google/protobuf/compiler/java/java_primitive_field.cc",
     "protobuf/src/google/protobuf/compiler/java/java_primitive_field.h",
     "protobuf/src/google/protobuf/compiler/java/java_primitive_field_lite.cc",
@@ -496,10 +510,15 @@ static_library("protoc_lib") {
     "protobuf/src/google/protobuf/compiler/javanano/javanano_message.h",
     "protobuf/src/google/protobuf/compiler/javanano/javanano_message_field.cc",
     "protobuf/src/google/protobuf/compiler/javanano/javanano_message_field.h",
+    "protobuf/src/google/protobuf/compiler/javanano/javanano_params.h",
     "protobuf/src/google/protobuf/compiler/javanano/javanano_primitive_field.cc",
     "protobuf/src/google/protobuf/compiler/javanano/javanano_primitive_field.h",
+    "protobuf/src/google/protobuf/compiler/js/embed.cc",
     "protobuf/src/google/protobuf/compiler/js/js_generator.cc",
     "protobuf/src/google/protobuf/compiler/js/js_generator.h",
+    "protobuf/src/google/protobuf/compiler/js/well_known_types/any.js",
+    "protobuf/src/google/protobuf/compiler/js/well_known_types/struct.js",
+    "protobuf/src/google/protobuf/compiler/js/well_known_types/timestamp.js",
     "protobuf/src/google/protobuf/compiler/js/well_known_types_embed.h",
     "protobuf/src/google/protobuf/compiler/objectivec/objectivec_enum.cc",
     "protobuf/src/google/protobuf/compiler/objectivec/objectivec_enum.h",
@@ -525,18 +544,25 @@ static_library("protoc_lib") {
     "protobuf/src/google/protobuf/compiler/objectivec/objectivec_oneof.h",
     "protobuf/src/google/protobuf/compiler/objectivec/objectivec_primitive_field.cc",
     "protobuf/src/google/protobuf/compiler/objectivec/objectivec_primitive_field.h",
+    "protobuf/src/google/protobuf/compiler/package_info.h",
+    "protobuf/src/google/protobuf/compiler/parser.cc",
+    "protobuf/src/google/protobuf/compiler/parser.h",
     "protobuf/src/google/protobuf/compiler/php/php_generator.cc",
     "protobuf/src/google/protobuf/compiler/php/php_generator.h",
     "protobuf/src/google/protobuf/compiler/plugin.cc",
     "protobuf/src/google/protobuf/compiler/plugin.h",
     "protobuf/src/google/protobuf/compiler/plugin.pb.cc",
     "protobuf/src/google/protobuf/compiler/plugin.pb.h",
+    "protobuf/src/google/protobuf/compiler/plugin.proto",
     "protobuf/src/google/protobuf/compiler/python/python_generator.cc",
     "protobuf/src/google/protobuf/compiler/python/python_generator.h",
+    "protobuf/src/google/protobuf/compiler/ruby/ruby_generated_code.proto",
+    "protobuf/src/google/protobuf/compiler/ruby/ruby_generated_code_pb.rb",
     "protobuf/src/google/protobuf/compiler/ruby/ruby_generator.cc",
     "protobuf/src/google/protobuf/compiler/ruby/ruby_generator.h",
     "protobuf/src/google/protobuf/compiler/subprocess.cc",
     "protobuf/src/google/protobuf/compiler/subprocess.h",
+    "protobuf/src/google/protobuf/compiler/test_plugin.cc",
     "protobuf/src/google/protobuf/compiler/zip_writer.cc",
     "protobuf/src/google/protobuf/compiler/zip_writer.h",
 
@@ -583,11 +609,12 @@ executable("protoc") {
 
   deps = [
     ":protoc_lib",
+
     # Default manifest on Windows (a no-op elsewhere).
     # "//build/win:default_exe_manifest",
-  ]
 
-  deps += [ "//build/config/sanitizers:deps" ]
+    "//build/config:exe_and_shlib_deps",
+  ]
 }
 
 executable("js_embed") {
@@ -598,6 +625,9 @@ executable("js_embed") {
   configs -= [ "//build/config/compiler:goma_code" ]
   configs += [ "//build/config/compiler:no_goma_code" ]
 
+  deps = [
+    "//build/config:exe_and_shlib_deps",
+  ]
   cflags = protobuf_lite_cflags
 }
 

@@ -38,9 +38,8 @@ class DummyFileReader : public FileReader {
     if (create_) {
       is_created_ = true;
       return std::unique_ptr<FileReader>(new DummyFileReader(dummy));
-    } else {
-      return nullptr;
     }
+    return nullptr;
   }
 
   static void Reset(bool create) {

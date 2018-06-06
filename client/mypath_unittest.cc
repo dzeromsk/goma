@@ -9,6 +9,7 @@
 
 #include "file.h"
 #include "file_dir.h"
+#include "filesystem.h"
 #include "ioutil.h"
 #include "path.h"
 #include "util.h"
@@ -38,32 +39,40 @@ TEST(Util, GetUsernameWithoutEnv) {
   EXPECT_EQ(username, devtools_goma::GetUsernameEnv());
 }
 
+#if GTEST_HAS_DEATH_TEST
+
+TEST(Util, CheckTempDiretoryNotDirectory) {
+  const string& tmpdir = devtools_goma::GetGomaTmpDir();
+  file::RecursivelyDelete(tmpdir, file::Defaults());
+  CHECK(file::CreateDir(tmpdir.c_str(), file::CreationMode(0700)).ok())
+      << tmpdir;
+  const string& tmpdir_file =
+      file::JoinPath(tmpdir, "tmpdir_is_not_dir");
+  devtools_goma::WriteStringToFileOrDie("", tmpdir_file, 0700);
 #ifndef _WIN32
 // TODO: enable CheckTempDiretoryNotDirectory on win.
 // EXPECT_DEATH doesn't work well on windows?
 // it failed to capture fatal message, but got
 // *** Check failure stack trace: ***.
-TEST(Util, CheckTempDiretoryNotDirectory) {
-  const string& tmpdir = devtools_goma::GetGomaTmpDir();
-  devtools_goma::RecursivelyDelete(tmpdir);
-  CHECK(File::CreateDir(tmpdir.c_str(), 0700)) << tmpdir;
-  const string& tmpdir_file =
-      file::JoinPath(tmpdir, "tmpdir_is_not_dir");
-  devtools_goma::WriteStringToFileOrDie("", tmpdir_file, 0700);
   EXPECT_DEATH(devtools_goma::CheckTempDirectory(tmpdir_file),
                "private goma tmp dir is not dir");
-  devtools_goma::RecursivelyDelete(tmpdir);
+#else
+  EXPECT_DEATH(devtools_goma::CheckTempDirectory(tmpdir_file), "");
+#endif
+  file::RecursivelyDelete(tmpdir, file::Defaults());
 }
+
+#ifndef _WIN32
 
 TEST(Util, CheckTempDiretoryBadPermission) {
   const string& tmpdir = devtools_goma::GetGomaTmpDir();
-  devtools_goma::RecursivelyDelete(tmpdir);
+  file::RecursivelyDelete(tmpdir, file::Defaults());
   mode_t omask = umask(022);
   PCHECK(mkdir(tmpdir.c_str(), 0744) == 0) << tmpdir;
   umask(omask);
   EXPECT_DEATH(devtools_goma::CheckTempDirectory(tmpdir),
                "private goma tmp dir is not owned only by you.");
-  devtools_goma::RecursivelyDelete(tmpdir);
+  file::RecursivelyDelete(tmpdir, file::Defaults());
 }
-
 #endif
+#endif  // GTEST_HAS_DEATH_TEST

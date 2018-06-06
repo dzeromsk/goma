@@ -4,12 +4,16 @@
 
 #include "include_file_finder.h"
 
+#include <utility>
+
+#include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "counterz.h"
 #include "cpp_parser.h"
 #include "file_dir.h"
-#include "file_id_cache.h"
+#include "file_stat_cache.h"
 #include "include_file_utils.h"
+#include "list_dir_cache.h"
 #include "path.h"
 #include "path_resolver.h"
 
@@ -39,14 +43,16 @@ void IncludeFileFinder::Init(bool gch_hack) {
   gch_hack_ = gch_hack;
 }
 
-IncludeFileFinder::IncludeFileFinder(
-    const std::string& cwd,
-    bool ignore_case,
-    const std::vector<std::string>* include_dirs,
-    const std::vector<std::string>* framework_dirs,
-    FileIdCache* file_id_cache)
-    : cwd_(cwd), ignore_case_(ignore_case), include_dirs_(include_dirs),
-      framework_dirs_(framework_dirs), file_id_cache_(file_id_cache) {
+IncludeFileFinder::IncludeFileFinder(string cwd,
+                                     bool ignore_case,
+                                     const std::vector<string>* include_dirs,
+                                     const std::vector<string>* framework_dirs,
+                                     FileStatCache* file_stat_cache)
+    : cwd_(std::move(cwd)),
+      ignore_case_(ignore_case),
+      include_dirs_(include_dirs),
+      framework_dirs_(framework_dirs),
+      file_stat_cache_(file_stat_cache) {
   GOMA_COUNTERZ("IncludeFileFinder");
 
   files_in_include_dirs_.resize(include_dirs_->size());
@@ -55,10 +61,10 @@ IncludeFileFinder::IncludeFileFinder(
   // Files and directories are used to skip unnecessary file checks.
   for (size_t i = CppParser::kIncludeDirIndexStarting;
        i < include_dirs_->size(); ++i) {
-    const std::string& abs_include_dir = file::JoinPathRespectAbsolute(
-        cwd_, (*include_dirs)[i]);
+    const string& abs_include_dir =
+        file::JoinPathRespectAbsolute(cwd_, (*include_dirs)[i]);
     if (absl::EndsWith(abs_include_dir, ".hmap")) {
-      std::vector<std::pair<std::string, std::string>> entries;
+      std::vector<std::pair<string, string>> entries;
       if (!ReadHeaderMapContent(abs_include_dir, &entries)) {
         LOG(WARNING) << "failed to load header map:" << abs_include_dir;
         continue;
@@ -81,18 +87,17 @@ IncludeFileFinder::IncludeFileFinder(
     }
 
     std::vector<DirEntry> entries;
-    {
-      GOMA_COUNTERZ("ListDirectory");
-      if (!ListDirectory(abs_include_dir, &entries)) {
-        continue;
-      }
+    if (!ListDirCache::instance()->GetDirEntries(
+            abs_include_dir, file_stat_cache_->Get(abs_include_dir),
+            &entries)) {
+      continue;
     }
 
     for (const auto& entry : entries) {
       string name = entry.name;
 
       if (ignore_case_) {
-        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+        absl::AsciiStrToLower(&name);
       }
 
       files_in_include_dirs_[i].insert(name);
@@ -107,8 +112,7 @@ string IncludeFileFinder::TopPathComponent(string path_in_directive,
                                            bool ignore_case) {
   string::size_type slash_pos = string::npos;
   if (ignore_case) {
-    std::transform(path_in_directive.begin(), path_in_directive.end(),
-                   path_in_directive.begin(), ::tolower);
+    absl::AsciiStrToLower(&path_in_directive);
     // Since some Windows SDK has a include like "foo\\bar",
     // we need to support this.
     slash_pos = path_in_directive.find_first_of("\\/");
@@ -128,6 +132,7 @@ bool IncludeFileFinder::Lookup(
     string* filepath,
     int* include_dir_index) {
   GOMA_COUNTERZ("Lookup");
+  VLOG(2) << "Lookup=" << path_in_directive;
 
   {
     // Check cache.
@@ -145,6 +150,7 @@ bool IncludeFileFinder::Lookup(
   // e.g. if #include <foo/bar.h> comes, include directories not having
   // foo directory are not searched.
   string top = TopPathComponent(path_in_directive, ignore_case_);
+  VLOG(2) << "top=" << top;
 
   size_t search_start_index = *include_dir_index;
 
@@ -179,6 +185,7 @@ bool IncludeFileFinder::Lookup(
     if (!absl::StartsWith(top, ".") &&
         files_in_include_dirs_[i].find(top) ==
         files_in_include_dirs_[i].end()) {
+      VLOG(2) << "not in " << i;
       continue;
     }
 
@@ -194,21 +201,24 @@ bool IncludeFileFinder::Lookup(
     string try_path;
     PathResolver::PlatformConvertToString(join_path, &try_path);
     try_path = RemoveDuplicateSlash(try_path);
+    VLOG(2) << "try_path=" << try_path;
 
     if (gch_hack_enabled()) {
       const string& gch_path = try_path + GOMA_GCH_SUFFIX;
-      FileId fileid = file_id_cache_->Get(
-          file::JoinPathRespectAbsolute(cwd_, gch_path));
-      if (!fileid.is_directory && fileid.IsValid()) {
+      FileStat filestat =
+          file_stat_cache_->Get(file::JoinPathRespectAbsolute(cwd_, gch_path));
+      if (!filestat.is_directory && filestat.IsValid()) {
         *filepath = gch_path;
         *include_dir_index = i;
         return true;
       }
     }
 
-    FileId fileid = file_id_cache_->Get(
-        file::JoinPathRespectAbsolute(cwd_,try_path));
-    if (fileid.is_directory || !fileid.IsValid()) {
+    const string full_try_path = file::JoinPathRespectAbsolute(cwd_, try_path);
+    FileStat filestat = file_stat_cache_->Get(full_try_path);
+    if (filestat.is_directory || !filestat.IsValid()) {
+      VLOG(2) << "filestat error:" << full_try_path
+              << " " << filestat.DebugString();
       continue;
     }
 
@@ -224,24 +234,24 @@ bool IncludeFileFinder::Lookup(
   return LookupFramework(path_in_directive, filepath);
 }
 
-bool IncludeFileFinder::LookupFramework(const std::string& path_in_directive,
-                                        std::string* filepath) {
+bool IncludeFileFinder::LookupFramework(const string& path_in_directive,
+                                        string* filepath) {
   auto sep_pos = path_in_directive.find('/');
-  if (sep_pos == std::string::npos) {
+  if (sep_pos == string::npos) {
     return false;
   }
 
-  const std::string framework_name =
+  const string framework_name =
       path_in_directive.substr(0, sep_pos) + ".framework";
-  const std::string base_name = path_in_directive.substr(sep_pos + 1);
+  const string base_name = path_in_directive.substr(sep_pos + 1);
 
   for (const auto& framework_dir : *framework_dirs_) {
     for (const auto& header_dir : {"Headers", "PrivateHeaders"}) {
-      const std::string filename = file::JoinPath(
-          framework_dir, framework_name, header_dir, base_name);
-      const FileId fileid = file_id_cache_->Get(
-          file::JoinPathRespectAbsolute(cwd_, filename));
-      if (!fileid.is_directory && fileid.IsValid()) {
+      const string filename =
+          file::JoinPath(framework_dir, framework_name, header_dir, base_name);
+      const FileStat filestat =
+          file_stat_cache_->Get(file::JoinPathRespectAbsolute(cwd_, filename));
+      if (!filestat.is_directory && filestat.IsValid()) {
         *filepath = filename;
         return true;
       }
@@ -250,11 +260,11 @@ bool IncludeFileFinder::LookupFramework(const std::string& path_in_directive,
   return false;
 }
 
-bool IncludeFileFinder::LookupSubframework(const std::string& path_in_directive,
-                                           const std::string& current_directory,
-                                           std::string* filepath) {
-  const std::string& abs_current = file::JoinPathRespectAbsolute(
-      cwd_, current_directory);
+bool IncludeFileFinder::LookupSubframework(const string& path_in_directive,
+                                           const string& current_directory,
+                                           string* filepath) {
+  const string& abs_current =
+      file::JoinPathRespectAbsolute(cwd_, current_directory);
   for (const auto& fwdir : *framework_dirs_) {
     if (CreateSubframeworkIncludeFilename(
             file::JoinPathRespectAbsolute(cwd_, fwdir),

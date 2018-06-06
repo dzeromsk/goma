@@ -15,11 +15,9 @@
 #include <string>
 #include <vector>
 
-#include <glog/logging.h>
-#include <glog/stl_logging.h>
-#include <gtest/gtest.h>
-
+#include "absl/memory/memory.h"
 #include "compiler_info.h"
+#include "gtest/gtest.h"
 #include "ioutil.h"
 #include "library_path_resolver.h"
 #include "linker_input_processor.h"
@@ -45,7 +43,7 @@ static const char *kMachCigam64 = "\xcf\xfa\xed\xfe blahblahblah";
 class LinkerInputProcessorTest : public testing::Test {
  public:
   void SetUp() override {
-    tmpdir_util_.reset(new TmpdirUtil("linker_input_processor_test"));
+    tmpdir_util_ = absl::make_unique<TmpdirUtil>("linker_input_processor_test");
 
     // To be used by LibraryPathResolver::fakeroot_.
     tmpdir_ = tmpdir_util_->tmpdir();

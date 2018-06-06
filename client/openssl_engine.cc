@@ -19,6 +19,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/base/call_once.h"
+#include "absl/memory/memory.h"
 #include "absl/strings/match.h"
 #include "autolock_timer.h"
 #include "callback.h"
@@ -51,11 +53,7 @@ static const time_t kErrorTimeoutSecs = 60;
 // Wait for this period if no more sockets are in the pool.
 static const unsigned int kWaitForThingsGetsBetterInMs = 1000;
 
-#ifndef _WIN32
-pthread_once_t g_openssl_init_once = PTHREAD_ONCE_INIT;
-#else
-INIT_ONCE g_openssl_init_once = INIT_ONCE_STATIC_INIT;
-#endif
+absl::once_flag g_openssl_init_once;
 
 class ScopedBIOFree {
  public:
@@ -291,7 +289,7 @@ class OpenSSLSocketPoolCache {
  public:
   static void Init() {
     if (!cache_) {
-      cache_ = new OpenSSLSocketPoolCache;
+      cache_.reset(new OpenSSLSocketPoolCache);
       atexit(FinalizeOpenSSLSocketPoolCache);
     }
   }
@@ -303,16 +301,10 @@ class OpenSSLSocketPoolCache {
 
  private:
   OpenSSLSocketPoolCache() {}
-  ~OpenSSLSocketPoolCache() {
-    for (const auto& iter : socket_pools_) {
-      delete iter.second;
-    }
-  }
+  ~OpenSSLSocketPoolCache() = default;
+  friend std::unique_ptr<OpenSSLSocketPoolCache>::deleter_type;
 
-  static void FinalizeOpenSSLSocketPoolCache() {
-    delete cache_;
-    cache_ = nullptr;
-  }
+  static void FinalizeOpenSSLSocketPoolCache() { cache_.reset(); }
 
   SocketPool* GetSocketPoolInternal(const string& host, int port) {
     std::ostringstream ss;
@@ -320,24 +312,23 @@ class OpenSSLSocketPoolCache {
     const string key = ss.str();
 
     AUTOLOCK(lock, &socket_pool_mu_);
-    SocketPool* socket_pool = nullptr;
-    std::pair<std::unordered_map<string, SocketPool*>::iterator, bool> p =
-        socket_pools_.insert(std::make_pair(key, socket_pool));
+    auto p = socket_pools_.emplace(key, nullptr);
     if (p.second) {
-      p.first->second = new SocketPool(host, port);
+      p.first->second = absl::make_unique<SocketPool>(host, port);
     }
-    return p.first->second;
+    return p.first->second.get();
   }
 
   Lock socket_pool_mu_;
-  std::unordered_map<string, SocketPool*> socket_pools_;
+  std::unordered_map<string, std::unique_ptr<SocketPool>> socket_pools_;
 
-  static OpenSSLSocketPoolCache* cache_;
+  static std::unique_ptr<OpenSSLSocketPoolCache> cache_;
   DISALLOW_COPY_AND_ASSIGN(OpenSSLSocketPoolCache);
 };
 
 /* static */
-OpenSSLSocketPoolCache* OpenSSLSocketPoolCache::cache_ = nullptr;
+std::unique_ptr<OpenSSLSocketPoolCache> OpenSSLSocketPoolCache::cache_ =
+    nullptr;
 
 class OpenSSLCertificateStore {
  public:
@@ -445,8 +436,8 @@ class OpenSSLCertificateStore {
                    << source;
       return false;
     }
-    it.first->second.reset(
-        new std::vector<std::unique_ptr<X509, ScopedX509Free>>());
+    it.first->second =
+        absl::make_unique<std::vector<std::unique_ptr<X509, ScopedX509Free>>>();
     for (;;) {
       std::unique_ptr<X509, ScopedX509Free> x509(
           PEM_read_bio_X509_AUX(bio.get(), nullptr, nullptr, nullptr));
@@ -578,13 +569,6 @@ void InitOpenSSL() {
   LOG(INFO) << "OpenSSL is initialized.";
 }
 
-#ifdef _WIN32
-BOOL WINAPI InitOpenSSLWin(PINIT_ONCE, PVOID, PVOID*) {
-  InitOpenSSL();
-  return TRUE;
-}
-#endif
-
 int NormalizeChar(int input) {
   if (!isalnum(input)) {
     return '_';
@@ -606,11 +590,11 @@ ScopedX509CRL ParseCrl(const string& crl_str) {
         BIO_new_mem_buf(crl_str.data(), crl_str.size()));
     return ScopedX509CRL(
         PEM_read_bio_X509_CRL(bio.get(), nullptr, nullptr, nullptr));
-  } else {  // DER
-    const unsigned char* p =
-        reinterpret_cast<const unsigned char*>(crl_str.data());
-    return ScopedX509CRL(d2i_X509_CRL(nullptr, &p, crl_str.size()));
   }
+  // DER
+  const unsigned char* p =
+      reinterpret_cast<const unsigned char*>(crl_str.data());
+  return ScopedX509CRL(d2i_X509_CRL(nullptr, &p, crl_str.size()));
 }
 
 string GetSubjectCommonName(X509* x509) {
@@ -1341,7 +1325,8 @@ void OpenSSLEngine::Init(OpenSSLContext* ctx) {
   // Since internal_bio is free'd by SSL_free, we do not need to keep this
   // separately.
   BIO* internal_bio;
-  CHECK(BIO_new_bio_pair(&internal_bio, kBufSize, &network_bio_, kBufSize))
+  CHECK(BIO_new_bio_pair(&internal_bio, kNetworkBufSize, &network_bio_,
+                         kNetworkBufSize))
       << "BIO_new_bio_pair failed.";
   SSL_set_bio(ssl_, internal_bio, internal_bio);
 
@@ -1511,11 +1496,7 @@ string OpenSSLEngine::GetLastErrorMessage() const {
 
 OpenSSLEngineCache::OpenSSLEngineCache() :
     ctx_(nullptr), crl_max_valid_duration_(-1) {
-#ifndef _WIN32
-  pthread_once(&g_openssl_init_once, InitOpenSSL);
-#else
-  InitOnceExecuteOnce(&g_openssl_init_once, InitOpenSSLWin, nullptr, nullptr);
-#endif
+  absl::call_once(g_openssl_init_once, InitOpenSSL);
 }
 
 OpenSSLEngineCache::~OpenSSLEngineCache() {
@@ -1528,17 +1509,17 @@ OpenSSLEngineCache::~OpenSSLEngineCache() {
   CHECK(!ctx_.get() || ctx_->ref_cnt() == 0UL);
 }
 
-OpenSSLEngine* OpenSSLEngineCache::GetOpenSSLEngineUnlocked() {
+std::unique_ptr<OpenSSLEngine> OpenSSLEngineCache::GetOpenSSLEngineUnlocked() {
   if (ctx_.get() == nullptr) {
     CHECK(OpenSSLCertificateStore::IsReady())
         << "OpenSSLCertificateStore does not have any certificates.";
-    ctx_.reset(new OpenSSLContext);
+    ctx_ = absl::make_unique<OpenSSLContext>();
     ctx_->Init(hostname_, crl_max_valid_duration_,
                NewCallback(this, &OpenSSLEngineCache::InvalidateContext));
     if (!proxy_host_.empty())
       ctx_->SetProxy(proxy_host_, proxy_port_);
   }
-  OpenSSLEngine* engine = new OpenSSLEngine();
+  std::unique_ptr<OpenSSLEngine> engine(new OpenSSLEngine());
   engine->Init(ctx_.get());
   return engine;
 }
@@ -1558,13 +1539,14 @@ TLSEngine* OpenSSLEngineCache::NewTLSEngine(int sock) {
   auto found = ssl_map_.find(sock);
   if (found != ssl_map_.end()) {
     found->second->SetRecycled();
-    return found->second;
+    return found->second.get();
   }
-  OpenSSLEngine* engine = GetOpenSSLEngineUnlocked();
-  CHECK(ssl_map_.insert(std::make_pair(sock, engine)).second)
+  std::unique_ptr<OpenSSLEngine> engine = GetOpenSSLEngineUnlocked();
+  OpenSSLEngine* engine_ptr = engine.get();
+  CHECK(ssl_map_.emplace(sock, std::move(engine)).second)
       << "ssl_map_ should not have the same key:" << sock;
   VLOG(1) << "SSL engine allocated. sock=" << sock;
-  return engine;
+  return engine_ptr;
 }
 
 void OpenSSLEngineCache::WillCloseSocket(int sock) {
@@ -1572,7 +1554,6 @@ void OpenSSLEngineCache::WillCloseSocket(int sock) {
   VLOG(1) << "SSL engine release. sock=" << sock;
   auto found = ssl_map_.find(sock);
   if (found != ssl_map_.end()) {
-    delete found->second;
     ssl_map_.erase(found);
   }
 

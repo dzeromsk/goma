@@ -33,7 +33,7 @@ class SubProcessControllerServer: public SubProcessController {
  public:
   // Take ownsership of sock_fd.
   SubProcessControllerServer(int sock_fd,
-                             const SubProcessController::Options& options);
+                             SubProcessController::Options options);
   ~SubProcessControllerServer() override;
 
   void Loop();

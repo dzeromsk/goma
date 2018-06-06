@@ -11,9 +11,9 @@ namespace devtools_goma {
 
 class WorkerThreadManager;
 
-void ApplySettings(const std::string& settings_server,
-                   const std::string& expect_settings,
-                   WorkerThreadManager* wm);
+std::string ApplySettings(const std::string& settings_server,
+                          const std::string& expect_settings,
+                          WorkerThreadManager* wm);
 
 }  // namespace devtools_goma
 

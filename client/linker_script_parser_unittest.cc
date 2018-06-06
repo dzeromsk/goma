@@ -7,11 +7,9 @@
 #include <string>
 #include <vector>
 
-#include <glog/logging.h>
-#include <glog/stl_logging.h>
-#include <gtest/gtest.h>
-
+#include "absl/memory/memory.h"
 #include "content.h"
+#include "gtest/gtest.h"
 #include "linker_script_parser.h"
 #include "unittest_util.h"
 
@@ -22,7 +20,7 @@ namespace devtools_goma {
 class LinkerScriptParserTest : public testing::Test {
  public:
   void SetUp() override {
-    tmpdir_util_.reset(new TmpdirUtil("linker_script_test"));
+    tmpdir_util_ = absl::make_unique<TmpdirUtil>("linker_script_test");
     // To be used by LinkerScriptParser::fakeroot_.
     tmpdir_ = tmpdir_util_->tmpdir();
     LinkerScriptParser::fakeroot_ = tmpdir_.c_str();

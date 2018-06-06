@@ -21,9 +21,15 @@ namespace devtools_goma {
 class SimpleTimer {
  public:
   enum CtorFlag { NO_START, START };
-  explicit SimpleTimer(CtorFlag cf);
-  SimpleTimer();
-  ~SimpleTimer();
+  explicit SimpleTimer(CtorFlag cf) {
+    if (cf == START) {
+      Start();
+    }
+  }
+  SimpleTimer() {
+    Start();
+  }
+
   void Start();
 
   // Return elapsed time in seconds.

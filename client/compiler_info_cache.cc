@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "absl/memory/memory.h"
 #include "absl/strings/str_join.h"
 #include "autolock_timer.h"
 #include "compiler_flags.h"
@@ -89,9 +90,11 @@ CompilerInfoCache::~CompilerInfoCache() {
 }
 
 void CompilerInfoCache::Clear() {
-  for (auto& it : keys_by_hash_) {
-    delete it.second;
-  }
+  AUTO_EXCLUSIVE_LOCK(lock, &mu_);
+  ClearUnlocked();
+}
+
+void CompilerInfoCache::ClearUnlocked() {
   keys_by_hash_.clear();
   for (auto& it : compiler_info_) {
     it.second->Deref();
@@ -180,7 +183,7 @@ CompilerInfoState* CompilerInfoCache::Store(
   {
     auto found = keys_by_hash_.find(hash);
     if (found != keys_by_hash_.end()) {
-      std::unordered_set<string>* keys = found->second;
+      std::unordered_set<string>* keys = found->second.get();
       if (!keys->empty()) {
         const string& compiler_info_key = *keys->begin();
         state.reset(LookupUnlocked(
@@ -228,10 +231,9 @@ CompilerInfoState* CompilerInfoCache::Store(
     }
   }
   {
-    std::unordered_set<string>* keys = nullptr;
-    auto p = keys_by_hash_.insert(std::make_pair(hash, keys));
+    auto p = keys_by_hash_.emplace(hash, nullptr);
     if (p.second) {
-      p.first->second = new std::unordered_set<string>;
+      p.first->second = absl::make_unique<std::unordered_set<string>>();
     }
     p.first->second->insert(compiler_info_key);
     LOG(INFO) << "hash=" << hash << " key=" << compiler_info_key;
@@ -243,7 +245,6 @@ CompilerInfoState* CompilerInfoCache::Store(
       p->second->erase(compiler_info_key);
       if (p->second->empty()) {
         LOG(INFO) << "delete hash=" << hash;
-        delete p->second;
         keys_by_hash_.erase(p);
       }
     }
@@ -407,6 +408,7 @@ int CompilerInfoCache::LoadedSize() const {
 
 void CompilerInfoCache::SetValidator(CompilerInfoValidator* validator) {
   CHECK(validator);
+  AUTO_EXCLUSIVE_LOCK(lock, &mu_);
   validator_.reset(validator);
 }
 
@@ -436,12 +438,12 @@ bool CompilerInfoCache::Load() {
     return false;
   }
 
-  Unmarshal(table);
+  UnmarshalUnlocked(table);
   if (table.built_revision() != kBuiltRevisionString) {
     LOG(WARNING) << "loaded from " << cache_file_.filename()
                  << " mismatch built_revision: got=" << table.built_revision()
                  << " want=" << kBuiltRevisionString;
-    Clear();
+    ClearUnlocked();
     return false;
   }
 
@@ -450,19 +452,23 @@ bool CompilerInfoCache::Load() {
   LOG(INFO) << "loaded from " << cache_file_.filename()
             << " loaded size " << loaded_size_;
 
-  UpdateOlderCompilerInfo();
+  UpdateOlderCompilerInfoUnlocked();
 
   return true;
 }
 
 void CompilerInfoCache::UpdateOlderCompilerInfo() {
+  AUTO_EXCLUSIVE_LOCK(lock, &mu_);
+  UpdateOlderCompilerInfoUnlocked();
+}
+
+void CompilerInfoCache::UpdateOlderCompilerInfoUnlocked() {
   // Check CompilerInfo validity. Obsolete CompilerInfo will be removed.
   // Since calculating sha256 is slow, we need cache. Otherwise, we will
   // need more than 2 seconds to check.
-  std::unordered_map<string, string> sha256_cache;
+  SHA256HashCache sha256_cache;
   std::vector<string> keys_to_remove;
   time_t now = time(nullptr);
-
   for (const auto& entry : compiler_info_) {
     const std::string& key = entry.first;
     CompilerInfoState* state = entry.second;
@@ -486,8 +492,8 @@ void CompilerInfoCache::UpdateOlderCompilerInfo() {
       continue;
     }
 
-    if (state->compiler_info_.UpdateFileIdIfHashMatch(&sha256_cache)) {
-      LOG(INFO) << "compiler fileid didn't match, but hash matched: "
+    if (state->compiler_info_.UpdateFileStatIfHashMatch(&sha256_cache)) {
+      LOG(INFO) << "compiler filestat didn't match, but hash matched: "
                 << abs_local_compiler_path;
       continue;
     }
@@ -507,8 +513,14 @@ void CompilerInfoCache::UpdateOlderCompilerInfo() {
 }
 
 bool CompilerInfoCache::Unmarshal(const CompilerInfoDataTable& table) {
+  AUTO_EXCLUSIVE_LOCK(lock, &mu_);
+  return UnmarshalUnlocked(table);
+}
+
+bool CompilerInfoCache::UnmarshalUnlocked(const CompilerInfoDataTable& table) {
   for (const auto& it : table.compiler_info_data()) {
-    std::unordered_set<string>* keys = new std::unordered_set<string>;
+    std::unique_ptr<std::unordered_set<string>> keys(
+        new std::unordered_set<string>);
     for (const auto& key : it.keys()) {
       keys->insert(key);
     }
@@ -521,15 +533,13 @@ bool CompilerInfoCache::Unmarshal(const CompilerInfoDataTable& table) {
       compiler_info_.insert(std::make_pair(key, state.get()));
       state.get()->Ref();
     }
-    keys_by_hash_.insert(std::make_pair(hash, keys));
+    keys_by_hash_.emplace(hash, std::move(keys));
   }
   // TODO: can be void?
   return true;
 }
 
 bool CompilerInfoCache::Save() {
-  AUTO_EXCLUSIVE_LOCK(lock, &mu_);
-
   LOG(INFO) << "saving to " << cache_file_.filename();
 
   CompilerInfoDataTable table;
@@ -546,6 +556,11 @@ bool CompilerInfoCache::Save() {
 }
 
 bool CompilerInfoCache::Marshal(CompilerInfoDataTable* table) {
+  AUTO_SHARED_LOCK(lock, &mu_);
+  return MarshalUnlocked(table);
+}
+
+bool CompilerInfoCache::MarshalUnlocked(CompilerInfoDataTable* table) {
   std::unordered_map<string, CompilerInfoDataTable::Entry*> by_hash;
   for (const auto& it : compiler_info_) {
     const string& info_key = it.first;

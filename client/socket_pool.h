@@ -50,9 +50,6 @@ class SocketPool : public SocketFactory {
   // it needs to open new connection.
   void CloseSocket(ScopedSocket&& sock, bool err) override;
 
-  // Clears errors associated with addresses.
-  void ClearErrors() override;
-
   string DestName() const override;
   string host_name() const override { return host_name_; }
   int port() const override { return port_; }
@@ -88,7 +85,7 @@ class SocketPool : public SocketFactory {
   // connected socket into socket_pool_.
   // Returns FAIL if no address is available.
   // Returns ERR_TIMEOUT if timeout.
-  Errno InitializeUnlocked();
+  Errno InitializeUnlocked() EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   // Sets error_timetamp in AddrData for sock to t
   void SetErrorTimestampUnlocked(int sock, time_t t);

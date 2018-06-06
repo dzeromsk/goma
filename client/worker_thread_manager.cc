@@ -69,9 +69,9 @@ static void DontCallForkInWorkerThreadManager() {
 #endif
 
 WorkerThreadManager::WorkerThreadManager()
-    : alarm_worker_(nullptr),
-      next_worker_index_(0),
+    : next_worker_index_(0),
       next_pool_(kFreePool + 1),
+      alarm_worker_(nullptr),
       next_periodic_closure_id_(1) {
   WorkerThread::Initialize();
 #ifndef _WIN32

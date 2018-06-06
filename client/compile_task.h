@@ -16,13 +16,14 @@
 
 #include <json/json.h>
 
+#include "absl/base/call_once.h"
 #include "basictypes.h"
+#include "compile_service.h"
 #include "compiler_info.h"
 #include "compiler_specific.h"
-#include "compile_service.h"
 #include "deps_cache.h"
-#include "file_id.h"
-#include "file_id_cache.h"
+#include "file_stat.h"
+#include "file_stat_cache.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "google/protobuf/repeated_field.h"
 MSVC_POP_WARNING()
@@ -127,9 +128,10 @@ class CompileTask {
   friend class CompilerProxyHistogram;
   struct RenameParam;
   struct ContentOutputParam;
-  struct RunIncludeProcessorParam;
+  struct RunCppIncludeProcessorParam;
   struct RunLinkerInputProcessorParam;
   struct RunJarParserParam;
+  struct ReadThinLTOImportsParam;
 
   ~CompileTask();
 
@@ -253,8 +255,10 @@ class CompileTask {
           const;
   void UpdateRequiredFiles();
   void GetIncludeFiles();
-  void RunIncludeProcessor(std::unique_ptr<RunIncludeProcessorParam> param);
-  void RunIncludeProcessorDone(std::unique_ptr<RunIncludeProcessorParam> param);
+  void RunCppIncludeProcessor(
+      std::unique_ptr<RunCppIncludeProcessorParam> param);
+  void RunCppIncludeProcessorDone(
+      std::unique_ptr<RunCppIncludeProcessorParam> param);
   void GetLinkRequiredFiles();
   void RunLinkerInputProcessor(
       std::unique_ptr<RunLinkerInputProcessorParam> param);
@@ -263,6 +267,9 @@ class CompileTask {
   void GetJavaRequiredFiles();
   void RunJarParser(std::unique_ptr<RunJarParserParam> param);
   void RunJarParserDone(std::unique_ptr<RunJarParserParam> param);
+  void GetThinLTOImports();
+  void ReadThinLTOImports(std::unique_ptr<ReadThinLTOImportsParam> param);
+  void ReadThinLTOImportsDone(std::unique_ptr<ReadThinLTOImportsParam> param);
   void UpdateRequiredFilesDone(bool ok);
   void SetupRequestDone(bool ok);
 
@@ -317,9 +324,6 @@ class CompileTask {
   void AddErrorToResponse(
       ErrDest dest, const string& error_message, bool set_error);
 
-#ifdef _WIN32
-  static BOOL WINAPI InitializeWinOnce(PINIT_ONCE, PVOID, PVOID*);
-#endif
   static void InitializeStaticOnce();
 
   CompileService* service_;
@@ -362,13 +366,12 @@ class CompileTask {
   string flag_dump_;
   std::set<string> required_files_;
 
-  // Caches all FileId in this compilation unit, since creating FileId is slow
-  // especially on Windows.
-  // So that FileIdCache doesn't need to have lock,
-  // 2 FileIdCache instances are used for input/output in CompileTask.
+  // Caches all FileStat in this compilation unit, since creating FileStat is
+  // slow especially on Windows. So that FileStatCache doesn't need to have
+  // lock, 2 FileStatCache instances are used for input/output in CompileTask.
   // TODO: Maybe we can merge this with |required_files_|.
-  std::unique_ptr<FileIdCache> input_file_id_cache_;
-  std::unique_ptr<FileIdCache> output_file_id_cache_;
+  std::unique_ptr<FileStatCache> input_file_stat_cache_;
+  std::unique_ptr<FileStatCache> output_file_stat_cache_;
 
   // |system_library_paths_| is used only when linking_ == true.
   std::vector<string> system_library_paths_;
@@ -451,8 +454,6 @@ class CompileTask {
   // DepsCache
   DepsCache::Identifier deps_identifier_;
 
-  // LocalOutputCache
-  bool localoutputcache_lookup_succeeded_;
   // Even if lookup failed, we'd like to keep key after calculation so that
   // we can put cache later and at that time we don't need to recalculate
   // the key.
@@ -470,15 +471,10 @@ class CompileTask {
   // Timestamp that this task transmitted the request to Goma.
   millitime_t last_req_timestamp_ms_;
 
-#ifndef _WIN32
-  static pthread_once_t init_once_;
-#else
-  static INIT_ONCE init_once_;
-#endif
+  static absl::once_flag init_once_;
 
-  // protects link_file_req_tasks_.
   static Lock global_mu_;
-  static std::deque<CompileTask*>* link_file_req_tasks_;
+  static std::deque<CompileTask*>* link_file_req_tasks_ GUARDED_BY(global_mu_);
 
   DISALLOW_COPY_AND_ASSIGN(CompileTask);
 };

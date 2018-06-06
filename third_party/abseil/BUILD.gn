@@ -10,16 +10,12 @@ static_library("abseil") {
   # In abseil directory,
   # $ find src | egrep '\.(h|cc|inc)$' |
   #       grep -v '_test' | \
-  #       grep -v 'stack_consumption' | \
+  #       grep -v 'test_util' | \
+  #       grep -v 'nonprod' | \
+  #       grep -v 'benchmark.cc' | \
   #       sed -e 's/^/"/' -e 's/$/",/' | sort
   # Note: a few unnecessary files might be left. You might need to
   # remove it manually.
-  #
-  # Especially this file is not used.
-  #   "src/absl/synchronization/internal/mutex_nonprod.cc"
-  # On Windows, stack_consumption.{cc, h} does not build with clang-cl.
-  # So, they're removed. See https://github.com/abseil/abseil-cpp/issues/92
-  # for more info.
   sources = [
     "src/absl/algorithm/algorithm.h",
     "src/absl/algorithm/container.h",
@@ -32,6 +28,7 @@ static_library("abseil") {
     "src/absl/base/internal/atomic_hook.h",
     "src/absl/base/internal/cycleclock.cc",
     "src/absl/base/internal/cycleclock.h",
+    "src/absl/base/internal/direct_mmap.h",
     "src/absl/base/internal/endian.h",
     "src/absl/base/internal/identity.h",
     "src/absl/base/internal/inline_variable.h",
@@ -39,14 +36,6 @@ static_library("abseil") {
     "src/absl/base/internal/low_level_alloc.cc",
     "src/absl/base/internal/low_level_alloc.h",
     "src/absl/base/internal/low_level_scheduling.h",
-    "src/absl/base/internal/malloc_extension.cc",
-    "src/absl/base/internal/malloc_extension.h",
-    "src/absl/base/internal/malloc_extension_c.h",
-    "src/absl/base/internal/malloc_hook.cc",
-    "src/absl/base/internal/malloc_hook.h",
-    "src/absl/base/internal/malloc_hook_c.h",
-    "src/absl/base/internal/malloc_hook_invoke.h",
-    "src/absl/base/internal/malloc_hook_mmap_linux.inc",
     "src/absl/base/internal/per_thread_tls.h",
     "src/absl/base/internal/pretty_function.h",
     "src/absl/base/internal/raw_logging.cc",
@@ -77,10 +66,18 @@ static_library("abseil") {
     "src/absl/base/thread_annotations.h",
     "src/absl/container/fixed_array.h",
     "src/absl/container/inlined_vector.h",
+    "src/absl/container/internal/test_instance_tracker.cc",
+    "src/absl/container/internal/test_instance_tracker.h",
+    "src/absl/debugging/failure_signal_handler.cc",
+    "src/absl/debugging/failure_signal_handler.h",
     "src/absl/debugging/internal/address_is_readable.cc",
     "src/absl/debugging/internal/address_is_readable.h",
+    "src/absl/debugging/internal/demangle.cc",
+    "src/absl/debugging/internal/demangle.h",
     "src/absl/debugging/internal/elf_mem_image.cc",
     "src/absl/debugging/internal/elf_mem_image.h",
+    "src/absl/debugging/internal/examine_stack.cc",
+    "src/absl/debugging/internal/examine_stack.h",
     "src/absl/debugging/internal/stacktrace_aarch64-inl.inc",
     "src/absl/debugging/internal/stacktrace_arm-inl.inc",
     "src/absl/debugging/internal/stacktrace_config.h",
@@ -89,6 +86,7 @@ static_library("abseil") {
     "src/absl/debugging/internal/stacktrace_unimplemented-inl.inc",
     "src/absl/debugging/internal/stacktrace_win32-inl.inc",
     "src/absl/debugging/internal/stacktrace_x86-inl.inc",
+    "src/absl/debugging/internal/symbolize.h",
     "src/absl/debugging/internal/vdso_support.cc",
     "src/absl/debugging/internal/vdso_support.h",
     "src/absl/debugging/leak_check.cc",
@@ -96,6 +94,11 @@ static_library("abseil") {
     "src/absl/debugging/leak_check_disable.cc",
     "src/absl/debugging/stacktrace.cc",
     "src/absl/debugging/stacktrace.h",
+    "src/absl/debugging/symbolize.cc",
+    "src/absl/debugging/symbolize.h",
+    "src/absl/debugging/symbolize_elf.inc",
+    "src/absl/debugging/symbolize_unimplemented.inc",
+    "src/absl/debugging/symbolize_win32.inc",
     "src/absl/memory/memory.h",
     "src/absl/meta/type_traits.h",
     "src/absl/numeric/int128.cc",
@@ -142,7 +145,6 @@ static_library("abseil") {
     "src/absl/synchronization/internal/graphcycles.cc",
     "src/absl/synchronization/internal/graphcycles.h",
     "src/absl/synchronization/internal/kernel_timeout.h",
-    "src/absl/synchronization/internal/mutex_nonprod.inc",
     "src/absl/synchronization/internal/per_thread_sem.cc",
     "src/absl/synchronization/internal/per_thread_sem.h",
     "src/absl/synchronization/internal/thread_pool.h",
@@ -156,6 +158,27 @@ static_library("abseil") {
     "src/absl/time/clock.h",
     "src/absl/time/duration.cc",
     "src/absl/time/format.cc",
+    "src/absl/time/internal/cctz/include/cctz/civil_time.h",
+    "src/absl/time/internal/cctz/include/cctz/civil_time_detail.h",
+    "src/absl/time/internal/cctz/include/cctz/time_zone.h",
+    "src/absl/time/internal/cctz/include/cctz/zone_info_source.h",
+    "src/absl/time/internal/cctz/src/civil_time_detail.cc",
+    "src/absl/time/internal/cctz/src/time_zone_fixed.cc",
+    "src/absl/time/internal/cctz/src/time_zone_fixed.h",
+    "src/absl/time/internal/cctz/src/time_zone_format.cc",
+    "src/absl/time/internal/cctz/src/time_zone_if.cc",
+    "src/absl/time/internal/cctz/src/time_zone_if.h",
+    "src/absl/time/internal/cctz/src/time_zone_impl.cc",
+    "src/absl/time/internal/cctz/src/time_zone_impl.h",
+    "src/absl/time/internal/cctz/src/time_zone_info.cc",
+    "src/absl/time/internal/cctz/src/time_zone_info.h",
+    "src/absl/time/internal/cctz/src/time_zone_libc.cc",
+    "src/absl/time/internal/cctz/src/time_zone_libc.h",
+    "src/absl/time/internal/cctz/src/time_zone_lookup.cc",
+    "src/absl/time/internal/cctz/src/time_zone_posix.cc",
+    "src/absl/time/internal/cctz/src/time_zone_posix.h",
+    "src/absl/time/internal/cctz/src/tzfile.h",
+    "src/absl/time/internal/cctz/src/zone_info_source.cc",
     "src/absl/time/internal/get_current_time_ios.inc",
     "src/absl/time/internal/get_current_time_posix.inc",
     "src/absl/time/internal/get_current_time_windows.inc",
@@ -167,18 +190,28 @@ static_library("abseil") {
     "src/absl/types/bad_any_cast.h",
     "src/absl/types/bad_optional_access.cc",
     "src/absl/types/bad_optional_access.h",
+    "src/absl/types/bad_variant_access.cc",
+    "src/absl/types/bad_variant_access.h",
+    "src/absl/types/internal/variant.h",
     "src/absl/types/optional.cc",
     "src/absl/types/optional.h",
     "src/absl/types/span.h",
+    "src/absl/types/variant.h",
     "src/absl/utility/utility.h",
-  ]
-
-  deps = [
-    "//third_party/cctz:civil_time",
-    "//third_party/cctz:time_zone",
   ]
 
   configs -= [ "//build/config/compiler:goma_code" ]
   configs += [ "//build/config/compiler:no_goma_code" ]
   public_configs = [ ":abseil_config" ]
+
+  if (is_tsan) {
+    # Surppress tsan or abseil's bug.
+    # https://github.com/google/sanitizers/issues/953
+    cflags = [
+      "-mllvm",
+      "-tsan-instrument-atomics=0",
+      "-mllvm",
+      "-tsan-instrument-memory-accesses=0",
+    ]
+  }
 }

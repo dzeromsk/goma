@@ -11,6 +11,7 @@
 
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <glog/logging.h>
@@ -29,9 +30,8 @@ namespace devtools_goma {
 
 const char* LibraryPathResolver::fakeroot_ = "";
 
-LibraryPathResolver::LibraryPathResolver(const string& cwd)
-    : cwd_(cwd),
-      static_link_(false) {
+LibraryPathResolver::LibraryPathResolver(string cwd)
+    : cwd_(std::move(cwd)), static_link_(false) {
 #ifdef __MACH__
   fallback_searchdirs_.push_back("/usr/lib");
   fallback_searchdirs_.push_back("/usr/local/lib");

@@ -95,7 +95,8 @@ bool FlagParser::Flag::Parse(const std::vector<string>& args, size_t i,
       Output(i, args[i], &args[i]);
       *last_i = i;
       return true;
-    } else if (args[i][0] != flag_prefix_) {
+    }
+    if (args[i][0] != flag_prefix_) {
       VLOG(3) << "FlagParser: maybe non flag? " << args[i];
       Output(i, args[i], &args[i]);
       *last_i = i;
@@ -113,25 +114,25 @@ bool FlagParser::Flag::Parse(const std::vector<string>& args, size_t i,
       Output(i, args[i], nullptr);
       *last_i = i;
       return true;
-    } else if (!allows_space_arg_) {
+    }
+    if (!allows_space_arg_) {
       // E.g., "-O"
       VLOG(3) << "FlagParser: no allow space arg: " << key;
       string no_value;
       Output(i, args[i], &no_value);
       *last_i = i;
       return true;
-    } else {
-      // E.g., "-x c++"
-      if (i + 1U == args.size()) {
-        VLOG(2) << "FlagParser: " << args[i] << " should take an argument";
-        return false;
-      }
-      VLOG(3) << "FlagParser: key-value argument with space: " << args[i];
-      Output(i, args[i], nullptr);
-      Output(i + 1, args[i + 1], &args[i + 1]);
-      *last_i = i + 1;
-      return true;
     }
+    // E.g., "-x c++"
+    if (i + 1U == args.size()) {
+      VLOG(2) << "FlagParser: " << args[i] << " should take an argument";
+      return false;
+    }
+    VLOG(3) << "FlagParser: key-value argument with space: " << args[i];
+    Output(i, args[i], nullptr);
+    Output(i + 1, args[i + 1], &args[i + 1]);
+    *last_i = i + 1;
+    return true;
   }
   if (!require_value_) {
     // e.g. -clang-syntax for -c.
@@ -174,7 +175,7 @@ string FlagParser::Flag::GetLastValue() const {
 }
 
 const string& FlagParser::Flag::GetParsedArgs(int i) const {
-  std::unordered_map<int, string>::const_iterator found = parsed_args_.find(i);
+  auto found = parsed_args_.find(i);
   CHECK(found != parsed_args_.end()) << name_ << " at " << i;
   return found->second;
 }
@@ -216,50 +217,42 @@ FlagParser::FlagParser() {
 }
 
 FlagParser::~FlagParser() {
-  for (const auto& iter : flags_) {
-    Flag* flag = iter.second;
-    delete flag;
-  }
 }
 
 FlagParser::Flag* FlagParser::AddBoolFlag(const char* name) {
-  Flag* flag = nullptr;
-  std::pair<std::map<string, Flag*>::iterator, bool> p =
-      flags_.insert(std::make_pair(name, flag));
+  std::pair<std::map<string, std::unique_ptr<Flag>>::iterator, bool> p =
+      flags_.emplace(name, nullptr);
   if (p.second) {
-    p.first->second = new Flag(name, false, false, opts_);
+    p.first->second.reset(new Flag(name, false, false, opts_));
   }
-  return p.first->second;
+  return p.first->second.get();
 }
 
 FlagParser::Flag* FlagParser::AddPrefixFlag(const char* name) {
-  Flag* flag = nullptr;
-  std::pair<std::map<string, Flag*>::iterator, bool> p =
-      flags_.insert(std::make_pair(name, flag));
+  std::pair<std::map<string, std::unique_ptr<Flag>>::iterator, bool> p =
+      flags_.emplace(name, nullptr);
   if (p.second) {
-    p.first->second = new Flag(name, true, false, opts_);
+    p.first->second.reset(new Flag(name, true, false, opts_));
   }
-  return p.first->second;
+  return p.first->second.get();
 }
 
 FlagParser::Flag* FlagParser::AddFlag(const char* name) {
-  Flag* flag = nullptr;
-  std::pair<std::map<string, Flag*>::iterator, bool> p =
-      flags_.insert(std::make_pair(name, flag));
+  std::pair<std::map<string, std::unique_ptr<Flag>>::iterator, bool> p =
+      flags_.emplace(name, nullptr);
   if (p.second) {
-    p.first->second = new Flag(name, true, true, opts_);
+    p.first->second.reset(new Flag(name, true, true, opts_));
   }
-  return p.first->second;
+  return p.first->second.get();
 }
 
 FlagParser::Flag* FlagParser::AddNonFlag() {
-  Flag* flag = nullptr;
-  std::pair<std::map<string, Flag*>::iterator, bool> p =
-      flags_.insert(std::make_pair("", flag));
+  std::pair<std::map<string, std::unique_ptr<Flag>>::iterator, bool> p =
+      flags_.emplace("", nullptr);
   if (p.second) {
-    p.first->second = new Flag("", true, false, opts_);
+    p.first->second.reset(new Flag("", true, false, opts_));
   }
-  return p.first->second;
+  return p.first->second.get();
 }
 
 void FlagParser::Parse(const std::vector<string>& args) {
@@ -269,7 +262,7 @@ void FlagParser::Parse(const std::vector<string>& args) {
   // Check longest flag name first.
   std::vector<Flag*> flags;
   for (const auto& iter : flags_) {
-    flags.push_back(iter.second);
+    flags.push_back(iter.second.get());
   }
   FlagLengthComparator comp;
   std::sort(flags.begin(), flags.end(), comp);

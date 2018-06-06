@@ -88,8 +88,7 @@ class OpenSSLContext {
   ScopedX509CRL GetX509CrlsFromUrl(const string& url, string* crl_str);
 
   // Loads CRLs based on X509v3 CRL distribution point.
-  // Assert |mu_| should be held.
-  bool SetupCrlsUnlocked(STACK_OF(X509)* x509s);
+  bool SetupCrlsUnlocked(STACK_OF(X509) * x509s) EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   // Lock for OpenSSL context (ctx_, crls_, is_crl_ready_, certs_info_
   // and last_error_).
@@ -148,6 +147,8 @@ class OpenSSLEngine : public TLSEngine {
   void SetRecycled() { recycled_ = true; }
 
  private:
+  friend std::unique_ptr<OpenSSLEngine>::deleter_type;
+
   // Returns |return_value| if |return_value| > 0.
   // Note that positive |return_value| usually means the number of data
   // read / written.
@@ -202,14 +203,14 @@ class OpenSSLEngineCache : public TLSEngineFactory {
 
  private:
   // This function should be called with mu_ lock held.
-  OpenSSLEngine* GetOpenSSLEngineUnlocked();
+  std::unique_ptr<OpenSSLEngine> GetOpenSSLEngineUnlocked();
   void InvalidateContext();
 
   // Lock for ctx_, contexts_to_delete_, ssl_map_, certs_ and proxy configs.
   mutable Lock mu_;
   std::unique_ptr<OpenSSLContext> ctx_;
   std::vector<std::unique_ptr<OpenSSLContext>> contexts_to_delete_;
-  std::unordered_map<int, OpenSSLEngine*> ssl_map_;
+  std::unordered_map<int, std::unique_ptr<OpenSSLEngine>> ssl_map_;
   // Proxy configs to download CRLs.
   string hostname_;
   string proxy_host_;

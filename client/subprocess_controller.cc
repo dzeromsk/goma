@@ -14,6 +14,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#else
+#include <process.h>
 #endif
 
 #include <memory>
@@ -123,7 +125,7 @@ struct ServerParam {
   SubProcessController::Options options_;
 };
 
-DWORD WINAPI SubProcessController::StartServer(LPVOID param) {
+unsigned __stdcall SubProcessController::StartServer(void* param) {
   std::unique_ptr<ServerParam> args(reinterpret_cast<ServerParam*>(param));
   std::unique_ptr<SubProcessControllerServer> server(
       new SubProcessControllerServer(args->sockfd_, args->options_));
@@ -141,12 +143,16 @@ void SubProcessController::Initialize(
   ServerParam* args = new ServerParam;
   args->sockfd_ = sockfd[0];
   args->options_ = options;
-  DWORD server_thread_id = 0;
-  ScopedFd server_thread(CreateThread(nullptr, 0, StartServer, args, 0,
-                                      &server_thread_id));
-  if (server_thread.valid()) {
-    SubProcessControllerClient::Create(sockfd[1], server_thread_id, options);
+  unsigned server_thread_id = 0;
+  uintptr_t r =
+      _beginthreadex(nullptr, 0, StartServer, args, 0, &server_thread_id);
+  if (r == 0) {
+    LOG(ERROR) << "failed to create thread for SubProcessController";
+    return;
   }
+
+  ScopedFd server_thread(reinterpret_cast<HANDLE>(r));
+  SubProcessControllerClient::Create(sockfd[1], server_thread_id, options);
 }
 #endif
 
@@ -204,7 +210,8 @@ bool SubProcessController::ReadMessage(const IOChannel* fd,
   if (r == 0) {
     *op = CLOSED;
     return true;
-  } else if (r < 0) {
+  }
+  if (r < 0) {
 #ifndef _WIN32
     if (errno == EINTR || errno == EAGAIN)
       return false;

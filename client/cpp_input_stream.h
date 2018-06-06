@@ -8,17 +8,19 @@
 #include <memory>
 
 #include "content.h"
-#include "file_id.h"
 
 namespace devtools_goma {
 
 class CppInputStream {
  public:
-  explicit CppInputStream(
-      std::unique_ptr<Content> content, const FileId& fileid,
-      const string& filename)
-      : content_(std::move(content)), cur_(content_->buf()), line_(1),
-        fileid_(fileid), filename_(filename) {}
+  // |content| must alive while CppinputStream is alive.
+  explicit CppInputStream(const Content* content)
+      : CppInputStream(content, "") {
+  }
+  CppInputStream(const Content* content, const string& filename)
+      : content_(content),  cur_(content_->buf()), line_(1),
+        filename_(filename) {
+  }
 
   CppInputStream(const CppInputStream&) = delete;
   void operator=(const CppInputStream&) = delete;
@@ -28,7 +30,7 @@ class CppInputStream {
   const char* begin() const { return content_->buf(); }
   const char* end() const { return content_->buf_end(); }
   size_t pos() const { return cur_ - content_->buf(); }
-  const FileId& fileid() const { return fileid_; }
+
   const string& filename() const { return filename_; }
 
   void ConsumeChar();
@@ -42,10 +44,9 @@ class CppInputStream {
   void SkipWhiteSpaces();
 
  private:
-  std::unique_ptr<Content> content_;
+  const Content* content_;
   const char* cur_;
   int line_;
-  const FileId fileid_;
   const string filename_;
 };
 

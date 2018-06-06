@@ -14,8 +14,12 @@ static_library("base") {
     "file.h",
     "file_dir.cc",
     "file_dir.h",
+    "filesystem.cc",
+    "filesystem.h",
     "lockhelper.cc",
     "lockhelper.h",
+    "options.cc",
+    "options.h",
     "path.cc",
     "path.h",
     "status.h",
@@ -61,7 +65,7 @@ executable("lockhelper_unittest") {
   deps = [
     ":base",
     ":goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:glog",
     "//third_party:gtest",
   ]
@@ -76,7 +80,7 @@ if (os == "win") {
     deps = [
       ":base",
       ":goma_unittest",
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
       "//third_party:glog",
       "//third_party:gtest",
     ]

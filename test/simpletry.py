@@ -283,6 +283,25 @@ class SimpleTryTest(unittest.TestCase):
     self.assertEqual(request_line_before, request_line_after)
     self.AssertNoGomaccInfo()
 
+  def testLocalFallbackShouldWork(self):
+    stat_url = 'http://localhost:%s/statz' % (
+        os.environ['GOMA_COMPILER_PROXY_PORT'])
+    stat_before = urllib2.urlopen(stat_url).read()
+    os.environ['GOMA_FALLBACK_INPUT_FILES'] = os.path.join('test', 'hello.c')
+    self.AssertSuccess([self.gomacc, self.local_cl, '/c', '/Fotest.obj',
+                        os.path.join('test', 'hello.c')],
+                       msg='local fallback')
+    del os.environ['GOMA_FALLBACK_INPUT_FILES']
+    stat_after = urllib2.urlopen(stat_url).read()
+    request_line_before = '\n'.join(
+        [line for line in stat_before.split('\n') if 'fallback' in line])
+    request_line_after = '\n'.join(
+        [line for line in stat_after.split('\n') if 'fallback' in line])
+    self.assertNotEqual(request_line_before, '')
+    self.assertNotEqual(request_line_after, '')
+    self.assertNotEqual(request_line_before, request_line_after)
+    self.AssertNoGomaccInfo()
+
   def testClInPathShouldCompile(self):
     self.AssertSuccess([self.gomacc, 'cl', '/c', '/Fotest.obj',
                         os.path.join('test', 'hello.c')],

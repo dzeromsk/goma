@@ -145,35 +145,117 @@ TEST(PathUtilTest, HasPrefixDir) {
 #endif
 }
 
-TEST(PathUtilTest, GetFileNameExtension) {
-  EXPECT_EQ("txt", GetFileNameExtension("a.txt"));
-  EXPECT_EQ("",    GetFileNameExtension("a."));
-  EXPECT_EQ("",    GetFileNameExtension(""));
-  EXPECT_EQ("",    GetFileNameExtension("/"));
-  EXPECT_EQ("",    GetFileNameExtension("a"));
-  EXPECT_EQ("",    GetFileNameExtension("a/"));
-  EXPECT_EQ("txt", GetFileNameExtension("/a/b/c.txt"));
-  EXPECT_EQ("cc",  GetFileNameExtension("/a/b.c/d/e.cc"));
-  EXPECT_EQ("",    GetFileNameExtension("/a/b.c/d/e"));
-  EXPECT_EQ("g",   GetFileNameExtension("/a/b.c/d/e.f.g"));
+TEST(PathUtilTest, GetDirname) {
+  EXPECT_EQ("/a",    GetDirname("/a/"));
+  EXPECT_EQ("/",     GetDirname("/a"));
+  EXPECT_EQ("a",     GetDirname("a/b"));
+  EXPECT_EQ("a",     GetDirname("a/"));
+  EXPECT_EQ("",      GetDirname("a"));
+  EXPECT_EQ("",      GetDirname("ab"));
+  EXPECT_EQ("/",     GetDirname("/"));
+  EXPECT_EQ("",      GetDirname(""));
+  EXPECT_EQ("/a/b",  GetDirname("/a/b/c.txt"));
 
-  EXPECT_EQ("",    GetFileNameExtension("a:\\"));
-  EXPECT_EQ("",    GetFileNameExtension("a:\\b\\"));
-  EXPECT_EQ("txt", GetFileNameExtension("a:\\b\\c.txt"));
-  EXPECT_EQ("cc",  GetFileNameExtension("a:\\b.c\\d\\e.cc"));
-  EXPECT_EQ("",    GetFileNameExtension("a:\\b.c\\d\\e"));
-  EXPECT_EQ("g",   GetFileNameExtension("a:\\b.c\\d\\e.f.g"));
+  EXPECT_EQ("\\a",   GetDirname("\\a\\"));
+  EXPECT_EQ("\\",    GetDirname("\\a"));
+  EXPECT_EQ("a",     GetDirname("a\\b"));
+  EXPECT_EQ("a",     GetDirname("a\\"));
+  EXPECT_EQ("\\",    GetDirname("\\"));
 
-  EXPECT_EQ("",    GetFileNameExtension("a:/"));
-  EXPECT_EQ("",    GetFileNameExtension("a:/b/"));
-  EXPECT_EQ("txt", GetFileNameExtension("a:/b/c.txt"));
-  EXPECT_EQ("cc",  GetFileNameExtension("a:/b.c/d/e.cc"));
-  EXPECT_EQ("",    GetFileNameExtension("a:/b.c/d/e"));
-  EXPECT_EQ("g",   GetFileNameExtension("a:/b.c/d/e.f.g"));
+  EXPECT_EQ("a:\\",  GetDirname("a:\\"));
+  EXPECT_EQ("a:\\b", GetDirname("a:\\b\\"));
+  EXPECT_EQ("a:\\b", GetDirname("a:\\b\\c.txt"));
+  EXPECT_EQ("a:/",   GetDirname("a:/"));
+  EXPECT_EQ("a:/b",  GetDirname("a:/b/"));
+  EXPECT_EQ("a:/b",  GetDirname("a:/b/c.txt"));
 
-  EXPECT_EQ("",   GetFileNameExtension(".cshrc"));
-  EXPECT_EQ("",   GetFileNameExtension("/home/user/.cshrc"));
-  EXPECT_EQ("",   GetFileNameExtension("c:\\.netrc"));
+  EXPECT_EQ("a:b",   GetDirname("a:b\\c"));
+  EXPECT_EQ("a:",    GetDirname("a:b"));
+}
+
+TEST(PathUtilTest, GetBasename) {
+  EXPECT_EQ("",       GetBasename("/a/"));
+  EXPECT_EQ("a",      GetBasename("/a"));
+  EXPECT_EQ("b",      GetBasename("a/b"));
+  EXPECT_EQ("",       GetBasename("a/"));
+  EXPECT_EQ("a",      GetBasename("a"));
+  EXPECT_EQ("",       GetBasename("/"));
+  EXPECT_EQ("",       GetBasename(""));
+  EXPECT_EQ("c.txt",  GetBasename("/a/b/c.txt"));
+
+  EXPECT_EQ("",       GetBasename("a:\\"));
+  EXPECT_EQ("",       GetBasename("a:\\b\\"));
+  EXPECT_EQ("c.txt",  GetBasename("a:\\b\\c.txt"));
+
+  EXPECT_EQ("",       GetBasename("a:/"));
+  EXPECT_EQ("",       GetBasename("a:/b/"));
+  EXPECT_EQ("c.txt",  GetBasename("a:/b/c.txt"));
+
+  EXPECT_EQ(".cshrc", GetBasename(".cshrc"));
+  EXPECT_EQ(".cshrc", GetBasename("/home/user/.cshrc"));
+  EXPECT_EQ(".netrc", GetBasename("c:\\.netrc"));
+}
+
+TEST(PathUtilTest, GetExtension) {
+  EXPECT_EQ("txt", GetExtension("a.txt"));
+  EXPECT_EQ("",    GetExtension("a."));
+  EXPECT_EQ("",    GetExtension(""));
+  EXPECT_EQ("",    GetExtension("/"));
+  EXPECT_EQ("",    GetExtension("a"));
+  EXPECT_EQ("",    GetExtension("a/"));
+  EXPECT_EQ("txt", GetExtension("/a/b/c.txt"));
+  EXPECT_EQ("cc",  GetExtension("/a/b.c/d/e.cc"));
+  EXPECT_EQ("",    GetExtension("/a/b.c/d/e"));
+  EXPECT_EQ("g",   GetExtension("/a/b.c/d/e.f.g"));
+
+  EXPECT_EQ("",    GetExtension("a:\\"));
+  EXPECT_EQ("",    GetExtension("a:\\b\\"));
+  EXPECT_EQ("txt", GetExtension("a:\\b\\c.txt"));
+  EXPECT_EQ("cc",  GetExtension("a:\\b.c\\d\\e.cc"));
+  EXPECT_EQ("",    GetExtension("a:\\b.c\\d\\e"));
+  EXPECT_EQ("g",   GetExtension("a:\\b.c\\d\\e.f.g"));
+
+  EXPECT_EQ("",    GetExtension("a:/"));
+  EXPECT_EQ("",    GetExtension("a:/b/"));
+  EXPECT_EQ("txt", GetExtension("a:/b/c.txt"));
+  EXPECT_EQ("cc",  GetExtension("a:/b.c/d/e.cc"));
+  EXPECT_EQ("",    GetExtension("a:/b.c/d/e"));
+  EXPECT_EQ("g",   GetExtension("a:/b.c/d/e.f.g"));
+
+  EXPECT_EQ("",    GetExtension(".cshrc"));
+  EXPECT_EQ("",    GetExtension("/home/user/.cshrc"));
+  EXPECT_EQ("",    GetExtension("c:\\.netrc"));
+}
+
+TEST(PathUtilTest, GetStem) {
+  EXPECT_EQ("a",      GetStem("a.txt"));
+  EXPECT_EQ("a",      GetStem("a."));
+  EXPECT_EQ("",       GetStem(""));
+  EXPECT_EQ("",       GetStem("/"));
+  EXPECT_EQ("a",      GetStem("a"));
+  EXPECT_EQ("",       GetStem("a/"));
+  EXPECT_EQ("c",      GetStem("/a/b/c.txt"));
+  EXPECT_EQ("e",      GetStem("/a/b.c/d/e.cc"));
+  EXPECT_EQ("e",      GetStem("/a/b.c/d/e"));
+  EXPECT_EQ("e.f",    GetStem("/a/b.c/d/e.f.g"));
+
+  EXPECT_EQ("",       GetStem("a:\\"));
+  EXPECT_EQ("",       GetStem("a:\\b\\"));
+  EXPECT_EQ("c",      GetStem("a:\\b\\c.txt"));
+  EXPECT_EQ("e",      GetStem("a:\\b.c\\d\\e.cc"));
+  EXPECT_EQ("e",      GetStem("a:\\b.c\\d\\e"));
+  EXPECT_EQ("e.f",    GetStem("a:\\b.c\\d\\e.f.g"));
+
+  EXPECT_EQ("",       GetStem("a:/"));
+  EXPECT_EQ("",       GetStem("a:/b/"));
+  EXPECT_EQ("c",      GetStem("a:/b/c.txt"));
+  EXPECT_EQ("e",      GetStem("a:/b.c/d/e.cc"));
+  EXPECT_EQ("e",      GetStem("a:/b.c/d/e"));
+  EXPECT_EQ("e.f",    GetStem("a:/b.c/d/e.f.g"));
+
+  EXPECT_EQ(".cshrc", GetStem(".cshrc"));
+  EXPECT_EQ(".cshrc", GetStem("/home/user/.cshrc"));
+  EXPECT_EQ(".netrc", GetStem("c:\\.netrc"));
 }
 
 }  // namespace devtools_goma

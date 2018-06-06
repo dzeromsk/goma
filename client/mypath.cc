@@ -33,6 +33,8 @@
 #include "env_flags.h"
 #include "file.h"
 #include "file_dir.h"
+#include "filesystem.h"
+#include "mypath_helper.h"
 #include "path.h"
 #include "util.h"
 
@@ -77,17 +79,6 @@ static string GetTempDirectoryEnv() {
       },
       "/tmp");
 }
-
-#ifdef __linux__
-static string GetUserRuntimeDirectory() {
-  char buf[1024];
-  snprintf(buf, sizeof(buf), "/run/user/%d", getuid());
-  if (file::IsDirectory(buf, file::Defaults()).ok()) {
-    return buf;
-  }
-  return string();
-}
-#endif
 
 }  // anonymous namespace
 
@@ -209,10 +200,7 @@ string GetGomaTmpDir() {
     return FLAGS_TMP_DIR;
   }
 
-  string tmpdir;
-#ifdef __linux__
-  tmpdir = GetUserRuntimeDirectory();
-#endif
+  string tmpdir = GetPlatformSpecificTempDirectory();
   if (tmpdir.empty()) {
     tmpdir = GetTempDirectoryEnv();
   }

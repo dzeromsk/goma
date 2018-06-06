@@ -62,9 +62,6 @@ static const char kClientNotSoSecret[] = "client_not_so_secret";
 static const char kRefreshToken[] = "refresh_token";
 static const char kType[] = "type";
 
-static const char kGoogleScope[] =
-    "https://www.googleapis.com/auth/userinfo.email";
-
 // Google OAuth2 clients always have a secret, even if the client is an
 // installed application/utility such as this.
 // Please see following URL to understand why it is ok to do:
@@ -76,7 +73,7 @@ static const char kDefaultSecret[] = "R7e-JO3L5sKVczuR-dKQrijF";
 void DefaultOAuth2Config(OAuth2Config* config) {
   config->auth_uri = kGoogleAuthURI;
   config->token_uri = kGoogleTokenURI;
-  config->scope = kGoogleScope;
+  config->scope = kGomaAuthScope;
   config->client_id = kDefaultClientId;
   config->client_secret = kDefaultSecret;
   CHECK(config->enabled());
@@ -107,7 +104,7 @@ bool ParseOAuth2Config(const string& str, OAuth2Config* config) {
   string scope;
   if (!GetNonEmptyStringFromJson(root, kScope, &scope, &err)) {
     LOG(WARNING) << err;
-    scope = kGoogleScope;
+    scope = kGomaAuthScope;
   }
 
   string client_id;
@@ -142,6 +139,7 @@ bool ParseOAuth2Config(const string& str, OAuth2Config* config) {
   config->type = type;
   return true;
 }
+
 
 string FormatOAuth2Config(const OAuth2Config& config) {
   Json::Value root;

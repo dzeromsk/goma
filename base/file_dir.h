@@ -29,9 +29,6 @@ bool ListDirectory(const string& dirname, std::vector<DirEntry>* entries);
 // Returns true if dirname is successfully deleted.
 bool DeleteDirectory(const string& dirname);
 
-// Returns true if dirname and its children are successfully deleted.
-bool RecursivelyDelete(const string& dirname);
-
 // Ensure directory exists.
 bool EnsureDirectory(const string& dirname, int mode);
 

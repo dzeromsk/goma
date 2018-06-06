@@ -14,6 +14,9 @@
 char kTSanDefaultSuppressions[] =
   "race:third_party/glog/src/vlog_is_on.cc\n"
   "race:third_party/glog/src/raw_logging.cc\n"
+  // goma_fetch sometimes show data race in buildbot, which we cannot reproduce
+  // on our local machine (b/74301421).
+  "race:PollEvents\n"
   // PLEASE READ ABOVE BEFORE ADDING NEW SUPPRESSIONS.
   // End of suppressions.
 ;  // Please keep this semicolon.

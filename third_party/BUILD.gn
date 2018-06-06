@@ -76,7 +76,10 @@ if (os != "win") {
 config("glog_config") {
   include_dirs = glog_include_dirs
   if (is_posix) {
-    cflags = [ "-Wno-unused-local-typedef" ]  # For COMPILE_ASSERT macro.
+    cflags = [
+      "-Wno-unused-local-typedef",  # For COMPILE_ASSERT macro.
+      "-Wno-sign-compare",  # glog/logging.h has sign compare code
+    ]
   }
 }
 
@@ -116,7 +119,7 @@ config("unittest_config") {
   defines = [ "UNIT_TEST" ]
 
   # So that gtest headers can find themselves.
-  include_dirs = [ "gtest/include" ]
+  include_dirs = [ "gtest/googletest/include" ]
 
   if (is_clang) {
     cflags = [
@@ -133,39 +136,39 @@ config("variadix_max_config") {
 static_library("gtest") {
   testonly = true
   sources = [
-    "gtest/include/gtest/gtest-death-test.h",
-    "gtest/include/gtest/gtest-message.h",
-    "gtest/include/gtest/gtest-param-test.h",
-    "gtest/include/gtest/gtest-printers.h",
-    "gtest/include/gtest/gtest-spi.h",
-    "gtest/include/gtest/gtest-test-part.h",
-    "gtest/include/gtest/gtest-typed-test.h",
-    "gtest/include/gtest/gtest.h",
-    "gtest/include/gtest/gtest_pred_impl.h",
-    "gtest/include/gtest/gtest_prod.h",
-    "gtest/include/gtest/internal/gtest-death-test-internal.h",
-    "gtest/include/gtest/internal/gtest-filepath.h",
-    "gtest/include/gtest/internal/gtest-internal.h",
-    "gtest/include/gtest/internal/gtest-linked_ptr.h",
-    "gtest/include/gtest/internal/gtest-param-util-generated.h",
-    "gtest/include/gtest/internal/gtest-param-util.h",
-    "gtest/include/gtest/internal/gtest-port.h",
-    "gtest/include/gtest/internal/gtest-string.h",
-    "gtest/include/gtest/internal/gtest-tuple.h",
-    "gtest/include/gtest/internal/gtest-type-util.h",
-    "gtest/src/gtest-death-test.cc",
-    "gtest/src/gtest-filepath.cc",
-    "gtest/src/gtest-internal-inl.h",
-    "gtest/src/gtest-port.cc",
-    "gtest/src/gtest-printers.cc",
-    "gtest/src/gtest-test-part.cc",
-    "gtest/src/gtest-typed-test.cc",
-    "gtest/src/gtest.cc",
+    "gtest/googletest/include/gtest/googletest/gtest-death-test.h",
+    "gtest/googletest/include/gtest/googletest/gtest-message.h",
+    "gtest/googletest/include/gtest/googletest/gtest-param-test.h",
+    "gtest/googletest/include/gtest/googletest/gtest-printers.h",
+    "gtest/googletest/include/gtest/googletest/gtest-spi.h",
+    "gtest/googletest/include/gtest/googletest/gtest-test-part.h",
+    "gtest/googletest/include/gtest/googletest/gtest-typed-test.h",
+    "gtest/googletest/include/gtest/googletest/gtest.h",
+    "gtest/googletest/include/gtest/googletest/gtest_pred_impl.h",
+    "gtest/googletest/include/gtest/googletest/gtest_prod.h",
+    "gtest/googletest/include/gtest/googletest/internal/gtest-death-test-internal.h",
+    "gtest/googletest/include/gtest/googletest/internal/gtest-filepath.h",
+    "gtest/googletest/include/gtest/googletest/internal/gtest-internal.h",
+    "gtest/googletest/include/gtest/googletest/internal/gtest-linked_ptr.h",
+    "gtest/googletest/include/gtest/googletest/internal/gtest-param-util-generated.h",
+    "gtest/googletest/include/gtest/googletest/internal/gtest-param-util.h",
+    "gtest/googletest/include/gtest/googletest/internal/gtest-port.h",
+    "gtest/googletest/include/gtest/googletest/internal/gtest-string.h",
+    "gtest/googletest/include/gtest/googletest/internal/gtest-tuple.h",
+    "gtest/googletest/include/gtest/googletest/internal/gtest-type-util.h",
+    "gtest/googletest/src/gtest-death-test.cc",
+    "gtest/googletest/src/gtest-filepath.cc",
+    "gtest/googletest/src/gtest-internal-inl.h",
+    "gtest/googletest/src/gtest-port.cc",
+    "gtest/googletest/src/gtest-printers.cc",
+    "gtest/googletest/src/gtest-test-part.cc",
+    "gtest/googletest/src/gtest-typed-test.cc",
+    "gtest/googletest/src/gtest.cc",
   ]
 
   include_dirs = [
-    "gtest",
-    "gtest/include",
+    "gtest/googletest",
+    "gtest/googletest/include",
   ]
 
   public_configs = []
@@ -187,8 +190,8 @@ static_library("gtest") {
 }
 
 config("gtest_prod") {
-  # To include gtest/include/gtest/gtest_prod.h
-  include_dirs = [ "gtest/include" ]
+  # To include gtest/googletest/include/gtest/gtest_prod.h
+  include_dirs = [ "gtest/googletest/include" ]
 }
 
 static_library("gtest_main") {
@@ -197,7 +200,7 @@ static_library("gtest_main") {
     ":gtest",
   ]
   sources = [
-    "gtest/src/gtest_main.cc",
+    "gtest/googletest/src/gtest_main.cc",
   ]
 
   configs -= [ "//build/config/compiler:goma_code" ]

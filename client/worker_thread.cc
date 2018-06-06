@@ -7,13 +7,15 @@
 
 #include <algorithm>
 #include <sstream>
+#include <utility>
 
+#include "absl/memory/memory.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
-#include "socket_descriptor.h"
 #include "glog/logging.h"
 #include "ioutil.h"
+#include "socket_descriptor.h"
 
 #ifdef _WIN32
 # include "socket_helper_win.h"
@@ -97,8 +99,9 @@ class WorkerThreadManager::WorkerThread::PeriodicClosure {
   DISALLOW_COPY_AND_ASSIGN(PeriodicClosure);
 };
 
-WorkerThreadManager::WorkerThread::WorkerThread(
-    WorkerThreadManager* wm, int pool, const std::string& name)
+WorkerThreadManager::WorkerThread::WorkerThread(WorkerThreadManager* wm,
+                                                int pool,
+                                                std::string name)
     : wm_(wm),
       pool_(pool),
       handle_(kNullThreadHandle),
@@ -106,7 +109,7 @@ WorkerThreadManager::WorkerThread::WorkerThread(
       now_ns_(0),
       shutting_down_(false),
       quit_(false),
-      name_(name),
+      name_(std::move(name)),
       auto_lock_stat_next_closure_(nullptr),
       auto_lock_stat_poll_events_(nullptr) {
   int pipe_fd[2];
@@ -123,9 +126,9 @@ WorkerThreadManager::WorkerThread::WorkerThread(
   PCHECK(pw.SetNonBlocking());
   id_ = 0;
   // poller takes ownership of both pipe fds.
-  poller_.reset(DescriptorPoller::NewDescriptorPoller(
-      new SocketDescriptor(std::move(pr), PRIORITY_HIGH, this),
-      std::move(pw)));
+  poller_ = DescriptorPoller::NewDescriptorPoller(
+      absl::make_unique<SocketDescriptor>(std::move(pr), PRIORITY_HIGH, this),
+      std::move(pw));
   timer_.Start();
   if (g_auto_lock_stats) {
     // TODO: Split stats per pool.
@@ -148,14 +151,8 @@ WorkerThreadManager::WorkerThread::~WorkerThread() {
 
 /* static */
 void WorkerThreadManager::WorkerThread::Initialize() {
-#ifndef _WIN32
-  pthread_once(&key_worker_once_,
-      &WorkerThreadManager::WorkerThread::InitializeWorkerKey);
-#else
-  InitOnceExecuteOnce(&key_worker_once_,
-      &WorkerThreadManager::WorkerThread::InitializeWorkerKey,
-      nullptr, nullptr);
-#endif
+  absl::call_once(key_worker_once_,
+                  &WorkerThreadManager::WorkerThread::InitializeWorkerKey);
 }
 
 /* static */
@@ -241,13 +238,11 @@ bool WorkerThreadManager::WorkerThread::Dispatch() {
   return true;
 }
 
+absl::once_flag WorkerThreadManager::WorkerThread::key_worker_once_;
+
 #ifndef _WIN32
-pthread_once_t WorkerThreadManager::WorkerThread::key_worker_once_ =
-    PTHREAD_ONCE_INIT;
 pthread_key_t WorkerThreadManager::WorkerThread::key_worker_;
 #else
-INIT_ONCE WorkerThreadManager::WorkerThread::key_worker_once_ =
-    INIT_ONCE_STATIC_INIT;
 DWORD WorkerThreadManager::WorkerThread::key_worker_ = TLS_OUT_OF_INDEXES;
 #endif
 
@@ -532,12 +527,11 @@ bool WorkerThreadManager::WorkerThread::NextClosure() {
         descriptors_.empty()) {
       pool_ = WorkerThreadManager::kDeadPool;
       return false;
-    } else {
-      LOG(INFO) << "NextClosure: terminating but still active "
-                << " delayed_pendings=" << delayed_pendings_.size()
-                << " periodic_closures=" << periodic_closures_.size()
-                << " descriptors=" << descriptors_.empty();
     }
+    LOG(INFO) << "NextClosure: terminating but still active "
+              << " delayed_pendings=" << delayed_pendings_.size()
+              << " periodic_closures=" << periodic_closures_.size()
+              << " descriptors=" << descriptors_.empty();
   }
   VLOG(4) << "NextClosure: no closure to run";
   return true;
@@ -582,17 +576,13 @@ WorkerThreadManager::WorkerThread::GetClosure(
   return closure_data;
 }
 
-#ifndef _WIN32
 void WorkerThreadManager::WorkerThread::InitializeWorkerKey() {
+#ifndef _WIN32
   pthread_key_create(&key_worker_, nullptr);
-}
 #else
-BOOL WINAPI WorkerThreadManager::WorkerThread::InitializeWorkerKey(
-    PINIT_ONCE, PVOID, PVOID*) {
   key_worker_ = TlsAlloc();
-  return TRUE;
-}
 #endif
+}
 
 void WorkerThreadManager::WorkerThread::RegisterPollEvent(
     SocketDescriptor* d, DescriptorPoller::EventType type) {

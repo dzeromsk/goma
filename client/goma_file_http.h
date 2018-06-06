@@ -22,8 +22,8 @@ class FileServiceHttpClient : public FileServiceClient {
  public:
   // It doesn't take ownership of http and multi_file_store.
   FileServiceHttpClient(HttpRPC* http,
-                        const string& store_path,
-                        const string& lookup_path,
+                        string store_path,
+                        string lookup_path,
                         MultiFileStore* multi_file_store);
   ~FileServiceHttpClient() override;
 

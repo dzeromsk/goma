@@ -65,7 +65,7 @@ class MacDumpSyms(DumpSyms):
         r'|^.*: warning: failed to demangle [\.\w]+$' +
         r'|^.*: in compilation unit .* \(offset 0x[a-f\d]+\):$')
       for line in stderr_data.split('\n'):
-        if not filter_re.match(line):
+        if line != '' and not filter_re.match(line):
           print >> sys.stderr, line
 
 def GetDumpSyms(dump_syms, src, dst):

@@ -140,7 +140,7 @@ class SubProcessController {
   void ReadDone();
 
 #ifdef _WIN32
-  static DWORD WINAPI StartServer(LPVOID thread_params);
+  static unsigned __stdcall StartServer(void* thread_params);
 #endif
 
   static const size_t kMessageHeaderLen;

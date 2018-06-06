@@ -9,18 +9,6 @@
 
 namespace devtools_goma {
 
-SimpleTimer::SimpleTimer(CtorFlag cf) {
-  if (cf == START) {
-    Start();
-  }
-}
-
-SimpleTimer::SimpleTimer() {
-  Start();
-}
-
-SimpleTimer::~SimpleTimer() {}
-
 // Return elapsed time in seconds.
 double SimpleTimer::Get() const {
   return GetInNanoSeconds() / 1000000000.0;

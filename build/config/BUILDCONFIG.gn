@@ -4,6 +4,7 @@
 
 declare_args() {
   os = host_os
+  is_clang = true
   is_debug = true
   is_asan = false
   is_tsan = false
@@ -15,7 +16,6 @@ declare_args() {
   # Currently effective only on Win.
   use_link_time_optimization = true
 
-  use_custom_libcxx = false
   use_libfuzzer = false
   use_sanitizer_coverage = false
   with_cpu_profiling = false
@@ -32,7 +32,7 @@ declare_args() {
 }
 
 declare_args() {
-  is_clang = os == "mac" || os == "linux"
+  use_custom_libcxx = os == "linux"
 }
 
 if (target_os == "") {
@@ -89,7 +89,7 @@ if (is_debug) {
 }
 
 if (is_posix) {
-  default_compiler_configs += [ "//build/config/gcc:no_exceptions" ]
+  default_compiler_configs += [ "//build/config/compiler:no_exceptions" ]
 }
 if (is_asan) {
   default_compiler_configs += [ "//build/config/compiler:asan" ]

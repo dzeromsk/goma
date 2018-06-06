@@ -12,26 +12,27 @@
 
 #include <unordered_set>
 
-#include "socket_descriptor.h"
+#include "absl/memory/memory.h"
 #include "glog/logging.h"
 #include "scoped_fd.h"
+#include "socket_descriptor.h"
 
 namespace devtools_goma {
 
 class KqueueDescriptorPoller : public DescriptorPollerBase {
  public:
-  KqueueDescriptorPoller(SocketDescriptor* poll_breaker,
+  KqueueDescriptorPoller(std::unique_ptr<SocketDescriptor> breaker,
                          ScopedSocket&& poll_signaler)
-      : DescriptorPollerBase(poll_breaker, std::move(poll_signaler)),
+      : DescriptorPollerBase(std::move(breaker), std::move(poll_signaler)),
         kqueue_fd_(-1),
         nevents_(0) {
     kqueue_fd_.reset(kqueue());
     CHECK(kqueue_fd_.valid());
-    CHECK(poll_breaker);
+    CHECK(poll_breaker());
     struct kevent kev;
-    EV_SET(&kev, poll_breaker->fd(), EVFILT_READ, EV_ADD, 0, 0, nullptr);
+    EV_SET(&kev, poll_breaker()->fd(), EVFILT_READ, EV_ADD, 0, 0, nullptr);
     PCHECK(kevent(kqueue_fd_.fd(), &kev, 1, nullptr, 0, nullptr) != -1)
-        << "Cannot add fd for kqueue:" << poll_breaker->fd();
+        << "Cannot add fd for kqueue:" << poll_breaker()->fd();
   }
 
   void RegisterPollEvent(SocketDescriptor* d, EventType type) override {
@@ -156,10 +157,10 @@ class KqueueDescriptorPoller : public DescriptorPollerBase {
     DISALLOW_COPY_AND_ASSIGN(KqueueEventEnumerator);
   };
 
-  EventEnumerator* GetEventEnumerator(
+  std::unique_ptr<EventEnumerator> GetEventEnumerator(
       const DescriptorMap& descriptors) override {
     DCHECK(nevents_ <= static_cast<int>(eventlist_.size()));
-    return new KqueueEventEnumerator(this, descriptors);
+    return absl::make_unique<KqueueEventEnumerator>(this, descriptors);
   }
 
  private:
@@ -172,9 +173,11 @@ class KqueueDescriptorPoller : public DescriptorPollerBase {
 };
 
 // static
-DescriptorPoller* DescriptorPoller::NewDescriptorPoller(
-    SocketDescriptor* breaker, ScopedSocket&& signaler) {
-  return new KqueueDescriptorPoller(breaker, std::move(signaler));
+std::unique_ptr<DescriptorPoller> DescriptorPoller::NewDescriptorPoller(
+    std::unique_ptr<SocketDescriptor> breaker,
+    ScopedSocket&& signaler) {
+  return absl::make_unique<KqueueDescriptorPoller>(std::move(breaker),
+                                                   std::move(signaler));
 }
 
 }  // namespace devtools_goma

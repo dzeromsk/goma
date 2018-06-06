@@ -18,10 +18,16 @@ config("lib_config") {
 }
 static_library("lib") {
   sources = [
+    "clang_tidy_flags.cc",
+    "clang_tidy_flags.h",
     "cmdline_parser.cc",
     "cmdline_parser.h",
     "compiler_flags.cc",
     "compiler_flags.h",
+    "compiler_type.cc",
+    "compiler_type.h",
+    "compiler_type_specific.cc",
+    "compiler_type_specific.h",
     "compress_util.cc",
     "compress_util.h",
     "execreq_normalizer.cc",
@@ -36,8 +42,12 @@ static_library("lib") {
     "fileflag.h",
     "flag_parser.cc",
     "flag_parser.h",
+    "gcc_flags.cc",
+    "gcc_flags.h",
     "goma_data_util.cc",
     "goma_data_util.h",
+    "java_flags.cc",
+    "java_flags.h",
     "known_warning_options.h",
     "path_resolver.cc",
     "path_resolver.h",
@@ -45,6 +55,8 @@ static_library("lib") {
     "path_util.h",
     "scoped_fd.cc",
     "scoped_fd.h",
+    "vc_flags.cc",
+    "vc_flags.h",
   ]
 
   public_configs = [ ":lib_config" ]
@@ -53,6 +65,7 @@ static_library("lib") {
     ":goma_proto",
     "//base",
     "//third_party:glog",
+    "//third_party/abseil",
     "//third_party/protobuf:protobuf_full",
   ]
   if (enable_lzma) {
@@ -94,6 +107,32 @@ static_library("goma_file") {
   ]
 }
 
+executable("clang_tidy_execreq_normalizer_unittest") {
+  testonly = true
+  sources = [
+    "clang_tidy_execreq_normalizer_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:gtest",
+  ]
+}
+
+executable("clang_tidy_flags_unittest") {
+  testonly = true
+  sources = [
+    "clang_tidy_flags_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:gtest",
+  ]
+}
+
 executable("cmdline_parser_unittest") {
   testonly = true
   sources = [
@@ -102,7 +141,7 @@ executable("cmdline_parser_unittest") {
   deps = [
     ":lib",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:glog",
     "//third_party:gtest",
   ]
@@ -116,7 +155,21 @@ executable("compiler_flags_test") {
   deps = [
     ":lib",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:glog",
+    "//third_party:gtest",
+  ]
+}
+
+executable("compiler_type_specific_unittest") {
+  testonly = true
+  sources = [
+    "compiler_type_specific_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:glog",
     "//third_party:gtest",
   ]
@@ -130,7 +183,7 @@ executable("compress_util_unittest") {
   deps = [
     ":lib",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:glog",
     "//third_party:gtest",
   ]
@@ -144,7 +197,7 @@ executable("execreq_normalizer_unittest") {
   deps = [
     ":lib",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:glog",
     "//third_party:gtest",
   ]
@@ -158,7 +211,7 @@ executable("execreq_verifier_unittest") {
   deps = [
     ":lib",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:glog",
     "//third_party:gtest",
   ]
@@ -172,7 +225,7 @@ executable("file_reader_unittest") {
   deps = [
     ":lib",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:glog",
     "//third_party:gtest",
   ]
@@ -186,7 +239,35 @@ executable("flag_parser_unittest") {
   deps = [
     ":lib",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:gtest",
+  ]
+}
+
+executable("gcc_execreq_normalizer_unittest") {
+  testonly = true
+  sources = [
+    "gcc_execreq_normalizer_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:glog",
+    "//third_party:gtest",
+  ]
+}
+
+executable("gcc_flags_unittest") {
+  testonly = true
+  sources = [
+    "gcc_flags_test.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:glog",
     "//third_party:gtest",
   ]
 }
@@ -199,7 +280,7 @@ executable("goma_data_util_unittest") {
   deps = [
     ":lib",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:gtest",
   ]
 }
@@ -212,7 +293,7 @@ executable("goma_hash_unittest") {
   deps = [
     ":goma_hash",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:gtest",
   ]
 }
@@ -225,7 +306,35 @@ executable("goma_file_unittest") {
   deps = [
     ":goma_file",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:gtest",
+  ]
+}
+
+executable("java_execreq_normalizer_unittest") {
+  testonly = true
+  sources = [
+    "java_execreq_normalizer_unittest.cc",
+  ]
+
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:gtest",
+  ]
+}
+
+executable("java_flags_unittest") {
+  testonly = true
+  sources = [
+    "java_flags_unittest.cc",
+  ]
+
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:gtest",
   ]
 }
@@ -238,7 +347,7 @@ executable("path_resolver_unittest") {
   deps = [
     ":lib",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:gtest",
   ]
 }
@@ -251,7 +360,7 @@ executable("path_unittest") {
   deps = [
     ":lib",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:gtest",
   ]
 }
@@ -264,7 +373,33 @@ executable("path_util_unittest") {
   deps = [
     ":lib",
     "//base:goma_unittest",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:gtest",
+  ]
+}
+
+executable("vc_execreq_normalizer_unittest") {
+  testonly = true
+  sources = [
+    "vc_execreq_normalizer_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:gtest",
+  ]
+}
+
+executable("vc_flags_unittest") {
+  testonly = true
+  sources = [
+    "vc_flags_unittest.cc",
+  ]
+  deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config:exe_and_shlib_deps",
     "//third_party:gtest",
   ]
 }

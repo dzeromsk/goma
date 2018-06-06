@@ -12,13 +12,14 @@
 
 namespace devtools_goma {
 
-DescriptorPollerBase::DescriptorPollerBase(SocketDescriptor* poll_breaker,
-                                           ScopedSocket&& poll_signaler)
-    : poll_thread_(0) {
-  CHECK(poll_breaker);
-  CHECK(poll_signaler.valid());
-  poll_breaker_.reset(poll_breaker);
-  poll_signaler_ = std::move(poll_signaler);
+DescriptorPollerBase::DescriptorPollerBase(
+    std::unique_ptr<SocketDescriptor> poll_breaker,
+    ScopedSocket&& poll_signaler)
+    : poll_breaker_(std::move(poll_breaker)),
+      poll_signaler_(std::move(poll_signaler)),
+      poll_thread_(0) {
+  CHECK(poll_breaker_);
+  CHECK(poll_signaler_.valid());
 }
 
 bool DescriptorPollerBase::PollEvents(

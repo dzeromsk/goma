@@ -33,7 +33,7 @@
 #include "compiler_specific.h"
 #include "cros_util.h"
 #include "env_flags.h"
-#include "file_id.h"
+#include "file_stat.h"
 #include "glog/logging.h"
 #include "goma_ipc.h"
 #include "gomacc_argv.h"
@@ -71,7 +71,7 @@ GOMA_DECLARE_bool(FAN_OUT_EXEC_REQ);
 #endif
 
 using devtools_goma::CompilerFlags;
-using devtools_goma::FileId;
+using devtools_goma::FileStat;
 using devtools_goma::GomaIPC;
 using devtools_goma::GetMyDirectory;
 using devtools_goma::GetMyPathname;
@@ -109,16 +109,23 @@ static void DumpArgv(size_t argc, const char *argv[], const char *message) {
 }
 #endif
 
-bool HandleHttpPortRequest(int argc, char* argv[]) {
-  if (argc < 2 || strcmp(argv[1], "port") != 0) {
-    return false;
-  }
-  absl::string_view basename = file::Basename(argv[0]);
+static bool AmIGomacc(absl::string_view argv0) {
+  absl::string_view basename = file::Basename(argv0);
   if (basename != "gomacc"
 #ifdef _WIN32
       && basename != "gomacc.exe"
 #endif
       ) {
+    return false;
+  }
+  return true;
+}
+
+bool HandleHttpPortRequest(int argc, char* argv[]) {
+  if (argc < 2 || strcmp(argv[1], "port") != 0) {
+    return false;
+  }
+  if (!AmIGomacc(argv[0])) {
     return false;
   }
 
@@ -135,6 +142,19 @@ bool HandleHttpPortRequest(int argc, char* argv[]) {
   } else {
     std::cout << port << std::endl;
   }
+
+  return true;
+}
+
+bool HandleGomaTmpDir(int argc, char* argv[]) {
+  if (argc < 2 || strcmp(argv[1], "tmp_dir") != 0) {
+    return false;
+  }
+  if (!AmIGomacc(argv[0])) {
+    return false;
+  }
+
+  std::cout << devtools_goma::GetGomaTmpDir() << std::endl;
 
   return true;
 }
@@ -165,15 +185,18 @@ void VerifyIntermediateStageOutput(bool args0_is_argv0,
   for (size_t i = (args0_is_argv0 ? 1 : 0); i < args.size(); i++) {
     if (args[i] == "-S" || args[i] == "-E") {
       return;
-    } else if (args[i] == "-c") {
+    }
+    if (args[i] == "-c") {
       new_argv.push_back(new_option);
       run_verify_output = true;
       continue;
-    } else if (strncmp(args[i].c_str(), "-M", 2) == 0) {
+    }
+    if (strncmp(args[i].c_str(), "-M", 2) == 0) {
       if (args[i] == "-MF")
         ++i;  // skip next args. -MF file.
       continue;
-    } else if (args[i] == "-o") {
+    }
+    if (args[i] == "-o") {
       if (i + 1 == args.size()) {
         // argument to '-o' is missing.
         return;
@@ -206,7 +229,8 @@ void VerifyIntermediateStageOutput(bool args0_is_argv0,
     execvp(GetMyPathname().c_str(), const_cast<char**>(&new_argv[0]));
     perror("execvp");
     return;
-  } else if (pid < 0) {
+  }
+  if (pid < 0) {
     perror("fork");
     return;
   }
@@ -249,6 +273,9 @@ int main(int argc, char* argv[], const char* envp[]) {
   }
 
   if (HandleHttpPortRequest(argc, argv)) {
+    return 0;
+  }
+  if (HandleGomaTmpDir(argc, argv)) {
     return 0;
   }
 
@@ -301,8 +328,8 @@ int main(int argc, char* argv[], const char* envp[]) {
     for (int i = 0; envp[i]; ++i)
       envs.push_back(envp[i]);
 
-    FileId gomacc_fileid(GetMyPathname());
-    CHECK(gomacc_fileid.IsValid());
+    FileStat gomacc_filestat(GetMyPathname());
+    CHECK(gomacc_filestat.IsValid());
 
 #ifdef __linux__
     // For ChromiumOS.
@@ -323,9 +350,10 @@ int main(int argc, char* argv[], const char* envp[]) {
     // invalid memory address.
     // b/69231578
     // NOTE: SpawnAndWaitNonGomacc is not execve equivalent for windows.
-    exit(SpawnAndWaitNonGomacc(&gomacc_fileid, local_command_path, args, envs));
+    exit(SpawnAndWaitNonGomacc(&gomacc_filestat, local_command_path, args,
+                               envs));
 #else
-    exit(ExecvpeNonGomacc(&gomacc_fileid, local_command_path, args, envs));
+    exit(ExecvpeNonGomacc(&gomacc_filestat, local_command_path, args, envs));
 #endif
   }
 

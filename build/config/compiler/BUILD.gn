@@ -31,8 +31,16 @@ config("compiler") {
     if (may_make_pie) {
       cflags += [ "-fPIE" ]
     }
-    defines += [ "_FORTIFY_SOURCE=2" ]
+    if (!is_asan) {
+      # sanitizer build with _FORTIFY_SOURCE is not supported.
+      defines += [ "_FORTIFY_SOURCE=2" ]
+    }
   }
+
+  if (is_clang) {
+    cflags += [ "-Werror" ]
+  }
+
   if (os == "linux") {
     cflags += [
       "-g",
@@ -64,7 +72,13 @@ config("compiler") {
     }
 
     if (use_lld) {
-      ldflags += [ "-fuse-ld=lld" ]
+      ldflags += [
+        "-fuse-ld=lld",
+
+        # This is necessary to prevent crash of goma on chromiumos chroot env.
+        # (crbug.com/780045#c35)
+        "-Wl,-hash-style=both",
+      ]
     }
   }
   if (os == "mac") {
@@ -82,12 +96,23 @@ config("compiler") {
     # Treat warnings as errors.
     cflags += [ "/WX" ]
 
-    if (!use_goma || is_clang) {
-      if (is_debug) {
-        cflags += [ "/ZI" ]
-      } else {
-        cflags += [ "/Zi" ]
-      }
+    # clang does not support /ZI.
+    # goma does not support /Zi (PDB) or /ZI (PDB + edit and continue)
+    # clang-cl.exe's /Zi is the alias of /Z7 (It does not produce PDB).
+    # So, anyway we can use /Zi for clang.
+    #                 debug      release
+    # clang            /Zi         /Zi
+    # clang+goma       /Zi         /Zi
+    # cl.exe           /ZI         /Zi
+    # cl.exe+goma      /Z7         /Z7
+    if (is_clang) {
+      cflags += [ "/Zi" ]
+    } else if (use_goma) {
+      cflags += [ "/Z7" ]
+    } else if (is_debug) {
+      cflags += [ "/ZI" ]
+    } else {
+      cflags += [ "/Zi" ]
     }
 
     cflags += [
@@ -227,6 +252,7 @@ config("optimize") {
   } else {
     cflags = [ "-O2" ]
   }
+  ldflags = []
   if (os == "linux") {
     cflags += [
       "-msse2",
@@ -236,13 +262,29 @@ config("optimize") {
       "-fdata-sections",
       "-ffunction-sections",
     ]
-    ldflags = [
+
+    if (use_custom_libcxx) {
+      ldflags += [
+        "-Wl,--no-as-needed",
+        "-lpthread",
+      ]
+    }
+
+    ldflags += [
       # http://lwn.net/Articles/192624/
       "-Wl,-O1",
       "-Wl,--as-needed",
       "-Wl,--gc-sections",
     ]
   }
+
+  if (use_thin_lto) {
+    assert(is_clang && use_lld && os == "linux",
+           "ThinLTO is supported in clang with lld on linux")
+    cflags += [ "-flto=thin" ]
+    ldflags += [ "-flto=thin" ]
+  }
+
   defines = [ "NDEBUG" ]
 }
 
@@ -278,6 +320,41 @@ config("no_rtti") {
 config("no_size_t_to_int_warning") {
   if (os == "win" && current_cpu == "x64") {
     cflags = [ "/wd4267" ]
+  }
+}
+
+# exceptions -------------------------------------------------------------
+#
+# Allows turning Exceptions on or off.
+# Note: exceptions are disallowed in Google code.
+
+config("exceptions") {
+  if (os == "win") {
+    # Enables exceptions in the STL.
+    if (!use_custom_libcxx) {
+      defines = [ "_HAS_EXCEPTIONS=1" ]
+    }
+    cflags_cc = [ "/EHsc" ]
+  } else {
+    cflags_cc = [ "-fexceptions" ]
+    cflags_objcc = cflags_cc
+  }
+}
+
+config("no_exceptions") {
+  if (os == "win") {
+    # Disables exceptions in the STL.
+    # libc++ uses the __has_feature macro to control whether to use exceptions,
+    # so defining this macro is unnecessary. Defining _HAS_EXCEPTIONS to 0 also
+    # breaks libc++ because it depends on MSVC headers that only provide certain
+    # declarations if _HAS_EXCEPTIONS is 1. Those MSVC headers do not use
+    # exceptions, despite being conditional on _HAS_EXCEPTIONS.
+    if (!use_custom_libcxx) {
+      defines = [ "_HAS_EXCEPTIONS=0" ]
+    }
+  } else {
+    cflags_cc = [ "-fno-exceptions" ]
+    cflags_objcc = cflags_cc
   }
 }
 
@@ -365,6 +442,7 @@ config("no_goma_code") {
       "-Wno-unused-result",
       "-Wno-format",
     ]
+
     cflags_cc += [ "-Wno-deprecated" ]
   }
 }

@@ -18,6 +18,7 @@
 
 #include <memory>
 #include <stack>
+#include <utility>
 
 
 #include "compiler_specific.h"
@@ -164,11 +165,8 @@ class FileOutputImpl : public devtools_goma::FileServiceClient::Output {
 
 class StringOutputImpl : public devtools_goma::FileServiceClient::Output {
  public:
-  StringOutputImpl(const string& name, string* buf)
-      : name_(name),
-        buf_(buf),
-        size_(0UL) {
-  }
+  StringOutputImpl(string name, string* buf)
+      : name_(std::move(name)), buf_(buf), size_(0UL) {}
   ~StringOutputImpl() override {
   }
 

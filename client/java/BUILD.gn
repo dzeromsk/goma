@@ -1,0 +1,73 @@
+# Copyright 2018 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+static_library("jarfile_reader_lib") {
+  sources = [
+    "jarfile_reader.cc",
+    "jarfile_reader.h",
+  ]
+
+  public_deps = [
+    "//lib",
+  ]
+
+  public_configs = [
+    "//client:client_config",
+    "//third_party:gtest_prod",
+  ]
+}
+
+static_library("jar_parser_lib") {
+  sources = [
+    "jar_parser.cc",
+    "jar_parser.h",
+  ]
+  deps = [
+    "//client:common",
+    "//third_party:glog",
+    "//third_party:minizip",
+  ]
+
+  public_configs = [ "//client:client_config" ]
+}
+
+executable("jarfile_normalizer") {
+  sources = [
+    "jarfile_normalizer.cc",
+  ]
+  configs += [ "//client:client_config" ]
+  deps = [
+    ":jarfile_reader_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//lib",
+    "//third_party:glog",
+  ]
+}
+
+executable("jar_parser_unittest") {
+  testonly = true
+  sources = [
+    "jar_parser_unittest.cc",
+  ]
+  deps = [
+    ":jar_parser_lib",
+    "//base",
+    "//build/config:exe_and_shlib_deps",
+    "//client:goma_test_lib",
+    "//third_party:glog",
+  ]
+}
+
+executable("jarfile_reader_unittest") {
+  testonly = true
+  sources = [
+    "jarfile_reader_unittest.cc",
+  ]
+  deps = [
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:goma_test_lib",
+  ]
+}

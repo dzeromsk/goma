@@ -22,11 +22,13 @@
 #include "config_win.h"
 #endif
 
+#include "absl/strings/ascii.h"
+
 using std::string;
 
 namespace devtools_goma {
 
-struct FileId;
+struct FileStat;
 
 // Options to be used with ReadCommandOutput to specify which command output
 // will be returned.
@@ -63,7 +65,7 @@ bool IsGomacc(
     const string& cwd);
 
 // Find a real path name of |cmd| from |path_env|.
-// It avoids to choose the file having same FileId with |gomacc_fileid|.
+// It avoids to choose the file having same FileStat with |gomacc_filestat|.
 // It returns true on success, and |local_compiler_path| (real compiler path)
 // and |no_goma_path| (PATH env. without gomacc) are set.
 // On Windows, |pathext_env| is used as PATHEXT parameter.
@@ -74,13 +76,15 @@ bool IsGomacc(
 // Note: you can use NULL to |no_goma_path_env| and |is_in_relative_path|
 // if you do not need them.
 // Note: You MUST call InstallReadCommandOuptutFunc beforehand if you
-//       use gomacc_fileid.
-bool GetRealExecutablePath(
-    const FileId* gomacc_fileid,
-    const string& cmd, const string& cwd,
-    const string& path_env, const string& pathext_env,
-    string* local_compiler_path, string* no_goma_path_env,
-    bool* is_in_relative_path);
+//       use gomacc_filestat.
+bool GetRealExecutablePath(const FileStat* gomacc_filestat,
+                           const string& cmd,
+                           const string& cwd,
+                           const string& path_env,
+                           const string& pathext_env,
+                           string* local_compiler_path,
+                           string* no_goma_path_env,
+                           bool* is_in_relative_path);
 
 #ifdef _WIN32
 // Resolves path extension of |cmd| using PATHEXT environment given with
@@ -104,12 +108,12 @@ Iter GetEnvIterFromEnvIter(Iter env_begin, Iter env_end,
                            const string& name, bool ignore_case) {
   string key = name + "=";
   if (ignore_case)
-    std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+    absl::AsciiStrToLower(&key);
 
   for (Iter i = env_begin; i != env_end; ++i) {
     string token = i->substr(0, key.length());
     if (ignore_case)
-      std::transform(token.begin(), token.end(), token.begin(), ::tolower);
+      absl::AsciiStrToLower(&token);
     if (token == key) {
       return i;
     }
@@ -179,12 +183,6 @@ inline bool Chdir(const char* path) {
 string ToShortNodename(const string& nodename);
 
 }  // namespace devtools_goma
-
-// Use unordered_map<K, V>::reserve() if we can use C++11 library.
-template<typename UnorderedMap>
-void UnorderedMapReserve(size_t size, UnorderedMap* m) {
-  m->rehash(std::ceil(size / m->max_load_factor()));
-}
 
 // Convert absl::StrSplit result to std::vector<string>
 // Because of clang-cl.exe bug, we cannot write

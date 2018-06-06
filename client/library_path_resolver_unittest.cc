@@ -20,6 +20,7 @@
 #include <glog/stl_logging.h>
 #include <gtest/gtest.h>
 
+#include "absl/memory/memory.h"
 #include "path.h"
 #include "unittest_util.h"
 
@@ -30,7 +31,7 @@ namespace devtools_goma {
 class LibraryPathResolverTest : public testing::Test {
  public:
   void SetUp() override {
-    tmpdir_util_.reset(new TmpdirUtil("library_path_resolver_test"));
+    tmpdir_util_ = absl::make_unique<TmpdirUtil>("library_path_resolver_test");
 
     // |tmpdir_| should be kept for LibraryPathResolver::fakeroot_.
     tmpdir_ = tmpdir_util_->tmpdir();

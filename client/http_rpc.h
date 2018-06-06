@@ -112,7 +112,7 @@ class HttpRPC {
 
 class ExecServiceClient {
  public:
-  ExecServiceClient(HttpRPC* http_rpc, const string& path);
+  ExecServiceClient(HttpRPC* http_rpc, string path);
 
   ExecServiceClient(const ExecServiceClient&) = delete;
   ExecServiceClient& operator=(const ExecServiceClient&) = delete;

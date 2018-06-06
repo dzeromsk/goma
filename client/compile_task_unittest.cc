@@ -301,6 +301,31 @@ TEST_F(CompileTaskTest, RemoveDuplicateFiles) {
     };
     EXPECT_EQ(filenames, expected);
   }
+
+  {
+    // We want to test path X and path Y where
+    // 1. X < Y (alphabetical order)
+    // 2. JoinPathRespectAbsolute(cwd, X) == JoinPathRespectAbsolutePath(cwd, Y)
+    // 3. len(X) > len(Y).
+    //
+    // Due to (1) and (2), If X is relative path, Y should be absolute path
+    // or vice versa. Since we don't resolve path and due to (3),
+    // Y must be relative path, and X must be absolute path.
+    //
+    // So, relative path should start with a character which is larger than
+    // 'C' (on Win) or '/' (on non Win).
+    std::set<std::string> filenames {
+      file::JoinPath(kRootDir, "a", "a", "bar.cc"),
+      file::JoinPath("a", "bar.cc"),
+    };
+    ASSERT_EQ(file::JoinPath(kRootDir, "a", "a", "bar.cc"), *filenames.begin());
+    RemoveDuplicateFiles(file::JoinPath(kRootDir, "a"), &filenames);
+
+    std::set<std::string> expected {
+      file::JoinPath("a", "bar.cc"),
+    };
+    EXPECT_EQ(filenames, expected);
+  }
 }
 
 }  // namespace devtools_goma

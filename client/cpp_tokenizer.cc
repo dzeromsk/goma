@@ -14,6 +14,7 @@
 
 #include "absl/strings/ascii.h"
 #include "compiler_specific.h"
+#include "glog/logging.h"
 
 namespace {
 
@@ -68,50 +69,35 @@ const aligned_char16 kSharpPattern = {
 
 namespace devtools_goma {
 
-std::set<std::string>* CppTokenizer::integer_suffixes_ = nullptr;
-CppToken::Type kOpTokenTable[128][128];
-
-static void InitializeTokenSwitchTables() {
-  for (int i = 0; i < 128; ++i)
-    for (int j = 0; j < 128; ++j)
-      kOpTokenTable[i][j] = CppToken::PUNCTUATOR;
-# define UC(c)   static_cast<unsigned char>(c)
-  kOpTokenTable[UC('=')][UC('=')] = CppToken::EQ;
-  kOpTokenTable[UC('!')][UC('=')] = CppToken::NE;
-  kOpTokenTable[UC('>')][UC('=')] = CppToken::GE;
-  kOpTokenTable[UC('<')][UC('=')] = CppToken::LE;
-  kOpTokenTable[UC('&')][UC('&')] = CppToken::LAND;
-  kOpTokenTable[UC('|')][UC('|')] = CppToken::LOR;
-  kOpTokenTable[UC('>')][UC('>')] = CppToken::RSHIFT;
-  kOpTokenTable[UC('<')][UC('<')] = CppToken::LSHIFT;
-  kOpTokenTable[UC('#')][UC('#')] = CppToken::DOUBLESHARP;
-  kOpTokenTable[UC('\r')][UC('\n')] = CppToken::NEWLINE;
-  kOpTokenTable[UC('*')][0] = CppToken::MUL;
-  kOpTokenTable[UC('+')][0] = CppToken::ADD;
-  kOpTokenTable[UC('-')][0] = CppToken::SUB;
-  kOpTokenTable[UC('>')][0] = CppToken::GT;
-  kOpTokenTable[UC('<')][0] = CppToken::LT;
-  kOpTokenTable[UC('&')][0] = CppToken::AND;
-  kOpTokenTable[UC('^')][0] = CppToken::XOR;
-  kOpTokenTable[UC('|')][0] = CppToken::OR;
-  kOpTokenTable[UC('#')][0] = CppToken::SHARP;
-  kOpTokenTable[UC('\n')][0] = CppToken::NEWLINE;
-# undef UC
-}
-
 // static
-void CppTokenizer::InitializeStaticOnce() {
-  static const char* kLongSuffixes[] = { "l", "ll" };
-  static const char* kUnsignedSuffix = "u";
-  integer_suffixes_ = new std::set<std::string>;
-  integer_suffixes_->insert(kUnsignedSuffix);
-  for (const auto& suffix : kLongSuffixes) {
-    integer_suffixes_->insert(suffix);
-    integer_suffixes_->insert(std::string(kUnsignedSuffix) + suffix);
-    integer_suffixes_->insert(suffix + std::string(kUnsignedSuffix));
+bool CppTokenizer::TokenizeAll(const std::string& str,
+                               bool skip_space,
+                               ArrayTokenList* result) {
+  std::unique_ptr<Content> content = Content::CreateFromString(str);
+  CppInputStream stream(content.get());
+
+  string error_reason;
+  ArrayTokenList tokens;
+  while (true) {
+    CppToken token;
+    if (!NextTokenFrom(&stream, skip_space, &token, &error_reason)) {
+      break;
+    }
+    if (token.type == CppToken::END) {
+      break;
+    }
+    tokens.push_back(std::move(token));
   }
 
-  InitializeTokenSwitchTables();
+  if (!error_reason.empty()) {
+    LOG(ERROR) << "failed to tokenize:"
+               << " input=" << str
+               << " error=" << error_reason;
+    return false;
+  }
+
+  *result = std::move(tokens);
+  return true;
 }
 
 // static
@@ -207,7 +193,7 @@ bool CppTokenizer::NextTokenFrom(CppInputStream* stream,
         // e.g. 'A will be PUNCTUATOR '\'' and IDENTIFIER('A).
         FALLTHROUGH_INTENDED;
       default:
-        if (c == '_' || absl::ascii_isalpha(c)) {
+        if (c == '_'  || c == '$' || absl::ascii_isalpha(c)) {
           *token = ReadIdentifier(stream, cur);
           return true;
         }
@@ -216,16 +202,16 @@ bool CppTokenizer::NextTokenFrom(CppInputStream* stream,
           return true;
         }
         if (c1 == EOF) {
-          *token = CppToken(kOpTokenTable[c][0], static_cast<char>(c));
+          *token = CppToken(TypeFrom(c, 0), static_cast<char>(c));
           return true;
         }
-        if ((c1 & ~0x7f) == 0 && kOpTokenTable[c][c1] != CppToken::PUNCTUATOR) {
+        if ((c1 & ~0x7f) == 0 && TypeFrom(c, c1) != CppToken::PUNCTUATOR) {
           stream->Advance(1, 0);
-          *token = CppToken(kOpTokenTable[c][c1],
+          *token = CppToken(TypeFrom(c, c1),
                             static_cast<char>(c), static_cast<char>(c1));
           return true;
         }
-        *token = CppToken(kOpTokenTable[c][0], static_cast<char>(c));
+        *token = CppToken(TypeFrom(c, 0), static_cast<char>(c));
         return true;
     }
   }
@@ -271,7 +257,7 @@ CppToken CppTokenizer::ReadIdentifier(CppInputStream* stream,
   CppToken token(CppToken::IDENTIFIER);
   for (;;) {
     int c = stream->GetChar();
-    if (absl::ascii_isalnum(c) || c == '_' ||
+    if (absl::ascii_isalnum(c) || c == '_' || c == '$' ||
         (c == '\\' && HandleLineFoldingWithToken(stream, &token, &begin))) {
       continue;
     }
@@ -353,9 +339,7 @@ CppToken CppTokenizer::ReadNumber(CppInputStream* stream, int c0,
 
   token.Append(begin, stream->GetLengthToCurrentFrom(begin, c));
   stream->UngetChar(c);
-  if (maybe_int_constant &&
-      (suffix.empty() ||
-       integer_suffixes_->find(suffix) != integer_suffixes_->end())) {
+  if (maybe_int_constant && (suffix.empty() || IsValidIntegerSuffix(suffix))) {
     token.v.int_value = value;
   }
   return token;
@@ -477,6 +461,44 @@ bool CppTokenizer::ReadCharLiteral(CppInputStream* stream,
         (cur[1] - '0') << 6 |
         (cur[2] - '0') << 3 |
         (cur[3] - '0');
+    stream->Advance(5, 0);
+  } else if (cur_len >= 3 &&
+             cur[0] != '\'' && cur[0] != '\\' &&
+             cur[1] != '\'' && cur[1] != '\\' &&
+             cur[2] == '\'') {
+    // c-char-sequence
+    // support only 2 char sequence here
+    // Windows winioctl.h uses such sequence. http://b/74048713
+    // winioctl.h in win_sdk
+    //  #define IRP_EXT_TRACK_OFFSET_HEADER_VALIDATION_VALUE 'TO'
+    token.v.int_value =
+         (cur[0] <<  8) |
+         cur[1];
+    stream->Advance(3, 0);
+  } else if (cur_len >= 5 &&
+             cur[0] != '\'' && cur[0] != '\\' &&
+             cur[1] != '\'' && cur[1] != '\\' &&
+             cur[2] != '\'' && cur[2] != '\\' &&
+             cur[3] != '\'' && cur[3] != '\\' &&
+             cur[4] == '\'') {
+    // c-char-sequence
+    // support only 4 char sequence here.
+    // MacOSX system header uses such sequence. http://b/74048713
+    // - PMPrintAETypes.h in PrintCore.framework
+    //   #define kPMPrintSettingsAEType                  'pset'
+    //   etc
+    // - Debugging.h in CarbonCore.framework
+    //   #define COMPONENT_SIGNATURE '?*?*'
+    //
+    // The value of an integer character constant containing more than
+    // one character (e.g., 'ab'), or containing a character or escape
+    // sequence that does not map to a single-byte execution character,
+    // is implementation-defined.
+    token.v.int_value =
+         (cur[0] << 24) |
+         (cur[1] << 16) |
+         (cur[2] <<  8) |
+         cur[3];
     stream->Advance(5, 0);
   } else {
     // TODO: Support other literal form if necessary.
@@ -607,7 +629,8 @@ bool CppTokenizer::SkipUntilDirective(CppInputStream* stream,
         stream->Advance(1, 0);
         SkipUntilLineBreakIgnoreComment(stream);
         continue;
-      } else if (c0 == '/' && c == '*') {
+      }
+      if (c0 == '/' && c == '*') {
         stream->Advance(1, 0);
         if (!SkipComment(stream, error_reason))
           return false;
@@ -723,6 +746,74 @@ bool CppTokenizer::IsAfterEndOfLine(const char* cur, const char* begin) {
   }
 
   return true;
+}
+
+// static
+bool CppTokenizer::IsValidIntegerSuffix(const std::string& s) {
+  switch (s.size()) {
+    case 1:
+      return s == "u" || s == "l";
+    case 2:
+      return s == "ul" || s == "lu" || s == "ll";
+    case 3:
+      return s == "ull" || s == "llu";
+    default:
+      return false;
+  }
+}
+
+// static
+CppToken::Type CppTokenizer::TypeFrom(int c1, int c2) {
+  switch (c1) {
+  case '!':
+    if (c2 == '=') { return CppToken::NE; }
+    break;
+  case '#':
+    if (c2 == 0) { return CppToken::SHARP; }
+    if (c2 == '#') { return CppToken::DOUBLESHARP; }
+    break;
+  case '&':
+    if (c2 == 0) { return CppToken::AND; }
+    if (c2 == '&') { return CppToken::LAND; }
+    break;
+  case '*':
+    if (c2 == 0) { return CppToken::MUL; }
+    break;
+  case '+':
+    if (c2 == 0) { return CppToken::ADD; }
+    break;
+  case '-':
+    if (c2 == 0) { return CppToken::SUB; }
+    break;
+  case '<':
+    if (c2 == 0) { return CppToken::LT; }
+    if (c2 == '<') { return CppToken::LSHIFT; }
+    if (c2 == '=') { return CppToken::LE; }
+    break;
+  case '=':
+    if (c2 == '=') { return CppToken::EQ; }
+    break;
+  case '>':
+    if (c2 == 0) { return CppToken::GT; }
+    if (c2 == '=') { return CppToken::GE; }
+    if (c2 == '>') { return CppToken::RSHIFT; }
+    break;
+  case '\n':
+    if (c2 == 0) { return CppToken::NEWLINE; }
+    break;
+  case '\r':
+    if (c2 == '\n') { return CppToken::NEWLINE; }
+    break;
+  case '^':
+    if (c2 == 0) { return CppToken::XOR; }
+    break;
+  case '|':
+    if (c2 == 0) { return CppToken::OR; }
+    if (c2 == '|') { return CppToken::LOR; }
+    break;
+  }
+
+  return CppToken::PUNCTUATOR;
 }
 
 }  // namespace devtools_goma

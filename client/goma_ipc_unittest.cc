@@ -8,6 +8,7 @@
 #include <string>
 #include <sstream>
 
+#include "absl/memory/memory.h"
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
 #include "ioutil.h"
@@ -107,13 +108,13 @@ class GomaIPCTest : public ::testing::Test {
 #endif
 
   void SetUp() override {
-    wm_.reset(new WorkerThreadManager);
+    wm_ = absl::make_unique<WorkerThreadManager>();
     wm_->Start(1);
-    mock_server_.reset(new MockSocketServer(wm_.get()));
+    mock_server_ = absl::make_unique<MockSocketServer>(wm_.get());
 #ifdef _WIN32
-    mock_handler_.reset(new MockNamedPipeHandler);
-    named_pipe_server_.reset(
-        new NamedPipeServer(wm_.get(), mock_handler_.get()));
+    mock_handler_ = absl::make_unique<MockNamedPipeHandler>();
+    named_pipe_server_ =
+        absl::make_unique<NamedPipeServer>(wm_.get(), mock_handler_.get());
     named_pipe_server_->Start(kNamedPipeName);
 #endif
   }

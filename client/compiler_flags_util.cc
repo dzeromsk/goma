@@ -8,17 +8,20 @@
 
 #include "compiler_flags_util.h"
 
+#include <utility>
+
 #include "compiler_flags.h"
 #include "compiler_info.h"
 #include "compiler_specific.h"
 #include "flag_parser.h"
+#include "gcc_flags.h"
 #include "path_resolver.h"
 
 namespace {
 
-class FixPath : public FlagParser::Callback {
+class FixNonSystemPath : public FlagParser::Callback {
  public:
-  explicit FixPath(const string& cwd) : cwd_(cwd) {}
+  explicit FixNonSystemPath(string cwd) : cwd_(std::move(cwd)) {}
 
   void RegisterSystemPath(const string& path) {
     path_resolver_.RegisterSystemPath(path);
@@ -45,7 +48,7 @@ std::vector<string> CompilerFlagsUtil::MakeWeakRelative(
     const std::vector<string>& args,
     const string& cwd,
     const CompilerInfo& compiler_info) {
-  FixPath fix_path(cwd);
+  FixNonSystemPath fix_path(cwd);
   for (const auto& path : compiler_info.cxx_system_include_paths())
     fix_path.RegisterSystemPath(path);
   for (const auto& path : compiler_info.system_include_paths())

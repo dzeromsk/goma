@@ -5,9 +5,6 @@
 
 #include "directive_filter.h"
 
-#ifdef TEST
-#include <stdio.h>
-#endif
 #include <string.h>
 
 #include <memory>
@@ -303,30 +300,3 @@ size_t DirectiveFilter::RemoveDeadDirectives(
 }
 
 }  // namespace devtools_goma
-
-#ifdef TEST
-
-using devtools_goma::Content;
-using devtools_goma::DirectiveFilter;
-
-int main(int argc, char* argv[]) {
-  if (argc < 2) {
-    fprintf(stderr, "Usage: directive_filter <header or source>\n");
-    return 1;
-  }
-
-  std::unique_ptr<Content> content(Content::CreateFromFile(argv[1]));
-  if (!content.get()) {
-    fprintf(stderr, "Cannot read %s\n", argv[1]);
-    return 1;
-  }
-
-  std::unique_ptr<Content> filtered(
-      DirectiveFilter::MakeFilteredContent(*content));
-
-  fwrite(filtered->buf(), sizeof(char), filtered->size(), stdout);
-  fflush(stdout);
-
-  return 0;
-}
-#endif

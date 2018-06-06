@@ -6,10 +6,7 @@
 #include "file.h"
 
 #ifndef _WIN32
-# include <libgen.h>
 # include <sys/stat.h>
-# include <sys/types.h>
-# include <unistd.h>
 #else
 # include "config_win.h"
 #endif
@@ -18,7 +15,6 @@
 
 #include "file_dir.h"
 #include "glog/logging.h"
-#include "path.h"
 
 // TODO: Refactor code with Chromium base/file_util
 // Chrome base has file_util.h that pretty much replaces most functions in this
@@ -75,48 +71,4 @@ bool Copy(const char* from, const char* to, bool overwrite) {
 #endif
 }
 
-bool CreateDir(const std::string& path, int mode) {
-#ifndef _WIN32
-  int r = mkdir(path.c_str(), mode);
-  if (r < 0) {
-    PLOG(ERROR) << "CreateDir failed: " << path;
-    return false;
-  }
-#else
-  UNREFERENCED_PARAMETER(mode);
-  if (!CreateDirectoryA(path.c_str(), nullptr)) {
-    DWORD err = GetLastError();
-    LOG(ERROR) << "CreateDir failed: " << path << ": " << err;
-    LOG_SYSRESULT(err);
-    return false;
-  }
-#endif
-  return true;
-}
-
 }  // namespace File
-
-namespace file {
-
-Options Defaults() {
-  return Options();
-}
-
-util::Status IsDirectory(absl::string_view path, const file::Options&) {
-  std::string str = std::string(path);
-#ifndef _WIN32
-  struct stat st;
-  if (stat(str.c_str(), &st) == 0) {
-    return util::Status(S_ISDIR(st.st_mode));
-  }
-  return util::Status(false);
-#else
-  DWORD attr = GetFileAttributesA(str.c_str());
-  if (attr == INVALID_FILE_ATTRIBUTES)
-    return util::Status(false);
-  return util::Status(
-      (attr & FILE_ATTRIBUTE_DIRECTORY) == FILE_ATTRIBUTE_DIRECTORY);
-#endif
-}
-
-}  // namespace file

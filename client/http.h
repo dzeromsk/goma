@@ -93,10 +93,6 @@ class HttpClient {
 
     bool reuse_connection;
 
-    // Clear the error record of socket_pool when failed to get socket from
-    // socket_pool, and retry connection.
-    bool force_connect_errorneous_address;
-
     bool InitFromURL(absl::string_view url);
 
     string SocketHost() const;
@@ -481,9 +477,7 @@ class HttpClient {
   };
 
   // |may_retry| is provided for initial ping.
-  // If |may_retry| is true, NewDescriptor may returns a descriptor of
-  // an address that caused an error in a previous connection.
-  Descriptor* NewDescriptor(bool may_retry);
+  Descriptor* NewDescriptor();
   void ReleaseDescriptor(Descriptor* d, ConnectionCloseState close_state);
 
   double EstimatedRecvTime(size_t bytes);
@@ -543,7 +537,6 @@ class HttpClient {
   // When we get 2xx HTTP responses for specified duration, we consider
   // the network is recovered.
   // For the other error, this does not care.
-  // guarded by mu_.
   NetworkErrorStatus network_error_status_ GUARDED_BY(mu_);;
 
   int num_query_ GUARDED_BY(mu_);

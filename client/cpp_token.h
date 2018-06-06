@@ -5,12 +5,16 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_CPP_TOKEN_H_
 #define DEVTOOLS_GOMA_CLIENT_CPP_TOKEN_H_
 
+#include <list>
+#include <ostream>
 #include <string>
 #include <type_traits>
-
-#include "glog/logging.h"
+#include <vector>
 
 #include "absl/strings/string_view.h"
+#include "glog/logging.h"
+
+using std::string;
 
 namespace devtools_goma {
 
@@ -24,11 +28,6 @@ struct CppToken {
     OP_BEGIN,
     MUL = OP_BEGIN, DIV, MOD, ADD, SUB, RSHIFT, LSHIFT, GT, LT,
     GE, LE, EQ, NE, AND, XOR, OR, LAND, LOR,
-
-    // Hideset annotation.
-    // This is used only for macro expansion.
-    // If token has below type, it should have macro id in v.int_value.
-    BEGIN_HIDE, END_HIDE
   };
 
   typedef int (*OperatorFunction)(int, int);
@@ -43,6 +42,10 @@ struct CppToken {
   }
   CppToken(Type type, absl::string_view s) : type(type), string_value(s) {}
 
+  friend std::ostream& operator<<(std::ostream& os, const CppToken& token) {
+    return os << token.DebugString();
+  }
+
   bool operator==(const CppToken& other) const {
     if (type != other.type) {
       return false;
@@ -55,14 +58,21 @@ struct CppToken {
   }
 
   void Append(const char* str, size_t size);
-  void Append(const std::string& str);
+  void Append(const string& str);
   bool IsPuncChar(int c) const;
+  bool IsIdentifier(absl::string_view s) const {
+    return type == IDENTIFIER && string_value == s;
+  }
+  bool IsMacroParamType() const {
+    return type == MACRO_PARAM || type == MACRO_PARAM_VA_ARGS;
+  }
   bool IsOperator() const;
   void MakeMacroParam(size_t param_index);
-  void MakeMacroParamVaArgs();
+  // For F(X, Y, ...), __VA_ARGS__ param_index is 2 in this case.
+  void MakeMacroParamVaArgs(size_t param_index);
 
-  std::string DebugString() const;
-  std::string GetCanonicalString() const;
+  string DebugString() const;
+  string GetCanonicalString() const;
 
   int ApplyOperator(int v1, int v2) const {
     DCHECK(IsOperator());
@@ -81,7 +91,7 @@ struct CppToken {
   static const int kPrecedenceTable[];
 
   Type type;
-  std::string string_value;
+  string string_value;
 
   // A struct to hold char value(s) for operators and punctuators.
   struct CharValue {
@@ -113,7 +123,7 @@ inline void CppToken::Append(const char* str, size_t size) {
   string_value.append(str, size);
 }
 
-inline void CppToken::Append(const std::string& str) {
+inline void CppToken::Append(const string& str) {
   string_value.append(str);
 }
 
@@ -132,15 +142,36 @@ inline void CppToken::MakeMacroParam(size_t param_index) {
   string_value.clear();
 }
 
-inline void CppToken::MakeMacroParamVaArgs() {
+inline void CppToken::MakeMacroParamVaArgs(size_t param_index) {
   DCHECK_EQ(IDENTIFIER, type);
   DCHECK_EQ("__VA_ARGS__", string_value);
   type = MACRO_PARAM_VA_ARGS;
+  v.param_index = param_index;
   string_value.clear();
 }
 
 static_assert(std::is_nothrow_move_constructible<CppToken>::value,
               "CppToken must be move constructible");
+
+using TokenList = std::list<CppToken>;
+using ArrayTokenList = std::vector<CppToken>;
+
+template<typename Iter>
+string DebugString(Iter begin, Iter end) {
+  string str;
+  for (auto iter = begin; iter != end; ++iter) {
+    str.append(iter->DebugString());
+  }
+  return str;
+}
+
+inline string DebugString(const TokenList& tokens) {
+  return DebugString(tokens.begin(), tokens.end());
+}
+
+inline string DebugString(const ArrayTokenList& tokens) {
+  return DebugString(tokens.begin(), tokens.end());
+}
 
 }  // namespace devtools_goma
 

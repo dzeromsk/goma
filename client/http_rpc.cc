@@ -8,6 +8,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/strings/string_view.h"
@@ -438,9 +439,8 @@ void HttpRPC::CallResponse::ParseBody(
   return;
 }
 
-ExecServiceClient::ExecServiceClient(HttpRPC* http_rpc, const string& path)
-    : http_rpc_(http_rpc), path_(path) {
-}
+ExecServiceClient::ExecServiceClient(HttpRPC* http_rpc, string path)
+    : http_rpc_(http_rpc), path_(std::move(path)) {}
 
 void ExecServiceClient::ExecAsync(const ExecReq* req, ExecResp* resp,
                                   HttpClient::Status* status,

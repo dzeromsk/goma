@@ -17,7 +17,7 @@ namespace devtools_goma {
 
 class FrameworkPathResolver {
  public:
-  explicit FrameworkPathResolver(const string& cwd);
+  explicit FrameworkPathResolver(string cwd);
   ~FrameworkPathResolver() {}
 
   // Returns list of files in the framework.

@@ -58,6 +58,8 @@ message SubProcessReq {
 
   optional string prog = 10;
   repeated string argv = 11;
+  // Note: TMP and TEMP in env will be replaced without setting keep_env = true
+  // (on Windows). See b/21312000
   repeated string env = 12;
   optional string cwd = 13;
   optional string stdin_filename = 14;
@@ -71,6 +73,9 @@ message SubProcessReq {
 
   // If detach is true, no feedback comes from subprocess controller server.
   optional bool detach = 30;
+  // If true, env is used as-is. Otherwise, TMP and TEMP can be replaced in
+  // spawner.
+  optional bool keep_env = 31;
 };
 
 message SubProcessRun {

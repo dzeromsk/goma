@@ -18,6 +18,10 @@
 
 #include "glog/logging.h"
 
+#ifdef _WIN32
+#include <process.h>
+#endif
+
 #if HAVE_CPU_PROFILER
 #include <gperftools/profiler.h>
 #endif
@@ -26,7 +30,7 @@ namespace devtools_goma {
 
 #if defined (_WIN32)
 
-DWORD __stdcall ThreadFunc(void* params) {
+unsigned __stdcall ThreadFunc(void* params) {
   PlatformThread::Delegate* delegate =
       static_cast<PlatformThread::Delegate*>(params);
   delegate->ThreadMain();
@@ -37,11 +41,12 @@ DWORD __stdcall ThreadFunc(void* params) {
 bool PlatformThread::Create(Delegate* delegate,
                             PlatformThreadHandle* thread_handle) {
   CHECK(thread_handle);
-  *thread_handle = CreateThread(nullptr, 0, ThreadFunc, delegate, 0, nullptr);
-  if (!(*thread_handle)) {
+  uintptr_t r = _beginthreadex(nullptr, 0, ThreadFunc, delegate, 0, nullptr);
+  if (r == 0) {
     return false;
   }
 
+  *thread_handle = reinterpret_cast<HANDLE>(r);
   return true;
 }
 

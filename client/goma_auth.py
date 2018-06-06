@@ -23,13 +23,9 @@ import random
 GOOGLE_AUTH_URI = 'https://accounts.google.com/o/oauth2/auth'
 OAUTH_SCOPES = 'https://www.googleapis.com/auth/userinfo.email'
 OAUTH_TOKEN_ENDPOINT = 'https://www.googleapis.com/oauth2/v3/token'
+TOKEN_INFO_ENDPOINT = 'https://www.googleapis.com/oauth2/v3/tokeninfo'
 OOB_CALLBACK_URN = 'urn:ietf:wg:oauth:2.0:oob'
-GOMA_OAUTH_SCOPE='https://www.googleapis.com/auth/goma'
 
-CHROME_INFRA_CONFIG_URL = ('https://chrome-infra-auth.appspot.com/'
-                           'auth/api/v1/server/oauth_config')
-CHROME_INFRA_CONFIG_DEV_URL = ('https://chrome-infra-auth-dev.appspot.com/'
-                               'auth/api/v1/server/oauth_config')
 DEFAULT_GOMA_OAUTH2_CONFIG_FILE_NAME = '.goma_oauth2_config'
 
 OAUTH_STATE_LENGTH = 64
@@ -124,35 +120,24 @@ def HttpPostRequest(url, post_dict):
   return subprocess.check_output(cmd)
 
 
-def OAuth2BasicConfig():
-  """Returns a dictionary of a basic OAuth2 config."""
+def DefaultOAuth2Config():
+  """Returns default OAuth2 config.
+
+  same as oauth2.cc:DefaultOAuth2Config.
+  TODO: run compiler_propxy to generate default oauth2 config?
+
+  Returns:
+    a dictionary of OAuth2 config.
+  """
   return {
-      'client_id': '',
-      'client_secret': '',
+      'client_id': ('687418631491-r6m1c3pr0lth5atp4ie07f03ae8omefc.'
+                    'apps.googleusercontent.com'),
+      'client_secret': 'R7e-JO3L5sKVczuR-dKQrijF',
       'redirect_uri': OOB_CALLBACK_URN,
       'auth_uri': GOOGLE_AUTH_URI,
       'scope': OAUTH_SCOPES,
       'token_uri': OAUTH_TOKEN_ENDPOINT,
   }
-
-
-def ReadOAuth2ConfigFromSite(is_dev):
-  """Returns OAuth2 config that is come from chrome-infra-site.
-
-  Args:
-    is_dev: use dev site on True.
-
-  Returns:
-    a dictionary of OAuth2 config.
-  """
-  url = CHROME_INFRA_CONFIG_DEV_URL if is_dev else CHROME_INFRA_CONFIG_URL
-  config = json.loads(HttpGetRequest(url))
-  ret = OAuth2BasicConfig()
-  ret.update({
-      'client_id': config['client_id'],
-      'client_secret': config['client_not_so_secret'],
-  })
-  return ret
 
 
 class AuthorizationCodeHandler(BaseHTTPServer.BaseHTTPRequestHandler):
@@ -268,9 +253,14 @@ def GetRefreshToken(get_code_func, config):
 
 
 def VerifyRefreshToken(config):
-  """Returns True if a refresh token in config is valid."""
+  """Verify refresh token in config.
+
+  Returns:
+     '' if a refresh token in config is valid.
+     error message if something wrong.
+  """
   if not 'refresh_token' in config:
-    return False
+    return 'no refresh token in config'
   post_data = {
       'client_id': config['client_id'],
       'client_secret': config['client_secret'],
@@ -279,8 +269,16 @@ def VerifyRefreshToken(config):
   }
   resp = json.loads(HttpPostRequest(config['token_uri'], post_data))
   if 'error' in resp:
-    return False
-  return 'access_token' in resp
+    return 'obtain access token: %s' % resp['error']
+  token_info = json.loads(HttpPostRequest(
+      TOKEN_INFO_ENDPOINT,
+      {'access_token': resp['access_token']}))
+  if 'error_description' in token_info:
+    return 'token info: %s' % token_info['error_description']
+  if not 'email' in token_info:
+    return 'no email in token_info %s' % token_info
+  print 'Login as ' + token_info['email']
+  return ''
 
 
 def Login(options):
@@ -294,23 +292,21 @@ def Login(options):
   if options.delete:
     config.Delete()
   if not config.Load():
-    config.update(ReadOAuth2ConfigFromSite(options.dev_chrome_infra_site))
+    config.update(DefaultOAuth2Config())
     func = GetAuthorizationCodeViaCommandLine
     if options.browser:
       func = GetAuthorizationCodeViaBrowser
     config['refresh_token'] = GetRefreshToken(func, config)
 
-  if not VerifyRefreshToken(config):
-    raise Error('invalid refresh token')
+  err = VerifyRefreshToken(config)
+  if err:
+    sys.stderr.write(err + '\n')
 
   config.Save()
 
 
 def main():
-  print '!!!EXPERIMENTAL!!!  WE MAY CHANGE THIS WITHOUT ANNOUNCEMENT.'
   parser = argparse.ArgumentParser()
-  parser.add_argument('--dev_chrome_infra_site', action='store_true',
-                      help=('Use dev chrome infra site.'))
   parser.add_argument('--delete', action='store_true',
                       help=('Delete the stored goma OAuth2 config file.'))
   parser.add_argument('--browser', action='store_true',

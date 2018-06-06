@@ -28,12 +28,12 @@ class DescriptorPoller {
 
   // Creates a new DescriptorPoller instance.
   // |poll_breaker| is a special Descriptor that has no callbacks and is
-  // only used to break the PollEvents.  Its ownership is transferred
-  // to the poller.
+  // only used to break the PollEvents.
   // poll_signaler should not be SocketDescriptor because it will be used
   // on other thread than the thread for the DescriptorPoller.
-  static DescriptorPoller* NewDescriptorPoller(
-      SocketDescriptor* poll_breaker, ScopedSocket&& poll_signaler);
+  static std::unique_ptr<DescriptorPoller> NewDescriptorPoller(
+      std::unique_ptr<SocketDescriptor> poll_breaker,
+      ScopedSocket&& poll_signaler);
   DescriptorPoller() {}
   virtual ~DescriptorPoller() {}
 
@@ -66,7 +66,7 @@ class DescriptorPoller {
 
 class DescriptorPollerBase : public DescriptorPoller {
  public:
-  DescriptorPollerBase(SocketDescriptor* poll_breaker,
+  DescriptorPollerBase(std::unique_ptr<SocketDescriptor> poll_breaker,
                        ScopedSocket&& poll_signaler);
   ~DescriptorPollerBase() override {}
 
@@ -105,7 +105,7 @@ class DescriptorPollerBase : public DescriptorPoller {
   // Called right after PollEventsInternal; with lock held.
   // Returns EventEnumerator with which caller can iterate over descriptors
   // that have had any events.
-  virtual EventEnumerator* GetEventEnumerator(
+  virtual std::unique_ptr<EventEnumerator> GetEventEnumerator(
       const DescriptorMap& descriptors) = 0;
 
   SocketDescriptor* poll_breaker() const { return poll_breaker_.get(); }

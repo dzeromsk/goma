@@ -71,7 +71,7 @@ class SubProcessControllerClient: public SubProcessController {
   static SubProcessControllerClient* Create(
       int fd, pid_t pid, const Options& options);
 
-  SubProcessControllerClient(int fd, pid_t pid, const Options& options);
+  SubProcessControllerClient(int fd, pid_t pid, Options options);
   ~SubProcessControllerClient() override;
   void Setup(WorkerThreadManager* wm, std::string tmp_dir);
   void Delete();

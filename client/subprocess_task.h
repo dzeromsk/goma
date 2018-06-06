@@ -129,9 +129,9 @@ class SubProcessTask {
 
   OneshotClosure* callback_;
 
-  mutable Lock mu_;  // protect state_.
+  mutable Lock mu_;
   ConditionVariable cond_;
-  SubProcessState::State state_;
+  SubProcessState::State state_ GUARDED_BY(mu_);
 
   DISALLOW_COPY_AND_ASSIGN(SubProcessTask);
 };

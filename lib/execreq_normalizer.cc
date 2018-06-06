@@ -9,27 +9,32 @@
 #include <utility>
 #include <vector>
 
+#include "absl/memory/memory.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "compiler_flags.h"
+#include "gcc_flags.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
+#include "java_flags.h"
 #include "path.h"
 #include "path_resolver.h"
 #include "path_util.h"
+#include "vc_flags.h"
 using ::google::protobuf::RepeatedPtrField;
 using ::absl::StrCat;
+
+namespace devtools_goma {
 
 namespace {
 
 class FixPath : public FlagParser::Callback {
  public:
-  explicit FixPath(const string& cwd) : cwd_(cwd), is_fixed_(false) {}
+  explicit FixPath(string cwd) : cwd_(std::move(cwd)), is_fixed_(false) {}
   string ParseFlagValue(const FlagParser::Flag& flag,
                         const string& value) override {
-    string normalized_path =
-        devtools_goma::PathResolver::WeakRelativePath(value, cwd_);
+    string normalized_path = PathResolver::WeakRelativePath(value, cwd_);
     if (normalized_path != value) {
       is_fixed_ = true;
     }
@@ -52,7 +57,7 @@ class RewritePath : public FlagParser::Callback {
   string ParseFlagValue(const FlagParser::Flag& flag,
                         const string& value) override {
     // TODO: need to support Windows?
-    if (!devtools_goma::IsPosixAbsolutePath(value)) {
+    if (!IsPosixAbsolutePath(value)) {
       return value;
     }
     // RewritePath is used for normalizing paths.
@@ -63,8 +68,7 @@ class RewritePath : public FlagParser::Callback {
     }
 
     string path = value;
-    if (devtools_goma::RewritePathWithDebugPrefixMap(
-          debug_prefix_map_, &path)) {
+    if (RewritePathWithDebugPrefixMap(debug_prefix_map_, &path)) {
       is_rewritten_ = true;
       return path;
     }
@@ -81,8 +85,6 @@ class RewritePath : public FlagParser::Callback {
 };
 
 }  // anonymous namespace
-
-namespace devtools_goma {
 
 bool RewritePathWithDebugPrefixMap(
     const std::map<string, string>& debug_prefix_map,
@@ -136,6 +138,270 @@ bool HasAmbiguityInDebugPrefixMap(
   return false;
 }
 
+void ConfigurableExecReqNormalizer::NormalizeExecReqSystemIncludeDirs(
+    int keep_system_include_dirs,
+    const std::map<string, string>& debug_prefix_map,
+    const string& debug_prefix_map_signature,
+    ExecReq* req) const {
+  if (keep_system_include_dirs & kAsIs) {
+    return;
+  }
+
+  // Hack for non-system-default compilers e.g. NaCl and clang.
+  // Normalize following paths to be given with the relative path:
+  // - system_include_path
+  // - cxx_system_include_path
+  //
+  // Already cleared:
+  // - local_compiler_path
+  //
+  // Note:
+  // Since followings are usually pointing the system default paths,
+  // we do not normalize them.
+  // - system_framework_path
+  // - system_library_path
+  CommandSpec* normalized_spec = req->mutable_command_spec();
+  // To avoid yet another cache poisoning, we should separate cache area.
+  // i.e. include_paths with relative paths is given but misunderstand
+  // it as not normalized.
+  if (keep_system_include_dirs & kNormalizeWithDebugPrefixMap) {
+    bool is_normalized = false;
+    for (auto& path : *normalized_spec->mutable_system_include_path()) {
+      is_normalized |= RewritePathWithDebugPrefixMap(debug_prefix_map, &path);
+    }
+    for (auto& path : *normalized_spec->mutable_cxx_system_include_path()) {
+      is_normalized |= RewritePathWithDebugPrefixMap(debug_prefix_map, &path);
+    }
+    if (is_normalized) {
+      normalized_spec->mutable_comment()->append(" include_path:" +
+                                                 debug_prefix_map_signature);
+    }
+  } else if (keep_system_include_dirs & kNormalizeWithCwd) {
+    bool is_include_path_normalized = false;
+    for (auto& path : *normalized_spec->mutable_system_include_path()) {
+      string normalized_path = PathResolver::WeakRelativePath(path, req->cwd());
+      if (path != normalized_path) {
+        path.assign(normalized_path);
+        is_include_path_normalized = true;
+      }
+    }
+    for (auto& path : *normalized_spec->mutable_cxx_system_include_path()) {
+      string normalized_path = PathResolver::WeakRelativePath(path, req->cwd());
+      if (path != normalized_path) {
+        path.assign(normalized_path);
+        is_include_path_normalized = true;
+      }
+    }
+    if (is_include_path_normalized) {
+      normalized_spec->mutable_comment()->append(" include_path:cwd");
+    }
+  } else if (keep_system_include_dirs == kOmit) {
+    normalized_spec->clear_system_include_path();
+    normalized_spec->clear_cxx_system_include_path();
+    normalized_spec->mutable_comment()->append(" omit_include_path:");
+  } else {
+    DLOG(FATAL) << "Unexpected keep_system_include_dirs="
+                << keep_system_include_dirs;
+  }
+}
+
+void ConfigurableExecReqNormalizer::NormalizeExecReqArgs(
+    int keep_args,
+    const std::vector<string>& args,
+    const std::vector<string>& normalize_weak_relative_for_arg,
+    const std::map<string, string>& debug_prefix_map,
+    const string& debug_prefix_map_signature,
+    ExecReq* req) const {
+  if (keep_args & kAsIs) {
+    return;
+  }
+
+  // Normalize arguments after certain flags.
+  // This is required for
+  // - libFindBadConstructs.so plugin used in chrome clang. b/9957696.
+  // - -B to choose third_party/binutils used in chrome. b/13940741.
+  // - -gcc-toolchain= for clang to find headers. b/16876457.
+  FlagParser parser;
+  GCCFlags::DefineFlags(&parser);
+
+  std::unique_ptr<RewritePath> rewrite_path;
+  // Use this to remove -fdebug-prefix-map in Release build b/28280739
+  if (keep_args & kNormalizeWithDebugPrefixMap) {
+    rewrite_path = absl::make_unique<RewritePath>(debug_prefix_map);
+  } else {
+    rewrite_path = absl::make_unique<RewritePath>((std::map<string, string>()));
+  }
+  parser.AddFlag("fdebug-prefix-map")
+      ->SetCallbackForParsedArgs(rewrite_path.get());
+
+  FixPath fix_path(req->cwd());
+  for (const auto& flag : normalize_weak_relative_for_arg) {
+    if ((keep_args & kPreserveI) && (flag == "I" || flag == "isystem")) {
+      continue;
+    }
+    if (keep_args & kNormalizeWithDebugPrefixMap) {
+      parser.AddFlag(flag.c_str())
+          ->SetCallbackForParsedArgs(rewrite_path.get());
+    } else if (keep_args & kNormalizeWithCwd) {
+      parser.AddFlag(flag.c_str())->SetCallbackForParsedArgs(&fix_path);
+    }
+  }
+
+  parser.Parse(args);
+  if (fix_path.is_fixed() || rewrite_path->removed_fdebug_prefix_map()) {
+    std::vector<string> parsed_args = parser.GetParsedArgs();
+    if (req->expanded_arg_size() > 0) {
+      req->clear_expanded_arg();
+      std::copy(parsed_args.begin(), parsed_args.end(),
+                RepeatedFieldBackInserter(req->mutable_expanded_arg()));
+    } else {
+      req->clear_arg();
+      std::copy(parsed_args.begin(), parsed_args.end(),
+                RepeatedFieldBackInserter(req->mutable_arg()));
+    }
+
+    CommandSpec* normalized_spec = req->mutable_command_spec();
+    if (fix_path.is_fixed()) {
+      normalized_spec->mutable_comment()->append(
+          " args:cwd:" + absl::StrJoin(normalize_weak_relative_for_arg, ","));
+    }
+    if (rewrite_path->removed_fdebug_prefix_map()) {
+      normalized_spec->mutable_comment()->append(
+          " args:removed_-fdebug-prefix-map");
+    }
+    if (rewrite_path->is_rewritten()) {
+      normalized_spec->mutable_comment()->append(" args:" +
+                                                 debug_prefix_map_signature);
+    }
+  }
+}
+
+void ConfigurableExecReqNormalizer::NormalizeExecReqPathnamesInInput(
+    int keep_pathnames_in_input,
+    const std::map<string, string>& debug_prefix_map,
+    const string& debug_prefix_map_signature,
+    ExecReq* req) const {
+  if (keep_pathnames_in_input & kAsIs) {
+    return;
+  }
+
+  bool is_rewritten_debug_prefix_map = false;
+  bool is_rewritten_cwd = false;
+  bool is_removed = false;
+  for (auto& input : *req->mutable_input()) {
+    if (keep_pathnames_in_input & kNormalizeWithDebugPrefixMap) {
+      RewritePathWithDebugPrefixMap(debug_prefix_map, input.mutable_filename());
+      is_rewritten_debug_prefix_map = true;
+    } else if (keep_pathnames_in_input & kNormalizeWithCwd) {
+      input.set_filename(
+          PathResolver::WeakRelativePath(input.filename(), req->cwd()));
+      is_rewritten_cwd = true;
+    } else if (keep_pathnames_in_input == kOmit) {
+      input.clear_filename();
+      is_removed = true;
+    } else {
+      DLOG(FATAL) << "Unexpected keep_pathnames_in_input="
+                  << keep_pathnames_in_input;
+    }
+  }
+
+  CommandSpec* normalized_spec = req->mutable_command_spec();
+  if (is_rewritten_debug_prefix_map) {
+    normalized_spec->mutable_comment()->append(" pathnames_in_input:" +
+                                               debug_prefix_map_signature);
+  }
+  if (is_rewritten_cwd) {
+    normalized_spec->mutable_comment()->append(" pathnames_in_input:cwd");
+  }
+  if (is_removed) {
+    normalized_spec->mutable_comment()->append(" pathnames_in_input:removed");
+  }
+}
+
+void ConfigurableExecReqNormalizer::NormalizeExecReqCwd(
+    int keep_cwd,
+    const std::map<string, string>& debug_prefix_map,
+    const string& debug_prefix_map_signature,
+    ExecReq* req) const {
+  if (keep_cwd & kAsIs) {
+    return;
+  }
+
+  bool is_rewritten = false;
+  bool is_removed = false;
+
+  static const char kPwd[] = "PWD=";
+
+  if (keep_cwd & kNormalizeWithDebugPrefixMap) {
+    // If there is PWD= in env, replace cwd with content of PWD=.
+    for (const auto& env_var : req->env()) {
+      if (absl::StartsWith(env_var, kPwd)) {
+        *req->mutable_cwd() = env_var.substr(strlen(kPwd));
+        break;
+      }
+    }
+    RewritePathWithDebugPrefixMap(debug_prefix_map, req->mutable_cwd());
+    is_rewritten = true;
+  } else {
+    req->clear_cwd();
+    is_removed = true;
+  }
+
+  // Drop PWD from env.
+  auto it = req->mutable_env()->begin();
+  while (it != req->mutable_env()->end()) {
+    if (absl::StartsWith(*it, kPwd)) {
+      if (keep_cwd & kNormalizeWithDebugPrefixMap) {
+        string path = it->substr(strlen(kPwd));
+        RewritePathWithDebugPrefixMap(debug_prefix_map, &path);
+        *it = StrCat(kPwd, path);
+        is_rewritten = true;
+        ++it;
+      } else {
+        it = req->mutable_env()->erase(it);
+        is_removed = true;
+      }
+    } else {
+      ++it;
+    }
+  }
+
+  CommandSpec* normalized_spec = req->mutable_command_spec();
+  if (is_rewritten) {
+    normalized_spec->mutable_comment()->append(" cwd:" +
+                                               debug_prefix_map_signature);
+  }
+  if (is_removed) {
+    normalized_spec->mutable_comment()->append(" cwd:removed");
+  }
+}
+
+void ConfigurableExecReqNormalizer::NormalizeExecReqSubprograms(
+    ExecReq* req) const {
+  // normalize subprogram. path names are not needed for cache key.
+  for (auto& s : *req->mutable_subprogram()) {
+    s.clear_path();
+  }
+}
+
+void ConfigurableExecReqNormalizer::NormalizeExecReqEnvs(ExecReq* req) const {
+  std::vector<string> new_env;
+  bool changed = false;
+  for (const auto& env_var : req->env()) {
+    if (absl::StartsWith(env_var, "DEVELOPER_DIR=")) {
+      changed = true;
+      continue;
+    }
+    new_env.push_back(env_var);
+  }
+  if (changed) {
+    req->clear_env();
+    for (auto&& env_var : new_env) {
+      req->add_env(std::move(env_var));
+    }
+  }
+}
+
 // ExecReq_Inputs are sorted by filename now. However, cwd can be different
 // among computers, and filename might contain cwd. So the essentially same
 // ExecReq might have different hash values, even if cwd in ExecReq and
@@ -156,8 +422,8 @@ bool HasAmbiguityInDebugPrefixMap(
 //     ...
 //
 // See also b/11455957
-/* static */
-void NormalizeExecReqInputOrderForCacheKey(ExecReq* req) {
+void ConfigurableExecReqNormalizer::NormalizeExecReqInputOrderForCacheKey(
+    ExecReq* req) const {
   std::vector<const ExecReq_Input*> inputs_in_cwd;
   std::vector<const ExecReq_Input*> inputs_not_in_cwd;
 
@@ -220,24 +486,34 @@ void NormalizeExecReqForCacheKey(
     req->set_arg(0, command_name);
     std::copy(req->arg().begin(), req->arg().end(), back_inserter(args));
   }
-  static const int kOmit = 0;
-  static const int kNormalizeWithCwd = 1 << 0;
-  static const int kNormalizeWithDebugPrefixMap = 1 << 1;
-  static const int kPreserveI = 1 << 2;
-  static const int kAsIs = 1 << 3;
 
+  ConfigurableExecReqNormalizer normalizer;
+  normalizer.Normalize(id, args, normalize_include_path, is_linking,
+                       normalize_weak_relative_for_arg, debug_prefix_map, req);
+}
+
+ConfigurableExecReqNormalizer::Config ConfigurableExecReqNormalizer::Configure(
+    int id,
+    const std::vector<string>& args,
+    bool normalize_include_path,
+    bool is_linking,
+    const std::vector<string>& normalize_weak_relative_for_arg,
+    const std::map<string, string>& debug_prefix_map,
+    const ExecReq* req) const {
   int keep_cwd = kOmit;
   int keep_args = kNormalizeWithCwd;
   int keep_pathnames_in_input = kOmit;
   int keep_system_include_dirs = kNormalizeWithCwd;
+
   if (normalize_weak_relative_for_arg.empty()) {
     keep_args |= kAsIs;
   }
   if (!normalize_include_path) {
     keep_system_include_dirs |= kAsIs;
   }
-  if (CompilerFlags::IsGCCCommand(req->command_spec().name())) {
-    bool is_clang = CompilerFlags::IsClangCommand(req->command_spec().name());
+
+  if (GCCFlags::IsGCCCommand(req->command_spec().name())) {
+    bool is_clang = GCCFlags::IsClangCommand(req->command_spec().name());
     FlagParser flag_parser;
     GCCFlags::DefineFlags(&flag_parser);
     FlagParser::Flag* flag_g = flag_parser.AddPrefixFlag("g");
@@ -248,6 +524,10 @@ void NormalizeExecReqForCacheKey(
     FlagParser::Flag* flag_mmd = flag_parser.AddBoolFlag("MMD");
     FlagParser::Flag* flag_pnacl_allow_translate = flag_parser.AddBoolFlag(
         "-pnacl-allow-translate");
+    FlagParser::Flag* flag_fprofile_instr_generate = flag_parser.AddBoolFlag(
+        "fprofile-instr-generate");
+    FlagParser::Flag* flag_fcoverage_mapping = flag_parser.AddBoolFlag(
+        "fcoverage-mapping");
     flag_parser.Parse(args);
 
     // -g does not capture -gsplit-dwarf. So we need to check it explicitly.
@@ -322,7 +602,14 @@ void NormalizeExecReqForCacheKey(
       // translate output to ELF.  See: crbug.com/685461
       keep_cwd |= kAsIs;
     }
-  } else if (CompilerFlags::IsVCCommand(req->command_spec().name())) {
+    if (is_clang
+        && flag_fprofile_instr_generate->seen()
+        && flag_fcoverage_mapping->seen()) {
+      keep_cwd |= kAsIs;
+      keep_pathnames_in_input |= kAsIs;
+    }
+  } else if (VCFlags::IsVCCommand(req->command_spec().name())) {
+    bool is_clang_cl = VCFlags::IsClangClCommand(req->command_spec().name());
     FlagParser flag_parser;
     VCFlags::DefineFlags(&flag_parser);
     FlagParser::Flag* flag_show_include =
@@ -330,6 +617,10 @@ void NormalizeExecReqForCacheKey(
     FlagParser::Flag* flag_z7 = flag_parser.AddBoolFlag("Z7");
     FlagParser::Flag* flag_zi = flag_parser.AddBoolFlag("Zi");
     FlagParser::Flag* flag_zI = flag_parser.AddBoolFlag("ZI");
+    FlagParser::Flag* flag_fprofile_instr_generate = flag_parser.AddBoolFlag(
+        "fprofile-instr-generate");
+    FlagParser::Flag* flag_fcoverage_mapping = flag_parser.AddBoolFlag(
+        "fcoverage-mapping");
     flag_parser.Parse(args);
 
     if (flag_show_include->seen()) {
@@ -346,9 +637,27 @@ void NormalizeExecReqForCacheKey(
       keep_pathnames_in_input |= kAsIs;
       keep_system_include_dirs |= kAsIs;
     }
-  } else if (CompilerFlags::IsJavacCommand(req->command_spec().name())) {
+    if (is_clang_cl
+        && flag_fprofile_instr_generate->seen()
+        && flag_fcoverage_mapping->seen()) {
+      keep_cwd |= kAsIs;
+      keep_pathnames_in_input |= kAsIs;
+    }
+
+    // TODO: Currently the logic of keep_args is assuming args can be
+    // parsed with GCCFlags. Parsing command line for cl.exe (or clang-cl.exe)
+    // with GCCFlags is always wrong.
+    //
+    // Don't normalize args for cl.exe and clang-cl.exe until the code
+    // has fixed. Fortunately, absolute path won't appear in chrome build.
+    // So, the result of normalize won't change.
+    keep_args |= kAsIs;
+  } else if (JavacFlags::IsJavacCommand(req->command_spec().name())) {
     keep_cwd = kOmit;
-    keep_args = kNormalizeWithCwd;
+    // It would be OK to normalize args (e.g. in classname) for Javac.
+    // However, currently normalizer considers only gcc (clang) args.
+    // So, don't normalize.
+    keep_args = kAsIs;
     keep_pathnames_in_input = kOmit;
     keep_system_include_dirs = kOmit;
   } else {
@@ -357,6 +666,7 @@ void NormalizeExecReqForCacheKey(
     keep_pathnames_in_input |= kAsIs;
     keep_system_include_dirs |= kAsIs;
   }
+
   // TODO: check what is good for linking.
   if (is_linking) {
     // We preserve anything for linking but we may omit file contents.
@@ -366,11 +676,31 @@ void NormalizeExecReqForCacheKey(
     keep_system_include_dirs |= kAsIs;
   }
 
+  Config config;
+  config.keep_cwd = keep_cwd;
+  config.keep_args = keep_args;
+  config.keep_pathnames_in_input = keep_pathnames_in_input;
+  config.keep_system_include_dirs = keep_system_include_dirs;
+  return config;
+}
+
+void ConfigurableExecReqNormalizer::Normalize(
+    int id,
+    const std::vector<string>& args,
+    bool normalize_include_path,
+    bool is_linking,
+    const std::vector<string>& normalize_weak_relative_for_arg,
+    const std::map<string, string>& debug_prefix_map,
+    ExecReq* req) const {
+  Config config =
+      Configure(id, args, normalize_include_path, is_linking,
+                normalize_weak_relative_for_arg, debug_prefix_map, req);
+
   LOG(INFO) << id << ": normalize:"
-            << " keep_cwd=" << keep_cwd
-            << " keep_args=" << keep_args
-            << " keep_pathnames_in_input=" << keep_pathnames_in_input
-            << " keep_system_include_dirs=" << keep_system_include_dirs;
+            << " keep_cwd=" << config.keep_cwd
+            << " keep_args=" << config.keep_args
+            << " keep_pathnames_in_input=" << config.keep_pathnames_in_input
+            << " keep_system_include_dirs=" << config.keep_system_include_dirs;
 
   string debug_prefix_map_signature;
   if (!debug_prefix_map.empty()) {
@@ -380,241 +710,26 @@ void NormalizeExecReqForCacheKey(
       debug_prefix_map_signature += ",";
     }
   }
+
   // TODO: confirm output does not contains path in include_path
   // for the situation we normalize the include path name.
 
-  if (!(keep_system_include_dirs & kAsIs)) {
-    // Hack for non-system-default compilers e.g. NaCl and clang.
-    // Normalize following paths to be given with the relative path:
-    // - system_include_path
-    // - cxx_system_include_path
-    //
-    // Already cleared:
-    // - local_compiler_path
-    //
-    // Note:
-    // Since followings are usually pointing the system default paths,
-    // we do not normalize them.
-    // - system_framework_path
-    // - system_library_path
-    CommandSpec* normalized_spec = req->mutable_command_spec();
-    // To avoid yet another cache poisoning, we should separate cache area.
-    // i.e. include_paths with relative paths is given but misunderstand
-    // it as not normalized.
-    if (keep_system_include_dirs & kNormalizeWithDebugPrefixMap) {
-      bool is_normalized = false;
-      for (auto& path : *normalized_spec->mutable_system_include_path()) {
-        is_normalized |=
-            RewritePathWithDebugPrefixMap(debug_prefix_map, &path);
-      }
-      for (auto& path : *normalized_spec->mutable_cxx_system_include_path()) {
-        is_normalized |=
-            RewritePathWithDebugPrefixMap(debug_prefix_map, &path);
-      }
-      if (is_normalized) {
-        normalized_spec->mutable_comment()->append(
-            " include_path:" + debug_prefix_map_signature);
-      }
-    } else if (keep_system_include_dirs & kNormalizeWithCwd) {
-      bool is_include_path_normalized = false;
-      for (auto& path : *normalized_spec->mutable_system_include_path()) {
-        string normalized_path =
-            PathResolver::WeakRelativePath(path, req->cwd());
-        if (path != normalized_path) {
-          path.assign(normalized_path);
-          is_include_path_normalized = true;
-        }
-      }
-      for (auto& path : *normalized_spec->mutable_cxx_system_include_path()) {
-        string normalized_path =
-            PathResolver::WeakRelativePath(path, req->cwd());
-        if (path != normalized_path) {
-          path.assign(normalized_path);
-          is_include_path_normalized = true;
-        }
-      }
-      if (is_include_path_normalized) {
-        normalized_spec->mutable_comment()->append(" include_path:cwd");
-      }
-    } else if (keep_system_include_dirs == kOmit) {
-      normalized_spec->clear_system_include_path();
-      normalized_spec->clear_cxx_system_include_path();
-      normalized_spec->mutable_comment()->append(" omit_include_path:");
-    } else {
-      DLOG(FATAL) << "Unexpected keep_system_include_dirs="
-                  << keep_system_include_dirs;
-    }
-  }
-
-  if (!(keep_args & kAsIs)) {
-    // Normalize arguments after certain flags.
-    // This is required for
-    // - libFindBadConstructs.so plugin used in chrome clang. b/9957696.
-    // - -B to choose third_party/binutils used in chrome. b/13940741.
-    // - -gcc-toolchain= for clang to find headers. b/16876457.
-    FlagParser parser;
-    GCCFlags::DefineFlags(&parser);
-
-    std::unique_ptr<RewritePath> rewrite_path;
-    // Use this to remove -fdebug-prefix-map in Release build b/28280739
-    if (keep_args & kNormalizeWithDebugPrefixMap) {
-      rewrite_path.reset(new RewritePath(debug_prefix_map));
-    } else {
-      rewrite_path.reset(new RewritePath((std::map<string, string>())));
-    }
-    parser.AddFlag("fdebug-prefix-map")->SetCallbackForParsedArgs(
-        rewrite_path.get());
-
-    FixPath fix_path(req->cwd());
-    for (const auto& flag : normalize_weak_relative_for_arg) {
-      if ((keep_args & kPreserveI) && (flag == "I" || flag == "isystem")) {
-        continue;
-      }
-      if (keep_args & kNormalizeWithDebugPrefixMap) {
-        parser.AddFlag(flag.c_str())->SetCallbackForParsedArgs(
-            rewrite_path.get());
-      } else if (keep_args & kNormalizeWithCwd) {
-        parser.AddFlag(flag.c_str())->SetCallbackForParsedArgs(&fix_path);
-      }
-    }
-
-    parser.Parse(args);
-    if (fix_path.is_fixed() || rewrite_path->removed_fdebug_prefix_map()) {
-      std::vector<string> parsed_args = parser.GetParsedArgs();
-      if (req->expanded_arg_size() > 0) {
-        req->clear_expanded_arg();
-        std::copy(parsed_args.begin(), parsed_args.end(),
-                  RepeatedFieldBackInserter(req->mutable_expanded_arg()));
-      } else {
-        req->clear_arg();
-        std::copy(parsed_args.begin(), parsed_args.end(),
-                  RepeatedFieldBackInserter(req->mutable_arg()));
-      }
-
-      CommandSpec* normalized_spec = req->mutable_command_spec();
-      if (fix_path.is_fixed()) {
-        normalized_spec->mutable_comment()->append(
-            " args:cwd:" + absl::StrJoin(normalize_weak_relative_for_arg, ","));
-      }
-      if (rewrite_path->removed_fdebug_prefix_map()) {
-        normalized_spec->mutable_comment()->append(
-            " args:removed_-fdebug-prefix-map");
-      }
-      if (rewrite_path->is_rewritten()) {
-        normalized_spec->mutable_comment()->append(
-            " args:" + debug_prefix_map_signature);
-      }
-    }
-  }
-
+  NormalizeExecReqSystemIncludeDirs(config.keep_system_include_dirs,
+                                    debug_prefix_map,
+                                    debug_prefix_map_signature, req);
+  NormalizeExecReqArgs(config.keep_args, args, normalize_weak_relative_for_arg,
+                       debug_prefix_map, debug_prefix_map_signature, req);
   // This method needs cwd and filename in ExecReq_Input.
+  // So, do before processing keep_pathnames and keep_cwd.
   NormalizeExecReqInputOrderForCacheKey(req);
+  NormalizeExecReqPathnamesInInput(config.keep_pathnames_in_input,
+                                   debug_prefix_map, debug_prefix_map_signature,
+                                   req);
+  NormalizeExecReqCwd(config.keep_cwd, debug_prefix_map,
+                      debug_prefix_map_signature, req);
 
-  if (!(keep_pathnames_in_input & kAsIs)) {
-    bool is_rewritten_debug_prefix_map = false;
-    bool is_rewritten_cwd = false;
-    bool is_removed = false;
-    for (auto& input : *req->mutable_input()) {
-      if (keep_pathnames_in_input & kNormalizeWithDebugPrefixMap) {
-        RewritePathWithDebugPrefixMap(
-            debug_prefix_map, input.mutable_filename());
-        is_rewritten_debug_prefix_map = true;
-      } else if (keep_pathnames_in_input & kNormalizeWithCwd) {
-        input.set_filename(
-            PathResolver::WeakRelativePath(input.filename(), req->cwd()));
-        is_rewritten_cwd = true;
-      } else if (keep_pathnames_in_input == kOmit) {
-        input.clear_filename();
-        is_removed = true;
-      } else {
-        DLOG(FATAL) << "Unexpected keep_pathnames_in_input="
-                    << keep_pathnames_in_input;
-      }
-    }
-
-    CommandSpec* normalized_spec = req->mutable_command_spec();
-    if (is_rewritten_debug_prefix_map) {
-      normalized_spec->mutable_comment()->append(
-          " pathnames_in_input:" + debug_prefix_map_signature);
-    }
-    if (is_rewritten_cwd) {
-      normalized_spec->mutable_comment()->append(" pathnames_in_input:cwd");
-    }
-    if (is_removed) {
-      normalized_spec->mutable_comment()->append(" pathnames_in_input:removed");
-    }
-  }
-
-  if (!(keep_cwd & kAsIs)) {
-    bool is_rewritten = false;
-    bool is_removed = false;
-
-    static const char kPwd[] = "PWD=";
-
-    if (keep_cwd & kNormalizeWithDebugPrefixMap) {
-      // If there is PWD= in env, replace cwd with content of PWD=.
-      for (const auto& env_var : req->env()) {
-        if (absl::StartsWith(env_var, kPwd)) {
-          *req->mutable_cwd() = env_var.substr(strlen(kPwd));
-          break;
-        }
-      }
-      RewritePathWithDebugPrefixMap(debug_prefix_map, req->mutable_cwd());
-      is_rewritten = true;
-    } else {
-      req->clear_cwd();
-      is_removed = true;
-    }
-
-    // Drop PWD from env.
-    auto it = req->mutable_env()->begin();
-    while (it != req->mutable_env()->end()) {
-      if (absl::StartsWith(*it, kPwd)) {
-        if (keep_cwd & kNormalizeWithDebugPrefixMap) {
-          string path = it->substr(strlen(kPwd));
-          RewritePathWithDebugPrefixMap(debug_prefix_map, &path);
-          *it = StrCat(kPwd, path);
-          is_rewritten = true;
-          ++it;
-        } else {
-          it = req->mutable_env()->erase(it);
-          is_removed = true;
-        }
-      } else {
-        ++it;
-      }
-    }
-
-    CommandSpec* normalized_spec = req->mutable_command_spec();
-    if (is_rewritten) {
-      normalized_spec->mutable_comment()->append(
-          " cwd:" + debug_prefix_map_signature);
-    }
-    if (is_removed) {
-      normalized_spec->mutable_comment()->append(" cwd:removed");
-    }
-  }
-
-  // normalize subprogram. path names are not needed for cache key.
-  for (auto& s : *req->mutable_subprogram()) {
-    s.clear_path();
-  }
-
-  std::vector<string> new_env;
-  bool changed = false;
-  for (const auto& env_var : req->env()) {
-    if (absl::StartsWith(env_var, "DEVELOPER_DIR=")) {
-      changed = true;
-      continue;
-    }
-    new_env.push_back(env_var);
-  }
-  if (changed) {
-    req->clear_env();
-    for (auto&& env_var : new_env) {
-      req->add_env(std::move(env_var));
-    }
-  }
+  NormalizeExecReqSubprograms(req);
+  NormalizeExecReqEnvs(req);
 }
 
 }  // namespace devtools_goma

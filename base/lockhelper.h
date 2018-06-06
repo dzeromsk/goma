@@ -18,8 +18,8 @@
 typedef CRITICAL_SECTION OSLockType;
 typedef SRWLOCK OSRWLockType;
 #else
-# include <pthread.h>
 # include <errno.h>
+# include <pthread.h>
 typedef pthread_mutex_t OSLockType;
 typedef pthread_rwlock_t OSRWLockType;
 #endif

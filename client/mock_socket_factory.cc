@@ -121,7 +121,8 @@ void MockSocketServer::DoServerRead(int sock, string* buf) {
     if (n < 0) {
       PLOG(ERROR) << "read";
       break;
-    } else if (n == 0) {
+    }
+    if (n == 0) {
       break;
     }
     nread += n;

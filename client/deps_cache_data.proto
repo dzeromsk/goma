@@ -10,12 +10,12 @@ package devtools_goma;
 // GomaDeps contains all information for DepsCache.
 // We will make the following map from this information.
 // <identifier> -> <input file>s
-// <input file> -> <file id>, <directive hash>
+// <input file> -> <file stat>, <directive hash>
 //
 // - <identifier> is hash created from command line.
 // - <input file> is a file that will be sent to goma server
 //   in the <identifier> command line.
-// - <file id> is a FileId of <input file>
+// - <file stat> is a FileStat of <input file>
 // - <directive hash> is a hash value of <input file>'s directive lines.
 //
 // This information is saved to deps cache file.
@@ -45,15 +45,15 @@ message GomaFilenameIdTableRecord {
   required uint32 filename_id = 2;
 }
 
-// GomaDepsIdTable is a map (<filename_id> -> <file id>, <directive_hash>)
+// GomaDepsIdTable is a map (<filename_id> -> <file stat>, <directive_hash>)
 message GomaDepsIdTable {
   repeated GomaDepsIdTableRecord record = 1;
 }
 
 message GomaDepsIdTableRecord {
   required uint32 filename_id = 1;
-  optional uint64 dev = 2;
-  optional uint64 inode = 3;
+  optional uint64 DEPRECATED_dev = 2 [deprecated = true];
+  optional uint64 DEPRECATED_inode = 3 [deprecated = true];
   required int64 mtime = 4;
   required int64 size = 5;
   required string directive_hash = 6;

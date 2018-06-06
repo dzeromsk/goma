@@ -8,6 +8,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "autolock_timer.h"
@@ -265,16 +266,15 @@ class MultiHttpRPC::MultiJob {
   DISALLOW_COPY_AND_ASSIGN(MultiJob);
 };
 
-MultiHttpRPC::MultiHttpRPC(
-    HttpRPC* http_rpc,
-    const string& path,
-    const string& multi_path,
-    const Options& options,
-    WorkerThreadManager* wm)
+MultiHttpRPC::MultiHttpRPC(HttpRPC* http_rpc,
+                           string path,
+                           string multi_path,
+                           const Options& options,
+                           WorkerThreadManager* wm)
     : wm_(wm),
       http_rpc_(http_rpc),
-      path_(path),
-      multi_path_(multi_path),
+      path_(std::move(path)),
+      multi_path_(std::move(multi_path)),
       options_(options),
       periodic_callback_id_(kInvalidPeriodicClosureId),
       num_multi_job_(0),

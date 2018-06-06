@@ -11,6 +11,7 @@
 
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <glog/logging.h>
@@ -30,8 +31,8 @@ static const char* kFrameworkSuffix = ".framework";
 
 namespace devtools_goma {
 
-FrameworkPathResolver::FrameworkPathResolver(const string& cwd)
-    : cwd_(cwd) {
+FrameworkPathResolver::FrameworkPathResolver(string cwd)
+    : cwd_(std::move(cwd)) {
 #ifdef __MACH__
   default_searchpaths_.push_back("/Library/Frameworks");
   default_searchpaths_.push_back("/System/Library/Frameworks");

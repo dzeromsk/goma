@@ -131,10 +131,12 @@ class FakeGomaEnv(object):
   def CheckConfig(self):
     pass
 
-  def ControlCompilerProxy(self, command, fast=False):
+  def ControlCompilerProxy(self, command, check_running=True, need_pids=False):
     if command == '/healthz':
-      return {'status': True, 'message': 'ok', 'url': 'dummy_url'}
-    return {'status': True, 'message': 'dummy', 'url': 'dummy_url'}
+      return {'status': True, 'message': 'ok', 'url': 'dummy_url',
+              'pid': 'unknown'}
+    return {'status': True, 'message': 'dummy', 'url': 'dummy_url',
+            'pid': 'unknown'}
 
   def CompilerProxyRunning(self):
     return True
@@ -361,9 +363,12 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         super(SpyGomaEnv, self).__init__()
         self.command = ''
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=True,
+                               need_pids=False):
         self.command = command
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
     return SpyGomaEnv()
 
   def testIsGomaFlagTrueShouldShowTrueForVariousTruePatterns(self):
@@ -552,20 +557,43 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
     self.assertEqual(parsed, expected)
 
   def testParseLsofShouldParse(self):
-    test = 'u1\np2\nu3\np4\n'
-    expected = [{'uid': 1L, 'pid': 2L}, {'uid': 3L, 'pid': 4L}]
+    test = ('u1\n'
+            'p2\n'
+            'nlocalhost:8088\n'
+            'u3\n'
+            'p4\n'
+            'n/tmp/foo.txt\n')
+    expected = [{'uid': 1L, 'pid': 2L, 'name': 'localhost:8088'},
+                {'uid': 3L, 'pid': 4L, 'name': '/tmp/foo.txt'}]
     parsed = self._module._ParseLsof(test)
     self.assertEqual(parsed, expected)
 
   def testParseLsofShouldIgnoreUnknown(self):
-    test = 'x\n unknown\nu1\np2\nu3\np4\n'
-    expected = [{'uid': 1L, 'pid': 2L}, {'uid': 3L, 'pid': 4L}]
+    test = ('x\n'
+            'y\n'
+            'u1\n'
+            'p2\n'
+            'nlocalhost:8088\n')
+    expected = [{'uid': 1L, 'pid': 2L, 'name': 'localhost:8088'}]
     parsed = self._module._ParseLsof(test)
     self.assertEqual(parsed, expected)
 
   def testParseLsofShouldIgnoreEmptyLine(self):
-    test = '\n\t\t\n  \nu1\np2\nu3\np4\n'
-    expected = [{'uid': 1L, 'pid': 2L}, {'uid': 3L, 'pid': 4L}]
+    test = ('\n'
+            '\t\t\n'
+            '  \n'
+            'u1\n'
+            'p2\n'
+            'nlocalhost:8088\n')
+    expected = [{'uid': 1L, 'pid': 2L, 'name': 'localhost:8088'}]
+    parsed = self._module._ParseLsof(test)
+    self.assertEqual(parsed, expected)
+
+  def testParseLsofShouldIgnoreTypeStream(self):
+    test = ('u1\n'
+            'p2\n'
+            'n/tmp/goma.ipc type=STREAM\n')
+    expected = [{'uid': 1L, 'pid': 2L, 'name': '/tmp/goma.ipc'}]
     parsed = self._module._ParseLsof(test)
     self.assertEqual(parsed, expected)
 
@@ -922,17 +950,21 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.tgz_file = None
         self.written = False
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if command == '/healthz':
           return {
               'status': False,
               'message': 'compiler proxy is not running',
               'url': 'fake',
+              'pid': 'unknown',
           }
         # /compilerz, /histogramz, /serverz, or /statz won't be called.
         if command in ['/compilerz', '/histogramz', '/serverz', '/statz']:
           raise Exception('Unexpected command is called')
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
       def WriteFile(self, filename, content):
         self.output_files.append(filename)
@@ -966,18 +998,22 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.written = False
         self.is_dead = False
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if self.is_dead:
           return {
               'status': False,
               'message': 'compiler_proxy is not running',
               'url': 'dummy',
+              'pid': 'unknown',
           }
         # Die after /healthz is called. The first /healthz should be
         # processed correctly.
         if command == '/healthz':
           self.is_dead = True
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
       def WriteFile(self, filename, content):
         self.output_files.append(filename)
@@ -1519,11 +1555,15 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
       def __init__(self):
         super(SpyGomaEnv, self).__init__()
         self.compiler_proxy_healthz_called = False
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if command == '/healthz':
           self.compiler_proxy_healthz_called = True
-          return {'status': True, 'message': 'ok', 'url': 'fake'}
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+          return {'status': True, 'message': 'ok', 'url': 'fake',
+                  'pid': 'unknown'}
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
     env = SpyGomaEnv()
     driver = self._module.GomaDriver(env, FakeGomaBackend())
@@ -1535,12 +1575,15 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
       def __init__(self):
         super(SpyGomaEnv, self).__init__()
         self.compiler_proxy_healthz_called = False
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if command == '/healthz':
           self.compiler_proxy_healthz_called = True
           return {'status': True, 'message': 'running: had some error',
-                  'url': 'fake'}
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+                  'url': 'fake', 'pid': 'unknown'}
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
     env = SpyGomaEnv()
     driver = self._module.GomaDriver(env, FakeGomaBackend())
@@ -1552,12 +1595,15 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
       def __init__(self):
         super(SpyGomaEnv, self).__init__()
         self.compiler_proxy_healthz_called = False
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if command == '/healthz':
           self.compiler_proxy_healthz_called = True
           return {'status': True, 'message': 'error: had some error',
-                  'url': 'fake'}
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+                  'url': 'fake', 'pid': 'unknown'}
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
     env = SpyGomaEnv()
     driver = self._module.GomaDriver(env, FakeGomaBackend())
@@ -1569,11 +1615,15 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
       def __init__(self):
         super(SpyGomaEnv, self).__init__()
         self.compiler_proxy_healthz_called = False
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if command == '/healthz':
           self.compiler_proxy_healthz_called = True
-          return {'status': False, 'message': '', 'url': 'fake'}
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+          return {'status': False, 'message': '', 'url': 'fake',
+                  'pid': 'unknown'}
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
     env = SpyGomaEnv()
     driver = self._module.GomaDriver(env, FakeGomaBackend())
@@ -1612,19 +1662,23 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.get_version = True
         return 'GOMA version dummy_version'
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if command == '/quitquitquit':
           self.control_with_quit = True
         elif command == '/healthz':
           self.control_with_health = True
         elif command == '/versionz':
           self.control_with_version = True
-          return {'status': True, 'message': 'dummy_version', 'url': 'fake'}
+          return {'status': True, 'message': 'dummy_version', 'url': 'fake',
+                  'pid': 'unknown'}
         elif command == '/flagz':
-          return {'status': True, 'message': ''}
+          return {'status': True, 'message': '', 'pid': 'unknown'}
         else:
           raise Exception('Unknown command given.')
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
     env = SpyGomaEnv()
     driver = self._module.GomaDriver(env, FakeGomaBackend())
@@ -1811,7 +1865,8 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.get_version = True
         return 'GOMA version This version should not be matched.'
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if command == '/quitquitquit':
           self.control_with_quit = True
         elif command == '/healthz':
@@ -1819,10 +1874,12 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         elif command == '/versionz':
           self.control_with_version = True
         elif command == '/flagz':
-          return {'status': True, 'message': ''}
+          return {'status': True, 'message': '', 'pid': 'unknown'}
         else:
           raise Exception('Unknown command given.')
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
       def KillStakeholders(self):
         self.kill_stakeholders = True
@@ -1859,7 +1916,8 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.get_version = True
         return 'GOMA version dummy_version'
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if command == '/quitquitquit':
           self.control_with_quit = True
         elif command == '/healthz':
@@ -1867,11 +1925,15 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
           if self.status_healthy:
             return {'status': True,
                     'message': 'ok',
-                    'url': 'dummy'}
+                    'url': 'dummy',
+                    'pid': 'unknown',
+                    }
           else:
             return {'status': False,
                     'message': 'connect failed',
-                    'url': ''}
+                    'url': '',
+                    'pid': 'unknown',
+                    }
         elif command == '/versionz':
           self.control_with_version = True
           return {'status': True, 'message': 'dummy_version', 'url': 'fake'}
@@ -1879,7 +1941,9 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
           return {'status': True, 'message': ''}
         else:
           raise Exception('Unknown command given.')
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
       def KillStakeholders(self):
         self.kill_stakeholders = True
@@ -1921,23 +1985,29 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.get_version = True
         return 'GOMA version dummy_version'
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if command == '/quitquitquit':
           self.control_with_quit = True
         elif command == '/healthz':
           self.control_with_health = True
           return {'status': True,
                   'message': 'ok',
-                  'url': 'dummy'}
+                  'url': 'dummy',
+                  'pid': 'unknown',
+                  }
         elif command == '/versionz':
           self.control_with_version = True
-          return {'status': True, 'message': 'dummy_version', 'url': 'fake'}
+          return {'status': True, 'message': 'dummy_version', 'url': 'fake',
+                  'pid': 'unknown'}
         elif command == '/flagz':
           self.control_with_flagz = True
-          return {'status': True, 'message': ''}
+          return {'status': True, 'message': '', 'pid': 'unknown'}
         else:
           raise Exception('Unknown command given.')
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
       def KillStakeholders(self):
         self.kill_stakeholders = True
@@ -1974,23 +2044,30 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.get_version = True
         return 'GOMA version dummy_version'
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if command == '/quitquitquit':
           self.control_with_quit = True
         elif command == '/healthz':
           self.control_with_health = True
           return {'status': True,
                   'message': 'ok',
-                  'url': 'dummy'}
+                  'url': 'dummy',
+                  'pid': 'unknown',
+                  }
         elif command == '/versionz':
           self.control_with_version = True
-          return {'status': True, 'message': 'dummy_version', 'url': 'fake'}
+          return {'status': True, 'message': 'dummy_version', 'url': 'fake',
+                  'pid': 'unknown'}
         elif command == '/flagz':
           self.control_with_flagz = True
-          return {'status': True, 'message': 'GOMA_TEST=test\n'}
+          return {'status': True, 'message': 'GOMA_TEST=test\n',
+                  'pid': 'unknown'}
         else:
           raise Exception('Unknown command given.')
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
       def KillStakeholders(self):
         self.kill_stakeholders = True
@@ -2026,23 +2103,29 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.get_version = True
         return 'GOMA version dummy_version'
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if command == '/quitquitquit':
           self.control_with_quit = True
         elif command == '/healthz':
           self.control_with_health = True
           return {'status': True,
                   'message': 'ok',
-                  'url': 'dummy'}
+                  'url': 'dummy',
+                  'pid': 'unknown',
+                  }
         elif command == '/versionz':
           self.control_with_version = True
-          return {'status': True, 'message': 'dummy_version', 'url': 'fake'}
+          return {'status': True, 'message': 'dummy_version', 'url': 'fake',
+                  'pid': 'unknown'}
         elif command == '/flagz':
           self.control_with_flagz = True
-          return {'status': True, 'message': ''}
+          return {'status': True, 'message': '', 'pid': 'unknown'}
         else:
           raise Exception('Unknown command given.')
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
       def KillStakeholders(self):
         self.kill_stakeholders = True
@@ -2077,22 +2160,28 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.get_version = True
         return 'GOMA version dummy_version'
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         if command == '/quitquitquit':
           self.control_with_quit = True
         elif command == '/healthz':
           self.control_with_health = True
           return {'status': True,
                   'message': 'running: failed to connect to backend servers',
-                  'url': ''}
+                  'url': '',
+                  'pid': 'unknown',
+                  }
         elif command == '/versionz':
           self.control_with_version = True
-          return {'status': True, 'message': 'dummy_version', 'url': 'fake'}
+          return {'status': True, 'message': 'dummy_version', 'url': 'fake',
+                  'pid': 'unknown'}
         elif command == '/flagz':
-          return {'status': True, 'message': ''}
+          return {'status': True, 'message': '', 'pid': 'unknown'}
         else:
           raise Exception('Unknown command given.')
-        return super(SpyGomaEnv, self).ControlCompilerProxy(command, fast)
+        return super(SpyGomaEnv, self).ControlCompilerProxy(command,
+                                                            check_running,
+                                                            need_pids)
 
       def KillStakeholders(self):
         self.kill_stakeholders = True
@@ -2156,10 +2245,12 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.get_version = True
         return 'GOMA version fake0'
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         self.control_with_version = True
         if command == '/versionz':
-          return {'status': True, 'message': 'fake1', 'url': 'fake'}
+          return {'status': True, 'message': 'fake1', 'url': 'fake',
+                  'pid': 'unknown'}
 
     env = SpyGomaEnv()
     driver = self._module.GomaDriver(env, FakeGomaBackend())
@@ -2178,10 +2269,12 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.get_version = True
         return 'GOMA version fake0'
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         self.control_with_version = True
         if command == '/versionz':
-          return {'status': True, 'message': 'fake0', 'url': 'fake'}
+          return {'status': True, 'message': 'fake0', 'url': 'fake',
+                  'pid': 'unknown'}
 
     env = SpyGomaEnv()
     driver = self._module.GomaDriver(env, FakeGomaBackend())
@@ -2195,10 +2288,11 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         super(SpyGomaEnv, self).__init__()
         self.control_compiler_proxy = False
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         self.control_compiler_proxy = True
         if command == '/errorz':
-          return {'status': False}
+          return {'status': False, 'pid': 'unknown'}
 
     env = SpyGomaEnv()
     driver = self._module.GomaDriver(env, FakeGomaBackend())
@@ -2214,10 +2308,12 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         super(SpyGomaEnv, self).__init__()
         self.control_compiler_proxy = False
 
-      def ControlCompilerProxy(self, command, fast=False):
+      def ControlCompilerProxy(self, command, check_running=False,
+                               need_pids=False):
         self.control_compiler_proxy = True
         if command == '/errorz':
-          return {'status': True, 'message': compiler_proxy_output}
+          return {'status': True, 'message': compiler_proxy_output,
+                  'pid': 'unknown'}
 
     env = SpyGomaEnv()
     driver = self._module.GomaDriver(env, FakeGomaBackend())
@@ -2739,53 +2835,6 @@ class GomaEnvTest(GomaCtlTestCommon):
       self.assertEquals((st.st_mode & 077), 0)
     os.rmdir(tmpdir)
 
-  def testGetGomaTmpDir(self):
-    env = self._module._GOMA_ENVS[os.name]()
-    isdir = os.path.isdir
-    os.path.isdir = lambda dirname: True
-    oenv = os.environ.copy()
-    for tmp in ('GOMA_TMP_DIR', 'TEST_TMPDIR', 'TMPDIR', 'TMP'):
-      if tmp in os.environ:
-        del os.environ[tmp]
-    fake_user = 'chrome-bot'
-    self._module._GetUsernameEnv = lambda: fake_user
-    self._module._GetUserRuntimeDirectory = lambda: None
-    try:
-      if os.name == 'nt':
-        testcases = ((None, None,
-                      os.path.join('/tmp', 'goma')),
-                     ('GOMA_TMP_DIR', 'c:\\tmp\\goma', 'c:\\tmp\\goma'),
-                     ('TEST_TMPDIR', 'c:\\tmp\\test',
-                      os.path.join('c:\\tmp\\test', 'goma')),
-                     ('TMPDIR', 'c:\\tmp',
-                      os.path.join('c:\\tmp', 'goma')),
-                     ('TMP', 'c:\\tmp',
-                      os.path.join('c:\\tmp', 'goma')))
-      else:
-        testcases = ((None, None,
-                      os.path.join('/tmp', 'goma_chrome-bot')),
-                     ('GOMA_TMP_DIR', '/tmp/goma', '/tmp/goma'),
-                     ('TEST_TMPDIR', '/tmp/test',
-                      os.path.join('/tmp/test', 'goma_chrome-bot')),
-                     ('TMPDIR', '/var/tmp',
-                      os.path.join('/var/tmp', 'goma_chrome-bot')),
-                     ('TMP', '/var/tmp',
-                      os.path.join('/var/tmp', 'goma_chrome-bot')))
-      for (envname, envval, expected) in testcases:
-        if envname:
-          os.environ[envname] = envval
-        try:
-          tmpdir = env.GetGomaTmpDir()
-          self.assertEqual(tmpdir, expected)
-        finally:
-          if envname:
-            del os.environ[envname]
-
-    finally:
-      os.path.isdir = isdir
-      for (k, v) in oenv.iteritems():
-        os.environ[k] = v
-
   def testEnsureDirectoryOwnedByUser(self):
     tmpdir = tempfile.mkdtemp()
     env = self._module._GOMA_ENVS[os.name]()
@@ -2793,7 +2842,7 @@ class GomaEnvTest(GomaCtlTestCommon):
       self.assertTrue(env.EnsureDirectoryOwnedByUser(tmpdir))
       os.rmdir(tmpdir)
       return
-    self._module._GetUserRuntimeDirectory = lambda: None
+    self._module._GetPlatformSpecificTempDirectory = lambda: None
     # test only permissions will not have readable/writable for group/other.
     os.chmod(tmpdir, 0755)
     st = os.stat(tmpdir)
@@ -2805,26 +2854,6 @@ class GomaEnvTest(GomaCtlTestCommon):
     self.assertEquals(st.st_uid, os.geteuid())
     self.assertEquals((st.st_mode & 077), 0)
     os.rmdir(tmpdir)
-
-  def testUserRuntimeDirectoryIsPreferred(self):
-    if os.name == 'nt':  # This test is not meaningful on nt.
-      return
-    fake_user = 'chrome-bot'
-    fake_dir = '/run/user/1000'
-    self._module._GetUsernameEnv = lambda: fake_user
-    self._module._GetUserRuntimeDirectory = lambda: fake_dir
-
-    oenv = os.environ.copy()
-    try:
-      if 'GOMA_TMP_DIR' in os.environ:
-        del os.environ['GOMA_TMP_DIR']
-
-      env = self._module._GOMA_ENVS[os.name]()
-      tmpdir = env.GetGomaTmpDir()
-      self.assertEqual(tmpdir, os.path.join(fake_dir, 'goma_%s' % fake_user))
-    finally:
-      for (k, v) in oenv.iteritems():
-        os.environ[k] = v
 
   def testCreateCacheDirectoryShouldUseDefaultIfNoEnv(self):
     fake_tmp_dir = '/fake_tmp'
@@ -2913,8 +2942,9 @@ class GomaCtlLargeTestCommon(GomaCtlTestCommon):
     # Put fake methods instead of actual one to improve performance of tests.
     driver._env.GetCompilerProxyVersion = lambda dummy = None: 'dummy'
     driver._env.ExecCompilerProxy = lambda dummy = None: True
-    driver._env.ControlCompilerProxy = lambda dummy = None, fast=False: {
-        'status': True, 'message': 'msg', 'url': 'url'}
+    def DummyControlCompilerProxy(dummy, **_):
+      return {'status': True, 'message': 'msg', 'url': 'url', 'pid': '1'}
+    driver._env.ControlCompilerProxy = DummyControlCompilerProxy
     driver._env.CompilerProxyRunning = lambda dummy = None: True
     driver._StartCompilerProxy()
 

@@ -21,7 +21,7 @@ class LinkerInputProcessorTest;
 // Expands library name to full path name (e.g. -lfoo => /usr/lib/libfoo.so).
 class LibraryPathResolver {
  public:
-  explicit LibraryPathResolver(const string& cwd);
+  explicit LibraryPathResolver(string cwd);
   ~LibraryPathResolver();
 
   // for -lfoo flag, value is "foo".

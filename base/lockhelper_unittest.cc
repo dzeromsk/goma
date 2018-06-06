@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <stdlib.h>
+#include "lockhelper.h"
 
-#include <vector>
+#include <stdlib.h>
 #include <memory>
 
-#include <gtest/gtest.h>
-
-#include "lockhelper.h"
+#include "absl/memory/memory.h"
+#include "gtest/gtest.h"
 #include "platform_thread.h"
 
 namespace devtools_goma {
@@ -314,7 +313,8 @@ bool ConditionVar() {
   std::unique_ptr<ConditionVariableTestThread> threads[2];
   PlatformThreadHandle handles[2];
   for (int i = 0; i < 2; ++i) {
-    threads[i].reset(new ConditionVariableTestThread(i, &lock, &cond, &data));
+    threads[i] =
+        absl::make_unique<ConditionVariableTestThread>(i, &lock, &cond, &data);
     handles[i] = kNullThreadHandle;
   }
 
@@ -619,54 +619,4 @@ TEST(ReadWriteLockTest, ReadWriteLockAcquireExclusive) {
 TEST(ReadWriteLockTest, ReadWriteLockAcquireShared) {
   ASSERT_TRUE(devtools_goma::ReadWriteLockAcquireSharedWithExclusiveLockTest());
   ASSERT_TRUE(devtools_goma::ReadWriteLockAcquireSharedWithSharedLockTest());
-}
-
-TEST(LockhelperTest, FastLockBenchmark) {
-  const int thread_num = 8;
-  const int loop_num = 100000;
-  std::vector<devtools_goma::PlatformThreadHandle> thread_ids(thread_num);
-  std::vector<std::unique_ptr<devtools_goma::FastIncrement>> incrementers;
-  int x = 0;
-  devtools_goma::FastLock lock;
-
-  for (int i = 0; i < thread_num; ++i) {
-    incrementers.emplace_back(
-        new devtools_goma::FastIncrement(&lock, &x, loop_num));
-  }
-
-  for (int i = 0; i < thread_num; ++i) {
-    devtools_goma::PlatformThread::Create(
-        incrementers[i].get(), &thread_ids[i]);
-  }
-
-  for (int i = 0; i < thread_num; ++i) {
-    devtools_goma::PlatformThread::Join(thread_ids[i]);
-  }
-
-  EXPECT_EQ(x, loop_num * thread_num);
-}
-
-TEST(LockhelperTest, NormalLockBenchmark) {
-  const int thread_num = 8;
-  const int loop_num = 100000;
-  std::vector<devtools_goma::PlatformThreadHandle> thread_ids(thread_num);
-  std::vector<std::unique_ptr<devtools_goma::NormalIncrement>> incrementers;
-  int x = 0;
-  devtools_goma::Lock lock;
-
-  for (int i = 0; i < thread_num; ++i) {
-    incrementers.emplace_back(
-      new devtools_goma::NormalIncrement(&lock, &x, loop_num));
-  }
-
-  for (int i = 0; i < thread_num; ++i) {
-    devtools_goma::PlatformThread::Create(
-      incrementers[i].get(), &thread_ids[i]);
-  }
-
-  for (int i = 0; i < thread_num; ++i) {
-    devtools_goma::PlatformThread::Join(thread_ids[i]);
-  }
-
-  EXPECT_EQ(x, loop_num * thread_num);
 }

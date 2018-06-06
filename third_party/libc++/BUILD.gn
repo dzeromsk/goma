@@ -24,7 +24,7 @@ config("config") {
   ]
 }
 
-shared_library("libc++") {
+source_set("libc++") {
   sources = [
     "trunk/src/algorithm.cpp",
     "trunk/src/any.cpp",
@@ -33,6 +33,7 @@ shared_library("libc++") {
     "trunk/src/condition_variable.cpp",
     "trunk/src/debug.cpp",
     "trunk/src/exception.cpp",
+    "trunk/src/functional.cpp",
     "trunk/src/future.cpp",
     "trunk/src/hash.cpp",
     "trunk/src/ios.cpp",
@@ -53,11 +54,13 @@ shared_library("libc++") {
     "trunk/src/typeinfo.cpp",
     "trunk/src/utility.cpp",
     "trunk/src/valarray.cpp",
+    "trunk/src/variant.cpp",
+    "trunk/src/vector.cpp",
   ]
   configs -= [
     "//build/config/compiler:goma_code",
     "//build/config/compiler:no_rtti",
-    "//build/config/gcc:no_exceptions",
+    "//build/config/compiler:no_exceptions",
 
     #"//build/config/gcc:symbol_visibility_hidden",
   ]
@@ -65,12 +68,15 @@ shared_library("libc++") {
     ":config",
     "//build/config/compiler:no_goma_code",
     "//build/config/compiler:rtti",
+    "//build/config/compiler:exceptions",
 
     #"//build/config/gcc:symbol_visibility_default",
     "//build/config/sanitizers:sanitizer_options_link_helper",
   ]
 
   ldflags = [ "-nodefaultlibs" ]
+
+  defines = [ "_LIBCPP_BUILDING_LIBRARY" ]
 
   # TODO: Remove "-pthread" from ldflags.
   # -nodefaultlibs turns -pthread into a no-op, causing an unused argument
@@ -116,7 +122,7 @@ group("libcxx_proxy") {
 # //build/config/sanitizers:default_sanitizer_flags sets the include paths for
 # everything else.
 config("link_helper") {
-  ldflags = [ "-stdlib=libc++" ]
+  ldflags = []
 
   if (os != "mac") {
     ldflags += [

@@ -37,15 +37,9 @@ class Spawner {
     MERGE_STDOUT_STDERR = 0,
     STDOUT_ONLY = 1,
   };
-#ifdef _WIN32
-  // On Windows, the common convention of invalid PID is 0 (see
-  // http://blogs.msdn.com/b/oldnewthing/archive/2004/02/23/78395.aspx for
-  // discussions, another common invalid pid value is DWORD(-1), which is
-  // 0xffffffff and not 64-bit friendly).
-  static const int kInvalidPid = 0;
-#else
-  static const int kInvalidPid = -1;
-#endif
+
+  static const int kInvalidPid;
+
   virtual ~Spawner() {}
 
   // Set files for redirection.
@@ -80,12 +74,17 @@ class Spawner {
   // Note: this must be called BEFORE the Run method.
   void SetDetach(bool detach) { detach_ = detach; }
 
+  // If |keep| is true, the Spawner does not override env
+  // (e.g. TMP and/or TEMP are kept).
+  void SetKeepEnv(bool keep) { keep_env_ = keep; }
+
   // If |umask| is positive value, it is used as umask of the process.
   // Note: this feature only works on SpawnerPosix.
   void SetUmask(int32_t umask) { umask_ = umask; }
 
   // Spawns a child process.
-  // Returns a child process id on success.
+  // Returns a child process id spawned by |cmd| on success.
+  // Note: child process id is not monitor process pid in SpawnerPosix.
   // Returns kInvalidPid on non fatal error, and dies with fatal error.
   // |prog| is a program name, |args| is its arguments, |envs| is its
   // environment, and |cwd| is a current working directory.
@@ -128,12 +127,13 @@ class Spawner {
 
  protected:
   Spawner() :
-      console_output_(NULL), detach_(false), umask_(-1),
+      console_output_(NULL), detach_(false), keep_env_(false), umask_(-1),
       console_output_option_(MERGE_STDOUT_STDERR) {}
 
   string stdin_filename_, stdout_filename_, stderr_filename_;
   string* console_output_;
   bool detach_;
+  bool keep_env_;
   int32_t umask_;
   ConsoleOutputOption console_output_option_;
 

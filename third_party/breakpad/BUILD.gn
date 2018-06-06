@@ -34,7 +34,10 @@ config("tools_config") {
     "breakpad/src/third_party",
   ]
   if (is_clang) {
-    cflags = [ "-Wno-tautological-constant-out-of-range-compare" ]
+    cflags = [
+      "-Wno-tautological-constant-out-of-range-compare",
+      "-Wno-unused-parameter",  # argc of main in sym_upload.cc
+    ]
   }
 }
 
@@ -44,6 +47,10 @@ config("internal_config") {
   if (is_debug) {
     # This is needed for GTMLogger to work correctly.
     defines += [ "DEBUG" ]
+  }
+
+  if (is_clang) {
+    cflags = [ "-Wno-unused-parameter" ]
   }
 }
 

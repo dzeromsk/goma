@@ -57,17 +57,21 @@ void __attribute__((__noreturn__)) SubprocExitReport(
 namespace devtools_goma {
 
 SpawnerPosix::SpawnerPosix()
-    : pid_(Spawner::kInvalidPid),
+    : monitor_pid_(Spawner::kInvalidPid),
       prog_pid_(Spawner::kInvalidPid),
-      subprocess_dying_(false), is_signaled_(false),
-      sent_sig_(0), status_(kInvalidProcessStatus), process_mem_kb_(-1),
-      signal_(0) {
-}
+      subprocess_dying_(false),
+      is_signaled_(false),
+      sent_sig_(0),
+      status_(kInvalidProcessStatus),
+      process_mem_kb_(-1),
+      signal_(0) {}
 
 SpawnerPosix::~SpawnerPosix() {
   if (!console_out_file_.empty())
     remove(console_out_file_.c_str());
 }
+
+const int Spawner::kInvalidPid = -1;
 
 int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
                       const std::vector<string>& envs, const string& cwd) {
@@ -139,8 +143,8 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
   pid_t pid = fork();
   if (pid < 0) {
     PLOG(ERROR) << "fork failed. pid=" << pid;
-    pid_ = Spawner::kInvalidPid;
-    return pid_;
+    monitor_pid_ = Spawner::kInvalidPid;
+    return Spawner::kInvalidPid;
   }
   if (pid == 0) {
     // child process.
@@ -184,13 +188,6 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
         }
         exit(0);
       }
-    } else {
-      // Create own process group.
-      if (setpgid(0, 0) != 0) {
-        se.lineno = __LINE__ - 1;
-        se.last_errno = errno;
-        SubprocExitReport(child_exit_fd.fd(), se, 1);
-      }
     }
 
     // Reset SIGCHLD handler.  we'll get exit status of prog_pid
@@ -199,19 +196,6 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
     memset(&sa, 0, sizeof sa);
     sa.sa_handler = SIG_DFL;
     if (sigaction(SIGCHLD, &sa, nullptr) < 0) {
-      se.lineno = __LINE__ - 1;
-      se.last_errno = errno;
-      SubprocExitReport(child_exit_fd.fd(), se, 1);
-    }
-    // Ignore SIGINT and SIGTERM handler and unblock them.
-    sa.sa_handler = SIG_IGN;
-    if (sigaction(SIGINT, &sa, nullptr) < 0) {
-      se.lineno = __LINE__ - 1;
-      se.last_errno = errno;
-      SubprocExitReport(child_exit_fd.fd(), se, 1);
-    }
-    sa.sa_handler = SIG_IGN;
-    if (sigaction(SIGTERM, &sa, nullptr) < 0) {
       se.lineno = __LINE__ - 1;
       se.last_errno = errno;
       SubprocExitReport(child_exit_fd.fd(), se, 1);
@@ -236,7 +220,13 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
 
     posix_spawnattr_t spawnattr;
     posix_spawnattr_init(&spawnattr);
+
     // Reset SIGINT and SIGTERM signal handlers in child process.
+    if (posix_spawnattr_setflags(&spawnattr, POSIX_SPAWN_SETSIGDEF) != 0) {
+      se.lineno = __LINE__ - 1;
+      se.last_errno = errno;
+      SubprocExitReport(child_exit_fd.fd(), se, 1);
+    }
     sigset_t default_sigset;
     sigemptyset(&default_sigset);
     sigaddset(&default_sigset, SIGINT);
@@ -246,7 +236,13 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
       se.last_errno = errno;
       SubprocExitReport(child_exit_fd.fd(), se, 1);
     }
+
     // Don't mask any signals in child process.
+    if (posix_spawnattr_setflags(&spawnattr, POSIX_SPAWN_SETSIGMASK) != 0) {
+      se.lineno = __LINE__ - 1;
+      se.last_errno = errno;
+      SubprocExitReport(child_exit_fd.fd(), se, 1);
+    }
     sigset_t sigmask;
     sigemptyset(&sigmask);
     if (posix_spawnattr_setsigmask(&spawnattr, &sigmask) != 0) {
@@ -257,6 +253,14 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
     if (umask_ >= 0) {
       umask(umask_);
     }
+
+    // Let spawned process has its own pid/pgid.
+    if (posix_spawnattr_setflags(&spawnattr, POSIX_SPAWN_SETPGROUP) != 0) {
+      se.lineno = __LINE__ - 1;
+      se.last_errno = errno;
+      SubprocExitReport(child_exit_fd.fd(), se, 1);
+    }
+
     pid_t prog_pid;
     // TODO: use POSIX_SPAWN_USEVFORK (_GNU_SOURCE).
     if (posix_spawn(
@@ -283,25 +287,29 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
       se.last_errno = errno;
       SubprocExitReport(child_exit_fd.fd(), se, 1);
     }
+    int exit_status = -1;
     if (WIFSIGNALED(status)) {
       se.signal = WTERMSIG(status);
+      exit_status = 1;
+    } else if (WIFEXITED(status)) {
+      exit_status = WEXITSTATUS(status);
     }
-    SubprocExitReport(child_exit_fd.fd(), se, WEXITSTATUS(status));
+    SubprocExitReport(child_exit_fd.fd(), se, exit_status);
   }
-  pid_ = pid;
+  monitor_pid_ = pid;
   int r = read(exit_fd_.fd(), &prog_pid_, sizeof(prog_pid_));
   if (r != sizeof(prog_pid_)) {
-    PLOG(ERROR) << "failed to get prog_pid for pid=" << pid_;
+    PLOG(ERROR) << "failed to get prog_pid for monitor_pid=" << monitor_pid_;
     prog_pid_ = Spawner::kInvalidPid;
   }
   PCHECK(sigprocmask(SIG_UNBLOCK, &sigset, nullptr) == 0);
 
-  return pid_;
+  return prog_pid_;
 }
 
 bool SpawnerPosix::Kill() {
   int sig = SIGINT;
-  if (pid_ == Spawner::kInvalidPid) {
+  if (monitor_pid_ == Spawner::kInvalidPid) {
     // means not started yet.
     return false;
   }
@@ -323,40 +331,34 @@ bool SpawnerPosix::Kill() {
       }
     }
   }
-  if (kill(-pid_, sig) != 0) {
-    PLOG(WARNING) << " kill "
-                  << " pgrp=" << pid_;
-    if (kill(pid_, sig) != 0) {
-      PLOG(WARNING) << " kill "
-                    << " pid=" << pid_;
-      running = false;
-    }
-  }
   return running;
 }
 
 bool SpawnerPosix::Wait(WaitPolicy wait_policy) {
   int status = -1;
-  if (pid_ != Spawner::kInvalidPid) {
+  if (monitor_pid_ != Spawner::kInvalidPid) {
+    // TODO: Use SpawnerPosix::Kill() for NEED_KILL.
     const bool need_kill = (wait_policy == NEED_KILL);
     const int waitpid_options = (wait_policy == WAIT_INFINITE) ? 0 : WNOHANG;
     int r;
     bool pgrp_dead = false;
     bool process_dead = false;
-    if ((r = waitpid(-pid_, &status, waitpid_options)) == -1) {
+    if ((r = waitpid(-monitor_pid_, &status, waitpid_options)) == -1) {
       if (errno == ECHILD) {
         pgrp_dead = true;
       } else {
-        PLOG(ERROR) << "waitpid " << " pgrp=" << pid_;
+        PLOG(ERROR) << "waitpid "
+                    << " pgrp=" << monitor_pid_;
       }
     }
     if (r == -1) {
       // process might be killed before setting process group.
-      if ((r = waitpid(pid_, &status, waitpid_options)) == -1) {
+      if ((r = waitpid(monitor_pid_, &status, waitpid_options)) == -1) {
         if (errno == ECHILD) {
           process_dead = true;
         } else {
-          PLOG(ERROR) << "waitpid " << " pid=" << pid_;
+          PLOG(ERROR) << "waitpid "
+                      << " monitor_pid=" << monitor_pid_;
         }
       }
     }
@@ -368,12 +370,12 @@ bool SpawnerPosix::Wait(WaitPolicy wait_policy) {
         DCHECK(!pgrp_dead || !process_dead);
         return false;
       }
-    } else if (r == pid_) {
+    } else if (r == monitor_pid_) {
       status_ = WEXITSTATUS(status);
     }
     // Check subprocess itself and its process group still exist.
     // Note that subprocess didn't set own process group yet, so we need
-    // check pid_ too.
+    // check monitor_pid_ too.
     if (need_kill) {
       int sig = SIGINT;
       if (!pgrp_dead) {
@@ -381,7 +383,7 @@ bool SpawnerPosix::Wait(WaitPolicy wait_policy) {
           sent_sig_ = sig;
           sig_timer_.Start();
         }
-        if (kill(-pid_, sig) == -1) {
+        if (kill(-monitor_pid_, sig) == -1) {
           pgrp_dead = true;
         }
       }
@@ -390,39 +392,36 @@ bool SpawnerPosix::Wait(WaitPolicy wait_policy) {
           sent_sig_ = sig;
           sig_timer_.Start();
         }
-        if (kill(pid_, sig) == -1) {
+        if (kill(monitor_pid_, sig) == -1) {
           process_dead = true;
         }
       }
     }
-    if (!pgrp_dead && kill(-pid_, 0) == -1) {
+    if (!pgrp_dead && kill(-monitor_pid_, 0) == -1) {
       pgrp_dead = true;
     }
-    if (!process_dead && kill(pid_, 0) == -1) {
+    if (!process_dead && kill(monitor_pid_, 0) == -1) {
       process_dead = true;
     }
     if (pgrp_dead && process_dead) {
       if (subprocess_dying_) {
-        LOG(INFO) << "all process were finished. pid=" << pid_;
+        LOG(INFO) << "all process were finished. monitor_pid=" << monitor_pid_;
       } else {
-        VLOG(2) << "all processes were finished. pid=" << pid_;
+        VLOG(2) << "all processes were finished. monitor_pid=" << monitor_pid_;
       }
     } else {
       if (is_signaled_) {
         LOG_IF(INFO, !subprocess_dying_)
             << "process may still exist "
-            << " need_kill=" << need_kill
-            << " pgrp_dead=" << pgrp_dead
+            << " need_kill=" << need_kill << " pgrp_dead=" << pgrp_dead
             << " process_dead=" << process_dead
-            << " pid=" << pid_;
+            << " monitor_pid=" << monitor_pid_;
         subprocess_dying_ = true;
       } else {
         LOG_EVERY_N(INFO, 100)
             << "process is running "
-            << " pid=" << pid_
-            << " need_kill=" << need_kill
-            << " pgrp_dead=" << pgrp_dead
-            << " process_dead=" << process_dead
+            << " monitor_pid=" << monitor_pid_ << " need_kill=" << need_kill
+            << " pgrp_dead=" << pgrp_dead << " process_dead=" << process_dead
             << " is_signaled=" << is_signaled_;
       }
       return false;
@@ -434,32 +433,31 @@ bool SpawnerPosix::Wait(WaitPolicy wait_policy) {
     int r = read(exit_fd_.fd(), &se, sizeof(se));
     if (r == sizeof(se)) {
       if (se.lineno > 0 || se.last_errno > 0) {
-        LOG(WARNING) << "subproc abort: pid=" << pid_
-                     << " at " << __FILE__ << ":" << se.lineno
-                     << " err=" << strerror(se.last_errno)
-                     << "[" << se.last_errno << "]";
+        LOG(WARNING) << "subproc abort: monitor_pid=" << monitor_pid_ << " at "
+                     << __FILE__ << ":" << se.lineno
+                     << " err=" << strerror(se.last_errno) << "["
+                     << se.last_errno << "]";
       }
       process_mem_kb_ = se.ru.ru_maxrss;
       signal_ = se.signal;
       sig_source = "subproc_exit";
       if (signal_ != 0 && signal_ != SIGINT && signal_ != SIGTERM) {
         LOG(WARNING) << "subproc was terminated unexpectedly."
-                     << " pid=" << pid_
+                     << " monitor_pid=" << monitor_pid_
                      << " signal=" << signal_;
       } else if (signal_ == 0 && WIFSIGNALED(status)) {
         signal_ = WTERMSIG(status);
         sig_source = "wtermsig";
         if (signal_ != 0 && signal_ != SIGINT && signal_ != SIGTERM) {
           LOG(WARNING) << "mediator process was terminated unexpectedly."
-                       << " pid=" << pid_
+                       << " monitor_pid=" << monitor_pid_
                        << " signal=" << signal_;
         }
       }
     } else {
       sig_source = "exit_fd_read_err";
       PLOG(WARNING) << "read SubprocExit:"
-                    << " pid=" << pid_
-                    << " ret=" << r;
+                    << " monitor_pid=" << monitor_pid_ << " ret=" << r;
     }
   } else {
     sig_source = "exit_fd_invalid";
@@ -469,17 +467,16 @@ bool SpawnerPosix::Wait(WaitPolicy wait_policy) {
     ReadFileToString(console_out_file_, console_output_);
   }
   LOG_IF(INFO, sent_sig_ != 0)
-      << "signal=" << sent_sig_ << " sent to pid=" << pid_
-      << " prog_pid=" << prog_pid_
-      << " " << sig_timer_.GetInMs() << "msec ago,"
-      << " terminated by signal=" << signal_
-      << " from " << sig_source
+      << "signal=" << sent_sig_ << " sent to monitor_pid=" << monitor_pid_
+      << " prog_pid=" << prog_pid_ << " " << sig_timer_.GetInMs() << "msec ago,"
+      << " terminated by signal=" << signal_ << " from " << sig_source
       << " exit=" << status_;
   return true;
 }
 
 bool SpawnerPosix::IsChildRunning() const {
-  return pid_ != Spawner::kInvalidPid && status_ == kInvalidProcessStatus;
+  return monitor_pid_ != Spawner::kInvalidPid &&
+         status_ == kInvalidProcessStatus;
 }
 
 }  // namespace devtools_goma

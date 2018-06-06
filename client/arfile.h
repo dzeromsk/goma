@@ -36,8 +36,8 @@ class ArFile {
     bool SerializeToString(std::string* output) const;
     std::string DebugString() const;
   };
-  explicit ArFile(const std::string& filename);
-  explicit ArFile(const std::string& filename, off_t offset);
+  explicit ArFile(std::string filename);
+  explicit ArFile(std::string filename, off_t offset);
   virtual ~ArFile();
 
   virtual const std::string& filename() const { return filename_; }

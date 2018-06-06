@@ -9,28 +9,38 @@ package devtools_goma;
 
 // CompilerInfoData is a serializable format of CompilerInfo.
 //
-// NEXT ID TO USE: 34
+// NEXT ID TO USE: 36
 message CompilerInfoData {
   // FileId of the compiler or subprogram.
-  // All fields must be synced with file_id.h
   // NEXT ID TO USE: 9
   message FileId {
-    optional uint32 volume_serial_number = 5;
-    optional uint32 file_index_high = 6;
-    optional uint32 file_index_low = 7;
+    option deprecated = true;
 
-    optional uint64 dev = 1;
-    optional uint64 inode = 2;
+    optional uint32 DEPRECATED_volume_serial_number = 5 [deprecated = true];
+    optional uint32 DEPRECATED_file_index_high = 6 [deprecated = true];
+    optional uint32 DEPRECATED_file_index_low_DEPRECATED = 7
+        [deprecated = true];
+
+    optional uint64 DEPRECATED_dev = 1 [deprecated = true];
+    optional uint64 DEPRECATED_inode = 2 [deprecated = true];
 
     optional int64 mtime = 3;
     optional int64 size = 4;
     optional bool is_directory = 8;
   };
 
+  // FileStat of the compiler or subprogram.
+  message FileStat {
+    optional int64 mtime = 1;
+    optional int64 size = 2;
+    optional bool is_directory = 3;
+  };
+
   message SubprogramInfo {
     optional string name = 1;
     optional string hash = 2;
-    optional FileId file_id = 3;
+    optional FileId DEPRECATED_file_id = 3 [deprecated = true];
+    optional FileStat file_stat = 4;
   };
 
   message MacroValue {
@@ -52,14 +62,16 @@ message CompilerInfoData {
   // TODO:
   // Make only compiler info cache key has |cwd| and |local_compiler_path|
   // so that duplicate compiler infos are merged.
-  optional FileId local_compiler_id = 5;
+  optional FileId DEPRECATED_local_compiler_id = 5 [deprecated = true];
+  optional FileStat local_compiler_stat = 34;
   optional string local_compiler_path = 28;
   optional string cwd = 32;
   optional string local_compiler_hash = 29;
 
-  // Real compiler's FileId if real_compiler_path != local_compiler_path.
-  // Otherwise, real_compiler_id must be the same as local_compiler_id.
-  optional FileId real_compiler_id = 6;
+  // Real compiler's FileStat if real_compiler_path != local_compiler_path.
+  // Otherwise, real_compiler_stat must be the same as local_compiler_stat.
+  optional FileId DEPRECATED_real_compiler_id = 6 [deprecated = true];
+  optional FileStat real_compiler_stat = 35;
   optional string real_compiler_path = 8;
   // hash is sha256 hash of real compiler.
   // TODO: better to rename this to real_compiler_hash?

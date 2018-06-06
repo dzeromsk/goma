@@ -8,6 +8,7 @@
 #include <string>
 #include <sstream>
 
+#include "absl/memory/memory.h"
 #include "callback.h"
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
@@ -55,10 +56,10 @@ class HttpRPCTest : public ::testing::Test {
   HttpRPCTest() : pool_(-1) {}
 
   void SetUp() override {
-    wm_.reset(new WorkerThreadManager);
+    wm_ = absl::make_unique<WorkerThreadManager>();
     wm_->Start(1);
     pool_ = wm_->StartPool(1, "test");
-    mock_server_.reset(new MockSocketServer(wm_.get()));
+    mock_server_ = absl::make_unique<MockSocketServer>(wm_.get());
   }
   void TearDown() override {
     mock_server_.reset();

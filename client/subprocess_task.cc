@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/memory/memory.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
@@ -122,7 +123,10 @@ bool SubProcessTask::BelongsToCurrentThread() const {
 void SubProcessTask::Start(OneshotClosure* callback) {
   VLOG(1) << req_.trace_id() << " start";
   DCHECK(BelongsToCurrentThread());
-  DCHECK_EQ(SubProcessState::SETUP, state_);
+  if (DCHECK_IS_ON()) {
+    AUTOLOCK(lock, &mu_);
+    DCHECK_EQ(SubProcessState::SETUP, state_);
+  }
   DCHECK(!callback_);
   if (req_.detach())
     CHECK(callback == nullptr);
@@ -133,12 +137,12 @@ void SubProcessTask::Start(OneshotClosure* callback) {
 
 void SubProcessTask::StartInternal(OneshotClosure* callback) {
   DCHECK(BelongsToCurrentThread());
-  DCHECK_EQ(SubProcessState::SETUP, state_);
   DCHECK(!callback_);
   callback_ = callback;
 
   {
     AUTOLOCK(lock, &mu_);
+    DCHECK_EQ(SubProcessState::SETUP, state_);
     state_ = SubProcessState::PENDING;
   }
   SubProcessControllerClient::Get()->RegisterTask(this);
@@ -172,7 +176,7 @@ void SubProcessTask::RequestRun() {
       return;
     }
     req_.set_priority(SubProcessReq::HIGH_PRIORITY);
-    run.reset(new SubProcessRun);
+    run = absl::make_unique<SubProcessRun>();
     run->set_id(req_.id());
   }
   SubProcessControllerClient::Get()->RequestRun(std::move(run));
@@ -193,13 +197,13 @@ bool SubProcessTask::Kill() {
         break;
       case SubProcessState::PENDING:
         state_ = SubProcessState::SIGNALED;
-        kill.reset(new SubProcessKill);
+        kill = absl::make_unique<SubProcessKill>();
         kill->set_id(req_.id());
         r = false;
         break;
       case SubProcessState::RUN:
         state_ = SubProcessState::SIGNALED;
-        kill.reset(new SubProcessKill);
+        kill = absl::make_unique<SubProcessKill>();
         kill->set_id(req_.id());
         r = true;
         break;
@@ -226,8 +230,10 @@ int SubProcessTask::NumPending() {
 void SubProcessTask::Started(std::unique_ptr<SubProcessStarted> started) {
   VLOG(1) << req_.trace_id() << " started " << started->pid();
   DCHECK(!BelongsToCurrentThread());
+  string state_name;
   {
     AUTOLOCK(lock, &mu_);
+
     if (state_ != SubProcessState::PENDING) {
       CHECK_EQ(SubProcessState::SIGNALED, state_)
           << req_.trace_id()
@@ -237,9 +243,10 @@ void SubProcessTask::Started(std::unique_ptr<SubProcessStarted> started) {
       state_ = SubProcessState::RUN;
     }
     started_ = *started;
+    state_name = SubProcessState::State_Name(state_);
   }
   LOG(INFO) << req_.trace_id() << " started pid=" << started_.pid()
-            << " state=" << SubProcessState::State_Name(state_);
+            << " state=" << state_name;
 }
 
 void SubProcessTask::Terminated(

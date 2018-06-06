@@ -18,7 +18,8 @@
 
 #include "absl/strings/string_view.h"
 #include "compiler_specific.h"
-#include "file_id.h"
+#include "cpp_directive.h"
+#include "file_stat.h"
 #include "google/protobuf/repeated_field.h"
 #include "gtest/gtest_prod.h"
 #include "lockhelper.h"
@@ -26,6 +27,7 @@
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/compiler_info_data.pb.h"
 MSVC_POP_WARNING()
+#include "sha256_hash_cache.h"
 
 using std::string;
 
@@ -260,9 +262,10 @@ class CompilerInfoBuilder {
   void Dump(std::ostringstream* ss);
 
  private:
+  SHA256HashCache hash_cache_;
 
   ReadWriteLock rwlock_;
-  std::map<std::string, std::string> hash_rewrite_rule_;
+  std::map<std::string, std::string> hash_rewrite_rule_ GUARDED_BY(rwlock_);
 
   DISALLOW_COPY_AND_ASSIGN(CompilerInfoBuilder);
 };
@@ -277,18 +280,16 @@ class CompilerInfo {
                          SubprogramInfo* info);
     static SubprogramInfo FromPath(const string& path);
     bool IsValid() const {
-      return file_id.IsValid() && !hash.empty() && !name.empty();
+      return file_stat.IsValid() && !hash.empty() && !name.empty();
     }
     bool operator==(const SubprogramInfo& rhs) const {
-      return name == rhs.name &&
-          hash == rhs.hash &&
-          file_id == rhs.file_id;
+      return name == rhs.name && hash == rhs.hash && file_stat == rhs.file_stat;
     }
     string DebugString() const;
 
     string name;
     string hash;
-    FileId file_id;
+    FileStat file_stat;
   };
 
   // Takes ownership of data.
@@ -301,13 +302,12 @@ class CompilerInfo {
   string DebugString() const;
 
   // Returns true if |local_compiler_path| is up to date.
-  // i.e. FileId of |local_compiler_path| matches |local_compiler_id|.
+  // i.e. FileStat of |local_compiler_path| matches |local_compiler_stat|.
   bool IsUpToDate(const string& local_compiler_path) const;
 
-  // Updates FileId to the current FileId when hash is matched.
+  // Updates FileStat to the current FileStat when hash is matched.
   // Returns false if hash doesn't match.
-  bool UpdateFileIdIfHashMatch(
-      std::unordered_map<string, string>* sha256_cache);
+  bool UpdateFileStatIfHashMatch(SHA256HashCache* sha256_cache);
 
   // Returns true if CompilerInfo has some error.
   bool HasError() const { return data_->has_error_message(); }
@@ -316,7 +316,7 @@ class CompilerInfo {
 
   bool IsCwdRelative(const string& cwd) const;
 
-  const FileId& local_compiler_id() const { return local_compiler_id_; }
+  const FileStat& local_compiler_stat() const { return local_compiler_stat_; }
   const string& local_compiler_path() const {
     return data_->local_compiler_path();
   }
@@ -325,7 +325,7 @@ class CompilerInfo {
     return data_->local_compiler_hash();
   }
 
-  const FileId& real_compiler_id() const { return real_compiler_id_; }
+  const FileStat& real_compiler_stat() const { return real_compiler_stat_; }
   const string& real_compiler_path() const {
     return data_->real_compiler_path();
   }
@@ -361,6 +361,9 @@ class CompilerInfo {
   }
   const string& predefined_macros() const {
     return data_->predefined_macros();
+  }
+  const SharedCppDirectives& predefined_directives() const {
+    return predefined_directives_;
   }
   const string& name() const { return data_->name(); }
   bool HasName() const { return data_->has_name(); }
@@ -424,10 +427,10 @@ class CompilerInfo {
 
   std::unique_ptr<CompilerInfoData> data_;
 
-  FileId local_compiler_id_;
-  // Real compiler's FileId if real_compiler_path != local_compiler_path.
-  // Otherwise, real_compiler_id is the same as local_compiler_id.
-  FileId real_compiler_id_;
+  FileStat local_compiler_stat_;
+  // Real compiler's FileStat if real_compiler_path != local_compiler_path.
+  // Otherwise, real_compiler_stat is the same as local_compiler_stat.
+  FileStat real_compiler_stat_;
 
   std::vector<string> quote_include_paths_;
   std::vector<string> cxx_system_include_paths_;
@@ -443,6 +446,8 @@ class CompilerInfo {
   std::unordered_map<string, int> has_cpp_attribute_;
   std::unordered_map<string, int> has_declspec_attribute_;
   std::unordered_map<string, int> has_builtin_;
+
+  SharedCppDirectives predefined_directives_;
 
   std::vector<string> additional_flags_;
 
@@ -498,12 +503,12 @@ class CompilerInfoState {
 
   CompilerInfo compiler_info_;
 
-  mutable Lock mu_;  // protects refcnt_, disabled_, disabled_reason_.
-  int refcnt_;
+  mutable Lock mu_;
+  int refcnt_ GUARDED_BY(mu_);
   // When server side does not have the information about this compiler,
   // it's disabled.
-  bool disabled_;
-  string disabled_reason_;
+  bool disabled_ GUARDED_BY(mu_);
+  string disabled_reason_ GUARDED_BY(mu_);
 
   int used_;
 

@@ -7,7 +7,7 @@
 
 #include <iostream>
 
-#include <gtest/gtest.h>
+#include "gtest/gtest.h"
 
 #ifdef _WIN32
 #include "socket_helper_win.h"

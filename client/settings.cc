@@ -26,15 +26,17 @@ MSVC_POP_WARNING()
 
 namespace devtools_goma {
 
+using std::string;
+
 void SettingsGetCall(HttpRPC* http_rpc,
                      SettingsReq* req, SettingsResp* resp,
                      HttpRPC::Status* status) {
   http_rpc->Call("", req, resp, status);
 }
 
-void ApplySettings(const string& settings_server,
-                   const string& expect_settings,
-                   WorkerThreadManager* wm) {
+string ApplySettings(const string& settings_server,
+                     const string& expect_settings,
+                     WorkerThreadManager* wm) {
   HttpClient::Options http_options;
   InitHttpClientOptions(&http_options);
   http_options.InitFromURL(settings_server);
@@ -49,7 +51,6 @@ void ApplySettings(const string& settings_server,
 
   HttpRPC::Status status;
   SettingsReq req;
-  req.set_hostname(ToShortNodename(GetNodename()));
   if (!FLAGS_USE_CASE.empty()) {
     req.set_use_case(FLAGS_USE_CASE);
   }
@@ -69,7 +70,7 @@ void ApplySettings(const string& settings_server,
       LOG(FATAL) << "expect settings:" << expect_settings
                  << " but failed to get settings";
     }
-    return;
+    return "";
   }
   if (resp.has_settings()) {
     LOG(INFO) << "Settings name=" << resp.settings().name();
@@ -91,18 +92,20 @@ void ApplySettings(const string& settings_server,
       LOG(INFO) << "certificate=" << resp.settings().certificate();
       FLAGS_SSL_EXTRA_CERT_DATA = resp.settings().certificate();
     }
+
     LOG(INFO) << "Settings updated";
     if (!expect_settings.empty()) {
       CHECK_EQ(resp.settings().name(), expect_settings)
           << ": unexpected settings";
     }
-  } else {
-    LOG(WARNING) << "no settings";
-    if (!expect_settings.empty()) {
-      LOG(FATAL) << "expect settings:" << expect_settings
-                 << " but no settings";
-    }
+    return resp.settings().name();
   }
+  LOG(WARNING) << "no settings";
+  if (!expect_settings.empty()) {
+    LOG(FATAL) << "expect settings:" << expect_settings
+               << " but no settings";
+  }
+  return "";
 }
 
 }  // namespace devtools_goma

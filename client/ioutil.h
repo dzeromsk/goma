@@ -19,7 +19,7 @@ using std::string;
 
 namespace devtools_goma {
 
-const int kBufSize = 1024 * 32;
+const int kNetworkBufSize = 1024 * 32;
 const int kReadSelectTimeoutSec = 20;
 
 class ScopedSocket;

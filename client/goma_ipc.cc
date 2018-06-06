@@ -221,7 +221,7 @@ int GomaIPC::ReadResponse(const IOChannel* chan,
         response.resize(offset + content_length);
       }
     } else {
-      response.resize(response.size() + kBufSize);
+      response.resize(response.size() + kNetworkBufSize);
     }
     char* buf = const_cast<char*>(response.data()) + response_len;
     int buf_size = response.size() - response_len;
@@ -315,11 +315,11 @@ int GomaIPC::CheckHealthz(Status* status) {
     }
   }
   string healthz_response;
-  healthz_response.resize(kBufSize);
+  healthz_response.resize(kNetworkBufSize);
   char* buf = const_cast<char*>(healthz_response.data());
   SimpleTimer timer;
-  int len = healthz_chan->ReadWithTimeout(
-      buf, kBufSize, kReadSelectTimeoutSec);
+  int len = healthz_chan->ReadWithTimeout(buf, kNetworkBufSize,
+                                          kReadSelectTimeoutSec);
   if (len <= 0) {
     std::ostringstream ss;
     ss << "Error /healthz err=" << len

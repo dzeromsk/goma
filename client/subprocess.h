@@ -19,7 +19,7 @@ using std::string;
 
 namespace devtools_goma {
 
-struct FileId;
+struct FileStat;
 
 #ifdef _WIN32
 
@@ -30,10 +30,11 @@ int SpawnAndWait(const string& prog, const std::vector<string>& args,
                  const std::vector<string>& envs);
 
 // execute program but automatically avoids executing gomacc.
-// If |gomacc_fileid| == nullptr, this program won't avoid to execute gomacc.
+// If |gomacc_filestat| == nullptr, this program won't avoid to execute gomacc.
 // returns -1 on start failure.
 // return child process exit status from SpawnerWin.
-int SpawnAndWaitNonGomacc(const FileId* gomacc_fileid, const string& prog,
+int SpawnAndWaitNonGomacc(const FileStat* gomacc_filestat,
+                          const string& prog,
                           const std::vector<string>& args,
                           std::vector<string> envs);
 
@@ -48,11 +49,12 @@ int Execvpe(const string& prog, const std::vector<string>& args,
             const std::vector<string>& envs);
 
 // execute program but automatically avoids executing gomacc.
-// If |gomacc_fileid| == nullptr, this program won't avoid to execute gomacc.
+// If |gomacc_filestat| == nullptr, this program won't avoid to execute gomacc.
 //
 // Don't use this in multi threaded env.  (See spawner.h)
-int ExecvpeNonGomacc(const FileId* gomacc_fileid,
-                     const string& prog, const std::vector<string>& args,
+int ExecvpeNonGomacc(const FileStat* gomacc_filestat,
+                     const string& prog,
+                     const std::vector<string>& args,
                      std::vector<string> envs);
 
 #endif

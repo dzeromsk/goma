@@ -6,8 +6,10 @@
 
 #include <memory>
 #include <sstream>
+#include <utility>
 #include <vector>
 
+#include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "autolock_timer.h"
@@ -15,6 +17,7 @@
 #include "compiler_specific.h"
 #include "file_helper.h"
 #include "glog/logging.h"
+#include "glog/stl_logging.h"
 #include "http.h"
 #include "json/json.h"
 #include "json_util.h"
@@ -80,7 +83,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     CHECK(shutting_down_);
   }
 
-  string GetAccount() override {
+  string GetAccount() override LOCKS_EXCLUDED(mu_) {
     string access_token;
     {
       AUTOLOCK(lock, &mu_);
@@ -144,11 +147,13 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     return config_->GetOAuth2Config(config);
   }
 
-  bool SetOAuth2Config(const OAuth2Config& config) override {
+  bool SetOAuth2Config(const OAuth2Config& config) override
+      LOCKS_EXCLUDED(mu_) {
     if (!config_->SetOAuth2Config(config)) {
       LOG(WARNING) << "failed to set oauth2 config.";
       return false;
     }
+    AUTOLOCK(lock, &mu_);
     token_expires_at_ = time(nullptr);
     token_type_.clear();
     access_token_.clear();
@@ -156,7 +161,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     return true;
   }
 
-  string GetAuthorization() const override {
+  string GetAuthorization() const override LOCKS_EXCLUDED(mu_) {
     time_t now = time(nullptr);
     AUTOLOCK(lock, &mu_);
     if (now < token_expires_at_ &&
@@ -166,7 +171,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     return "";
   }
 
-  bool ShouldRefresh() const override {
+  bool ShouldRefresh() const override LOCKS_EXCLUDED(mu_) {
     time_t now = time(nullptr);
     AUTOLOCK(lock, &mu_);
     if (!config_->CanRefresh()) {
@@ -185,7 +190,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
   }
 
   void RunAfterRefresh(WorkerThreadManager::ThreadId thread_id,
-                       OneshotClosure* closure) override {
+                       OneshotClosure* closure) override LOCKS_EXCLUDED(mu_) {
     time_t now = time(nullptr);
     {
       AUTOLOCK(lock, &mu_);
@@ -231,7 +236,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     }
   }
 
-  void Shutdown() override {
+  void Shutdown() override LOCKS_EXCLUDED(mu_) {
     {
       AUTOLOCK(lock, &mu_);
       if (shutting_down_) {
@@ -272,7 +277,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     client_->Shutdown();
   }
 
-  void Wait() override {
+  void Wait() override LOCKS_EXCLUDED(mu_) {
     {
       AUTOLOCK(lock, &mu_);
       CHECK(shutting_down_) << "You must call Shutdown() beforehand.";
@@ -301,7 +306,8 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     }
   }
 
-  void ParseOAuth2AccessTokenUnlocked(int* next_update_in) {
+  void ParseOAuth2AccessTokenUnlocked(int* next_update_in)
+      EXCLUSIVE_LOCKS_REQUIRED(mu_) {
     static const int kOAuthExpireTimeMarginInSec = 60;
     if (status_->err != OK) {
       LOG(ERROR) << "HTTP communication failed to refresh OAuth2 access token."
@@ -337,7 +343,8 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
         << " kOAuthExpireTimeMarginInSec=" << kOAuthExpireTimeMarginInSec;
   }
 
-  void Done() {
+  void Done() LOCKS_EXCLUDED(mu_) {
+    AUTOLOCK(lock, &mu_);
     DCHECK(THREAD_ID_IS_SELF(refresh_task_thread_id_));
     bool http_ok = true;
     if (status_->err != OK &&
@@ -346,7 +353,6 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
       time_t now = time(nullptr);
       http_ok = false;
       {
-        AUTOLOCK(lock, &mu_);
         if (now < refresh_deadline_) {
           LOG(WARNING) << "refresh failed http=" << status_->http_return_code
                        << " retry until deadline=" << refresh_deadline_
@@ -386,7 +392,6 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
                           OneshotClosure*>> callbacks;
     int next_update_in = 0;
     {
-      AUTOLOCK(lock, &mu_);
       DCHECK_EQ(state_, RUN);
       state_ = NOT_STARTED;
       refresh_deadline_ = 0;
@@ -404,7 +409,6 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     }
     if (next_update_in > 0) {
       {
-        AUTOLOCK(lock, &mu_);
         if (shutting_down_) {
           return;
         }
@@ -428,14 +432,14 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     }
   }
 
-  void RunRefreshUnlocked() {
+  void RunRefreshUnlocked() EXCLUSIVE_LOCKS_REQUIRED(mu_) {
     DCHECK_EQ(RUN, state_);
     DCHECK(THREAD_ID_IS_SELF(refresh_task_thread_id_));
     InitRequest();
     // Make HttpClient get access token.
     LOG(INFO) << "Going to refresh OAuth2 access token.";
     resp_.Reset();
-    status_.reset(new HttpClient::Status);
+    status_ = absl::make_unique<HttpClient::Status>();
     status_->trace_id = "oauth2Refresh";
     client_->DoAsync(
         req_.get(), &resp_, status_.get(),
@@ -443,7 +447,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
             this, &GoogleOAuth2AccessTokenRefreshTask::Done));
   }
 
-  void RunRefresh() {
+  void RunRefresh() LOCKS_EXCLUDED(mu_) {
     LOG(INFO) << "Run refresh.";
 
     AUTOLOCK(lock, &mu_);
@@ -460,7 +464,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
   }
 
   // RunRefreshNow() is used for RunDelayedClosureInThread in Done() above.
-  void RunRefreshNow() {
+  void RunRefreshNow() LOCKS_EXCLUDED(mu_) {
     LOG(INFO) << "Run refresh now.";
 
     AUTOLOCK(lock, &mu_);
@@ -486,7 +490,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     RunRefreshUnlocked();
   }
 
-  void Cancel() {
+  void Cancel() LOCKS_EXCLUDED(mu_) {
     AUTOLOCK(lock, &mu_);
     DCHECK(THREAD_ID_IS_SELF(refresh_task_thread_id_));
     if (cancel_refresh_now_) {
@@ -508,21 +512,21 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
   std::unique_ptr<HttpClient> client_;
   std::unique_ptr<HttpRequest> req_;
   HttpResponse resp_;
-  std::unique_ptr<HttpClient::Status> status_;
 
-  mutable Lock mu_;  // protecting following members.
+  mutable Lock mu_;
   // signaled when cancel_refresh_now_ or cancel_refresh_ become nullptr.
   ConditionVariable cond_;
-  State state_ = NOT_STARTED;
-  time_t refresh_deadline_ = 0;
-  string token_type_;
-  string access_token_;
-  string account_email_;
-  time_t token_expires_at_ = 0;
-  time_t last_network_error_ = 0;
-  int refresh_backoff_ms_ = 0;
-  std::vector<std::pair<WorkerThreadManager::ThreadId,
-                        OneshotClosure*>> pending_tasks_;
+  std::unique_ptr<HttpClient::Status> status_ GUARDED_BY(mu_);
+  State state_ GUARDED_BY(mu_) = NOT_STARTED;
+  time_t refresh_deadline_ GUARDED_BY(mu_) = 0;
+  string token_type_ GUARDED_BY(mu_);
+  string access_token_ GUARDED_BY(mu_);
+  string account_email_ GUARDED_BY(mu_);
+  time_t token_expires_at_ GUARDED_BY(mu_) = 0;
+  time_t last_network_error_ GUARDED_BY(mu_) = 0;
+  int refresh_backoff_ms_ GUARDED_BY(mu_) = 0;
+  std::vector<std::pair<WorkerThreadManager::ThreadId, OneshotClosure*>>
+      pending_tasks_ GUARDED_BY(mu_);
 
   // This class cannot have an ownership of CancelableClosure.
   // It is valid until Cancel() is called or the closure is executed, and
@@ -531,11 +535,13 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
   //
   // cancel_refresh_now_ should set to nullptr when it become invalid.
   // cancel_refresh_ should also set to nullptr when it become invalid.
-  WorkerThreadManager::CancelableClosure* cancel_refresh_now_ = nullptr;
-  WorkerThreadManager::CancelableClosure* cancel_refresh_ = nullptr;
-  WorkerThreadManager::ThreadId refresh_task_thread_id_;
-  bool has_set_thread_id_ = false;
-  bool shutting_down_ = false;
+  WorkerThreadManager::CancelableClosure* cancel_refresh_now_ GUARDED_BY(mu_) =
+      nullptr;
+  WorkerThreadManager::CancelableClosure* cancel_refresh_ GUARDED_BY(mu_) =
+      nullptr;
+  WorkerThreadManager::ThreadId refresh_task_thread_id_ GUARDED_BY(mu_);
+  bool has_set_thread_id_ GUARDED_BY(mu_) = false;
+  bool shutting_down_ GUARDED_BY(mu_) = false;
 
   DISALLOW_COPY_AND_ASSIGN(GoogleOAuth2AccessTokenRefreshTask);
 };
@@ -593,8 +599,8 @@ class OAuth2RefreshConfig : public AuthRefreshConfig {
   }
 
  protected:
-  explicit OAuth2RefreshConfig(const OAuth2Config& config)
-      : config_(config) {}
+  explicit OAuth2RefreshConfig(OAuth2Config config)
+      : config_(std::move(config)) {}
 
   OAuth2Config config_;
 };
@@ -674,8 +680,6 @@ class ServiceAccountRefreshConfig : public OAuth2RefreshConfig {
               << http_options.service_account_json_filename;
     // https://developers.google.com/identity/protocols/OAuth2ServiceAccount#authorizingrequests
     options.InitFromURL(kGoogleTokenAudienceURI);
-    string path = options.url_path_prefix;
-    options.url_path_prefix = "/";
     std::unique_ptr<HttpClient> client(new HttpClient(
         HttpClient::NewSocketFactoryFromOptions(options),
         HttpClient::NewTLSEngineFactoryFromOptions(options),
@@ -683,13 +687,15 @@ class ServiceAccountRefreshConfig : public OAuth2RefreshConfig {
 
     // HTTP setup.
     std::unique_ptr<HttpRequest> req(new HttpRequest);
-    client->InitHttpRequest(req.get(), "POST", path);
+    client->InitHttpRequest(req.get(), "POST", "");
     req->SetContentType("application/x-www-form-urlencoded");
     req->AddHeader("Connection", "close");
     OAuth2Config config = http_options.oauth2_config;
     config.auth_uri = kGoogleAuthURI;
     config.token_uri = kGoogleTokenURI;
-    config.scope = kGomaAuthScope;
+    if (config.scope == "") {
+      config.scope = kGomaAuthScope;
+    }
     config.client_id = "client_is_not_needed";
     config.client_secret = "client_secret_is_not_needed";
     config.refresh_token = kServiceAccountRefreshTokenPrefix +
@@ -737,6 +743,10 @@ class ServiceAccountRefreshConfig : public OAuth2RefreshConfig {
     JsonWebToken::ClaimSet cs;
     cs.iss = sa.client_email;
     cs.scopes.emplace_back(kGomaAuthScope);
+    if (config_.scope != "" && config_.scope != kGomaAuthScope) {
+      LOG(INFO) << "additional scope:" << config_.scope;
+      cs.scopes.emplace_back(config_.scope);
+    }
     cs.expires_in_sec = 3600;
     JsonWebToken jwt(cs);
     string assertion = jwt.Token(*key, time(nullptr));
@@ -773,10 +783,6 @@ class RefreshTokenRefreshConfig : public OAuth2RefreshConfig {
       return nullptr;
     }
     options.InitFromURL(kGoogleTokenURI);
-    string path = options.url_path_prefix;
-    // client will be used for tokeninfo path too
-    // clear path prefix in options and put path in request.
-    options.url_path_prefix = "/";
     std::unique_ptr<HttpClient> client(new HttpClient(
         HttpClient::NewSocketFactoryFromOptions(options),
         HttpClient::NewTLSEngineFactoryFromOptions(options),
@@ -784,7 +790,7 @@ class RefreshTokenRefreshConfig : public OAuth2RefreshConfig {
 
     // HTTP setup.
     std::unique_ptr<HttpRequest> req(new HttpRequest);
-    client->InitHttpRequest(req.get(), "POST", path);
+    client->InitHttpRequest(req.get(), "POST", "");
     req->SetContentType("application/x-www-form-urlencoded");
     req->AddHeader("Connection", "close");
     config.type = kgRPCType;
@@ -833,9 +839,16 @@ class LuciAuthRefreshConfig : public AuthRefreshConfig {
     options.dest_host_name = kLuciLocalAuthServiceHost;
     options.dest_port = local_auth.rpc_port;
     options.url_path_prefix = kLuciLocalAuthServicePath;
+    std::vector<string> scopes;
+    scopes.emplace_back(kGomaAuthScope);
+    const string& scope = http_options.oauth2_config.scope;
+    if (scope != "" && scope != kGomaAuthScope) {
+      scopes.emplace_back(scope);
+    }
 
     LOG(INFO) << "LUCI_CONTEXT local_auth is used with account: "
-              << local_auth.default_account_id;
+              << local_auth.default_account_id
+              << " scopes=" << scopes;
 
     std::unique_ptr<HttpClient> client(new HttpClient(
         HttpClient::NewSocketFactoryFromOptions(options),
@@ -847,7 +860,7 @@ class LuciAuthRefreshConfig : public AuthRefreshConfig {
     req->AddHeader("Connection", "close");
 
     std::unique_ptr<AuthRefreshConfig> refresh_config(
-        new LuciAuthRefreshConfig(local_auth));
+        new LuciAuthRefreshConfig(local_auth, std::move(scopes)));
 
     return std::unique_ptr<OAuth2AccessTokenRefreshTask>(
         new GoogleOAuth2AccessTokenRefreshTask(
@@ -878,7 +891,7 @@ class LuciAuthRefreshConfig : public AuthRefreshConfig {
 
   bool InitRequest(HttpRequest* req) const override {
     LuciOAuthTokenRequest treq;
-    treq.scopes.push_back(kGomaAuthScope);
+    std::copy(scopes_.begin(), scopes_.end(), std::back_inserter(treq.scopes));
     treq.secret = local_auth_.secret;
     treq.account_id = local_auth_.default_account_id;
 
@@ -906,10 +919,11 @@ class LuciAuthRefreshConfig : public AuthRefreshConfig {
   }
 
  private:
-  explicit LuciAuthRefreshConfig(const LuciContextAuth& local_auth)
-      : local_auth_(local_auth) {}
+  LuciAuthRefreshConfig(LuciContextAuth local_auth, std::vector<string> scopes)
+      : local_auth_(std::move(local_auth)), scopes_(std::move(scopes)) {}
 
   LuciContextAuth local_auth_;
+  const std::vector<string> scopes_;
 };
 
 }  // namespace

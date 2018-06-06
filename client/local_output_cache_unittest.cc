@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 #include "content.h"
 #include "file.h"
@@ -30,7 +31,7 @@ namespace devtools_goma {
 class LocalOutputCacheTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    tmpdir_.reset(new TmpdirUtil("localoutputcache-test"));
+    tmpdir_ = absl::make_unique<TmpdirUtil>("localoutputcache-test");
     tmpdir_->MkdirForPath("build", true);
     tmpdir_->MkdirForPath("cache", true);
   }

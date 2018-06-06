@@ -21,19 +21,21 @@
 
 #include "absl/strings/match.h"
 #include "absl/strings/str_join.h"
+#include "absl/types/optional.h"
 #include "atomic_stats_counter.h"
-#include "autolock_timer.h"
 #include "auto_updater.h"
+#include "autolock_timer.h"
 #include "callback.h"
 #include "compile_stats.h"
 #include "compile_task.h"
 #include "compiler_flags.h"
 #include "compiler_proxy_histogram.h"
 #include "compiler_proxy_info.h"
+#include "cpp_include_processor.h"
 #include "deps_cache.h"
 #include "file_hash_cache.h"
 #include "file_helper.h"
-#include "file_id.h"
+#include "file_stat.h"
 #include "glog/logging.h"
 #include "goma_file_http.h"
 #include "goma_hash.h"
@@ -41,7 +43,6 @@
 #include "http.h"
 #include "http_rpc.h"
 #include "include_cache.h"
-#include "include_processor.h"
 #include "ioutil.h"
 #include "local_output_cache.h"
 #include "lockhelper.h"
@@ -307,7 +308,7 @@ void CompileService::MultiRpcController::RequestClosed() {
 }
 #endif
 
-CompileService::CompileService(WorkerThreadManager* wm)
+CompileService::CompileService(WorkerThreadManager* wm, int compiler_info_pool)
     : wm_(wm),
       quit_(false),
       task_id_(0),
@@ -319,7 +320,7 @@ CompileService::CompileService(WorkerThreadManager* wm)
       nodename_(GetNodename()),
       start_time_(time(nullptr)),
       compiler_info_builder_(new CompilerInfoBuilder),
-      compiler_info_pool_(wm_->StartPool(1, "compiler_info")),
+      compiler_info_pool_(wm_->StartPool(compiler_info_pool, "compiler_info")),
       file_hash_cache_(new FileHashCache),
       include_processor_pool_(WorkerThreadManager::kFreePool),
       histogram_(new CompilerProxyHistogram),
@@ -855,7 +856,10 @@ void CompileService::DumpStats(std::ostringstream* ss) {
   std::ostringstream mismatches_ss;
   {
     AUTOLOCK(lock, &mu_);
-    DumpCommonStatsUnlocked(&gstats);
+    {
+      AUTO_SHARED_LOCK(lock, &buf_mu_);
+      DumpCommonStatsUnlocked(&gstats);
+    }
     // Note that followings are not included in GomaStats.
     // GomaStats is used for storing statistics data for buildbot monitoring.
     // We are suggested by c-i-t monitoring folks not to store string data to
@@ -1070,7 +1074,10 @@ void CompileService::DumpStatsJson(
   GomaStatzStats statz;
   {
     AUTOLOCK(lock, &mu_);
-    DumpCommonStatsUnlocked(statz.mutable_stats());
+    {
+      AUTO_SHARED_LOCK(lock, &buf_mu_);
+      DumpCommonStatsUnlocked(statz.mutable_stats());
+    }
 
     if (!error_to_user_.empty()) {
       *statz.mutable_error_to_user() = google::protobuf::Map<string, int64_t>(
@@ -1287,17 +1294,16 @@ bool CompileService::FindLocalCompilerPathAndUpdate(
     LOG(ERROR) << "local_compiler is gomacc:" << *local_compiler_path;
   }
 
-  FileId gomacc_fileid(gomacc_path);
-  if (!gomacc_fileid.IsValid()) {
+  FileStat gomacc_filestat(gomacc_path);
+  if (!gomacc_filestat.IsValid()) {
     PLOG(ERROR) << "stat gomacc_path:" << gomacc_path;
     return false;
   }
 
   bool is_relative;
   string no_goma_path_env;
-  if (GetRealExecutablePath(&gomacc_fileid, basename, cwd,
-                            local_path, pathext,
-                            local_compiler_path, &no_goma_path_env,
+  if (GetRealExecutablePath(&gomacc_filestat, basename, cwd, local_path,
+                            pathext, local_compiler_path, &no_goma_path_env,
                             &is_relative)) {
     if (is_relative)
       local_compiler_key = key_cwd;
@@ -1498,11 +1504,13 @@ bool CompileService::AcquireOutputBuffer(size_t filesize, string* buf) {
 
   bool success = false;
 
-  {
-    // Since buf->resize() or buf->clear() could be slow,
-    // call it without holding a lock.
+  absl::optional<size_t> cur_sum_output_size;
+  absl::optional<size_t> max_sum_output_size;
 
-    AUTOLOCK(lock, &mu_);
+  {
+    // Since buf->resize(), buf->clear() or LOG(INFO) could be slow,
+    // call it without holding a lock.
+    AUTO_EXCLUSIVE_LOCK(lock, &buf_mu_);
     if (filesize > max_sum_output_size_ ||
         req_sum_output_size_ + filesize < req_sum_output_size_ ||
         cur_sum_output_size_ + filesize < cur_sum_output_size_) {
@@ -1519,13 +1527,17 @@ bool CompileService::AcquireOutputBuffer(size_t filesize, string* buf) {
         num_file_output_buf_++;
         success = true;
       } else {
-        LOG(INFO) << "output buf size over:"
-                  << " cur=" << cur_sum_output_size_
-                  << " req=" << filesize
-                  << " max=" << max_sum_output_size_;
+        cur_sum_output_size = cur_sum_output_size_;
+        max_sum_output_size = max_sum_output_size_;
         success = false;
       }
     }
+  }
+
+  if (cur_sum_output_size.has_value() && max_sum_output_size.has_value()) {
+    LOG(INFO) << "output buf size over:"
+              << " cur=" << *cur_sum_output_size << " req=" << filesize
+              << " max=" << *max_sum_output_size;
   }
 
   if (success) {
@@ -1538,12 +1550,13 @@ bool CompileService::AcquireOutputBuffer(size_t filesize, string* buf) {
 }
 
 void CompileService::ReleaseOutputBuffer(size_t filesize, string* buf) {
-  AUTOLOCK(lock, &mu_);
+  AUTO_EXCLUSIVE_LOCK(lock, &buf_mu_);
   if (req_sum_output_size_ < filesize) {
     req_sum_output_size_ = 0;
   } else {
     req_sum_output_size_ -= filesize;
   }
+
   size_t size = buf->size();
   buf->clear();
   if (size > cur_sum_output_size_) {
@@ -1661,7 +1674,10 @@ void CompileService::DumpErrorStatus(std::ostringstream* ss) {
   GomaStats gstats;
   {
     AUTOLOCK(lock, &mu_);
-    DumpCommonStatsUnlocked(&gstats);
+    {
+      AUTO_SHARED_LOCK(lock, &buf_mu_);
+      DumpCommonStatsUnlocked(&gstats);
+    }
   }
   InfraStatus* infra_status = notice->mutable_infra_status();
   infra_status->set_ping_status_code(
@@ -1828,7 +1844,10 @@ void CompileService::DumpStatsToFile(const string& filename) {
   GomaStats stats;
   {
     AUTOLOCK(lock, &mu_);
-    DumpCommonStatsUnlocked(&stats);
+    {
+      AUTO_SHARED_LOCK(lock, &buf_mu_);
+      DumpCommonStatsUnlocked(&stats);
+    }
   }
   histogram_->DumpToProto(stats.mutable_histogram());
   stats.mutable_machine_info()->set_goma_revision(kBuiltRevisionString);
