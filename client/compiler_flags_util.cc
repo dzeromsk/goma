@@ -47,7 +47,7 @@ namespace devtools_goma {
 std::vector<string> CompilerFlagsUtil::MakeWeakRelative(
     const std::vector<string>& args,
     const string& cwd,
-    const CompilerInfo& compiler_info) {
+    const CxxCompilerInfo& compiler_info) {
   FixNonSystemPath fix_path(cwd);
   for (const auto& path : compiler_info.cxx_system_include_paths())
     fix_path.RegisterSystemPath(path);

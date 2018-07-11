@@ -11,8 +11,8 @@ namespace devtools_goma {
 
 CompileStats::CompileStats()
     : ExecLog(),
-      gcc_req_size(0),
-      gcc_resp_size(0),
+      gomacc_req_size(0),
+      gomacc_resp_size(0),
       input_file_rpc_size(0),
       input_file_rpc_raw_size(0),
       output_file_rpc(0),
@@ -22,8 +22,7 @@ CompileStats::CompileStats()
       output_file_rpc_resp_recv_time(0),
       output_file_rpc_resp_parse_time(0),
       output_file_rpc_size(0),
-      output_file_rpc_raw_size(0) {
-}
+      output_file_rpc_raw_size(0) {}
 
 CompileStats::~CompileStats() {
 }

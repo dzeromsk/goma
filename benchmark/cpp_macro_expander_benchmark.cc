@@ -5,10 +5,10 @@
 #include <sstream>
 
 #include "benchmark/benchmark.h"
-#include "cpp_macro_expander.h"
-#include "cpp_parser.h"
-#include "cpp_token.h"
-#include "cpp_tokenizer.h"
+#include "cxx/include_processor/cpp_macro_expander.h"
+#include "cxx/include_processor/cpp_parser.h"
+#include "cxx/include_processor/cpp_token.h"
+#include "cxx/include_processor/cpp_tokenizer.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 

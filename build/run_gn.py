@@ -8,24 +8,15 @@
 import os
 import sys
 import subprocess
+import find_depot_tools
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def GetDepotToolsPath():
-  """Returns path to depot_tools."""
-  paths = os.environ.get('PATH', '').split(os.path.pathsep)
-  for path in paths:
-    if os.path.basename(path) == 'depot_tools':
-      return path
-
-
 def main(args):
-  depot_tools_path = GetDepotToolsPath()
-  if not depot_tools_path:
-    raise Exception('depot_tools path not found in PATH')
+  gn_py_path = os.path.join(find_depot_tools.DEPOT_TOOLS_PATH, 'gn.py')
   subprocess.check_call(
-      [sys.executable, os.path.join(depot_tools_path, 'gn.py')] + args[1:],
+      [sys.executable, gn_py_path] + args[1:],
       cwd=_SCRIPT_DIR)
 
 

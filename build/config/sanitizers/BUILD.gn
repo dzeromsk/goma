@@ -182,9 +182,10 @@ config("default_sanitizer_ldflags") {
       ldflags += [ "-fsanitize=thread" ]
     }
 
-    #if (is_msan) {
-    #  ldflags += [ "-fsanitize=memory" ]
-    #}
+    if (is_msan) {
+      ldflags += [ "-fsanitize=memory" ]
+    }
+
     #if (is_ubsan || is_ubsan_security) {
     #  ldflags += [ "-fsanitize=undefined" ]
     #}
@@ -322,18 +323,12 @@ config("coverage_flags") {
 #  }
 #}
 
-#config("msan_flags") {
-#  if (is_msan) {
-#    assert(is_linux, "msan only supported on linux x86_64")
-#    msan_blacklist_path =
-#        rebase_path("//tools/msan/blacklist.txt", root_build_dir)
-#    cflags = [
-#      "-fsanitize=memory",
-#      "-fsanitize-memory-track-origins=$msan_track_origins",
-#      "-fsanitize-blacklist=$msan_blacklist_path",
-#    ]
-#  }
-#}
+config("msan_flags") {
+  if (is_msan) {
+    assert(os == "linux", "msan only supported on linux x86_64")
+    cflags = [ "-fsanitize=memory" ]
+  }
+}
 
 config("tsan_flags") {
   if (is_tsan) {
@@ -424,10 +419,10 @@ all_sanitizer_configs = [
   ":default_sanitizer_ldflags",
   ":asan_flags",
   ":tsan_flags",
+  ":msan_flags",
 
   #":cfi_flags",
   #":lsan_flags",
-  #":msan_flags",
   #":ubsan_flags",
   #":ubsan_no_recover",
   #":ubsan_null_flags",

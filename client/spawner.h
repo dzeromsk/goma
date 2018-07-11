@@ -38,6 +38,11 @@ class Spawner {
     STDOUT_ONLY = 1,
   };
 
+  enum class ProcessStatus {
+    RUNNING,
+    EXITED,
+  };
+
   static const int kInvalidPid;
 
   virtual ~Spawner() {}
@@ -83,27 +88,25 @@ class Spawner {
   void SetUmask(int32_t umask) { umask_ = umask; }
 
   // Spawns a child process.
-  // Returns a child process id spawned by |cmd| on success.
-  // Note: child process id is not monitor process pid in SpawnerPosix.
-  // Returns kInvalidPid on non fatal error, and dies with fatal error.
-  // |prog| is a program name, |args| is its arguments, |envs| is its
-  // environment, and |cwd| is a current working directory.
+  // On Success,
+  // * returns spawned process id in SpawnerWin.
+  // * returns a monitor process id that spawned |cmd| in SpawnerPosix.
+  // Note: SpawnerPosix::Run first spawn a monitor process, and then monitor
+  // process spawn a child process not to inherit signal handlers.
+  // Returns kInvalidPid on non fatal error, and dies with fatal error. |prog|
+  // is a program name, |args| is its arguments, |envs| is its environment, and
+  // |cwd| is a current working directory.
   virtual int Run(const string& cmd, const std::vector<string>& args,
                   const std::vector<string>& envs, const string& cwd) = 0;
 
   // Kills the process.
-  // Returns true if the process is still running.
-  // Returns false if the process has been terminated.
-  // TODO: flip the return value meaning. True sounds success.
-  virtual bool Kill() = 0;
+  virtual ProcessStatus Kill() = 0;
 
   // Waits for process termination.
   // If |wait_policy| is NO_HANG, it just returns current status.
   // If |wait_policy| is WAIT_INFINITE, it wait until the process finishes.
   // If |wait_policy| is NEED_KILL, it kills process if the process is running.
-  // Returns true if the process is still running.
-  // Returns false if the process has been terminated.
-  virtual bool Wait(WaitPolicy wait_policy) = 0;
+  virtual ProcessStatus Wait(WaitPolicy wait_policy) = 0;
 
   // Returns true if the process is running.
   virtual bool IsChildRunning() const = 0;
@@ -140,6 +143,16 @@ class Spawner {
  private:
   DISALLOW_COPY_AND_ASSIGN(Spawner);
 };
+
+inline std::ostream& operator<<(std::ostream& os,
+                                Spawner::ProcessStatus status) {
+  switch (status) {
+    case Spawner::ProcessStatus::RUNNING:
+      return os << "RUNNING";
+    case Spawner::ProcessStatus::EXITED:
+      return os << "EXITED";
+  }
+}
 
 }  // namespace devtools_goma
 

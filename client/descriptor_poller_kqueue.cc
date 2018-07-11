@@ -3,8 +3,6 @@
 // found in the LICENSE file.
 
 
-#ifdef USE_KQUEUE
-
 #include "descriptor_poller.h"
 
 #include <sys/event.h>
@@ -12,6 +10,7 @@
 
 #include <unordered_set>
 
+#include "absl/base/call_once.h"
 #include "absl/memory/memory.h"
 #include "glog/logging.h"
 #include "scoped_fd.h"
@@ -26,6 +25,7 @@ class KqueueDescriptorPoller : public DescriptorPollerBase {
       : DescriptorPollerBase(std::move(breaker), std::move(poll_signaler)),
         kqueue_fd_(-1),
         nevents_(0) {
+    absl::call_once(s_init_once_, LogDescriptorPollerType);
     kqueue_fd_.reset(kqueue());
     CHECK(kqueue_fd_.valid());
     CHECK(poll_breaker());
@@ -33,6 +33,10 @@ class KqueueDescriptorPoller : public DescriptorPollerBase {
     EV_SET(&kev, poll_breaker()->fd(), EVFILT_READ, EV_ADD, 0, 0, nullptr);
     PCHECK(kevent(kqueue_fd_.fd(), &kev, 1, nullptr, 0, nullptr) != -1)
         << "Cannot add fd for kqueue:" << poll_breaker()->fd();
+  }
+
+  static void LogDescriptorPollerType() {
+    LOG(INFO) << "descriptor_poller will use \"kqueue\"";
   }
 
   void RegisterPollEvent(SocketDescriptor* d, EventType type) override {
@@ -124,7 +128,7 @@ class KqueueDescriptorPoller : public DescriptorPollerBase {
           DescriptorMap::const_iterator iter = descriptors_.find(
               current_ev_->ident);
           CHECK(iter != descriptors_.end());
-          d = iter->second;
+          d = iter->second.get();
         }
         event_received_.insert(d);
         return d;
@@ -165,12 +169,15 @@ class KqueueDescriptorPoller : public DescriptorPollerBase {
 
  private:
   friend class KqueueEventEnumerator;
+  static absl::once_flag s_init_once_;
   ScopedFd kqueue_fd_;
   std::vector<struct kevent> eventlist_;
   std::unordered_set<SocketDescriptor*> timeout_waiters_;
   int nevents_;
   DISALLOW_COPY_AND_ASSIGN(KqueueDescriptorPoller);
 };
+
+absl::once_flag KqueueDescriptorPoller::s_init_once_;
 
 // static
 std::unique_ptr<DescriptorPoller> DescriptorPoller::NewDescriptorPoller(
@@ -181,5 +188,3 @@ std::unique_ptr<DescriptorPoller> DescriptorPoller::NewDescriptorPoller(
 }
 
 }  // namespace devtools_goma
-
-#endif  // USE_KQUEUE

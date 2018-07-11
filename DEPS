@@ -17,7 +17,7 @@ deps = {
      # googletest
      "client/third_party/gtest":
      Var('chromium_git') + '/external/github.com/google/googletest.git' + '@' +
-         'a325ad2db5deb623eab740527e559b81c0f39d65',
+         '145d05750b15324899473340c8dd5af50d125d33',
 
      # zlib 1.2.8
      "client/third_party/zlib":
@@ -44,7 +44,7 @@ deps = {
 
      # chrome's deps/third_party/boringssl
      "client/third_party/boringssl/src":
-     "https://boringssl.googlesource.com/boringssl@81a6f6d8de908e27901f5c968c576fbb9c3f35d0",
+     "https://boringssl.googlesource.com/boringssl@82639e6f5341a3129b7cb62a5a2dd9b65f3c91ef",
 
      # google-breakpad
      "client/third_party/breakpad/breakpad":
@@ -88,6 +88,18 @@ deps = {
      "client/buildtools/clang_format/script":
      Var("chromium_git") + "/chromium/llvm-project/cfe/tools/" +
      "clang-format.git@0653eee0c81ea04715c635dd0885e8096ff6ba6d",
+
+     # Jinja2 template engine v2.10
+     "client/third_party/jinja2":
+     "https://github.com/pallets/jinja.git@78d2f672149e5b9b7d539c575d2c1bfc12db67a9",
+
+     # Markupsafe module v1.0
+     "client/third_party/markupsafe":
+     "https://github.com/pallets/markupsafe.git@d2a40c41dd1930345628ea9412d97e159f828157",
+
+     # depot_tools
+     'client/third_party/depot_tools':
+     Var('chromium_git') + '/chromium/tools/depot_tools.git'
 }
 
 hooks = [
@@ -180,5 +192,17 @@ hooks = [
        'name': 'win_toolchain',
        'pattern': '.',
        'action': ['python', 'client/build/vs_toolchain.py', 'update'],
+     },
+
+     # Ensure that the DEPS'd "depot_tools" has its self-update capability
+     # disabled.
+     {
+       'name': 'disable_depot_tools_selfupdate',
+       'pattern': '.',
+       'action': [
+         'python',
+         'client/third_party/depot_tools/update_depot_tools_toggle.py',
+         '--disable',
+       ],
      },
 ]

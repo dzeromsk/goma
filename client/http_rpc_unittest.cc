@@ -771,9 +771,6 @@ TEST_F(HttpRPCTest, TLSEngineFailWithTLSErrorAtRead) {
   HttpRPC http_rpc(&http_client, rpc_options);
   HttpRPC::Status status;
   int r = http_rpc.Ping(wm_.get(), "/pingz", &status);
-  string expected_buf;
-  expected_buf.resize(req_expected.size());
-  EXPECT_EQ(expected_buf, req_buf);  // nothing received at server.
   EXPECT_EQ(500, r);
   EXPECT_EQ("running: failed to send request to backend servers",
             http_client.GetHealthStatusMessage());

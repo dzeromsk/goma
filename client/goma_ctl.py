@@ -2067,6 +2067,7 @@ class GomaEnvPosix(GomaEnv):
     if os.uname()[0] == 'Darwin':
       self._platform = 'mac'
     self._fuser_path = None
+    self._lsof_path = None
     self._pwd = __import__('pwd')
 
   @staticmethod
@@ -2126,7 +2127,12 @@ class GomaEnvPosix(GomaEnv):
                            shell=True) == 0
 
   def _ExecLsof(self, cmd):
-    lsof_command = [self._LSOF, '-F', 'pun', '-P']
+    if self._lsof_path is None:
+      self._lsof_path = _FindCommandInPath(self._LSOF)
+      if not self._lsof_path:
+        raise Error('lsof command not found. '
+                    'Please install lsof command, or put it in PATH.')
+    lsof_command = [self._lsof_path, '-F', 'pun', '-P']
     if cmd['type'] == 'process':
       lsof_command.extend(['-p', cmd['name']])
     elif cmd['type'] == 'file':

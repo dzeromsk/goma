@@ -31,6 +31,47 @@ DEFAULT_GOMA_OAUTH2_CONFIG_FILE_NAME = '.goma_oauth2_config'
 OAUTH_STATE_LENGTH = 64
 
 
+def ConfirmUserAgreedToS():
+  """Returns if user agreed on ToS."""
+  print """You can use Goma (distributed compiler service) if you agree on the
+way we use data and the way we share data.
+
+1. How do we use data?
+a. the data used for compiling
+- source code (including contents and file paths) to be compiled.
+- header files (including contents and file paths) used during the compile.
+- other files accessed by compilers. e.g. asan_blacklist.txt, crtbegin.o,
+  profiling data for pgo.
+- identifier of a compiler to use. (SHA256 hash value of a compiler, version,
+  target).
+- command line arguments and environment variables necessary for a compile,
+  system include paths, current working directory.
+
+Google keeps collected data for 30 days.
+
+b. the data used for authentication
+- OAuth2 access token to use service, and email address gotten from access
+  token.
+
+Google may use data for logging and tracking (including abuse detection).
+Google keeps identifier of each compile (goma client start time, goma client
+id that changes when compiler_proxy starts, sequential compile id)
+Google keeps log for 30 days.
+
+2. What data will be shared?
+
+Contents in source code and header files are shared among users who send
+SHA256 hash values of them.  Compile results are shared among users who have
+sent the requests that bring the same compile result.
+"""
+
+  yn = raw_input('Do you agree to our data usage policy? (y/n) -->')
+  if yn in ('Y', 'y'):
+    print 'You have agreed.'
+    return
+  sys.exit(1)
+
+
 class Error(Exception):
   """Raised on Error."""
 
@@ -41,7 +82,6 @@ class GomaOAuth2Config(dict):
   def __init__(self):
     dict.__init__(self)
     self._path = self._GetLocation()
-    self._backup = None
 
   @staticmethod
   def _GetLocation():
@@ -64,26 +104,23 @@ class GomaOAuth2Config(dict):
         self.update(json.load(f))
     except ValueError:
       return False
-    self._backup = copy.copy(self)
+    if not self.get('refresh_token'):
+      return False
     return True
 
   def Save(self):
     """Saves config to a file."""
     # TODO: not save unnecessary data.
-    if self == self._backup:
-      return
     with open(self._path, 'wb') as f:
       if os.name == 'posix':
         os.fchmod(f.fileno(), 0600)
       json.dump(self, f)
-    self._backup = copy.copy(self)
 
   def Delete(self):
     """Deletes a config file."""
     if not os.path.exists(self._path):
       return
     os.remove(self._path)
-    self._backup = None
 
 
 def HttpGetRequest(url):
@@ -240,7 +277,7 @@ def GetRefreshToken(get_code_func, config):
     a refresh token string.
   """
   code = get_code_func(config)
-  assert code and type(code) == str
+  assert code and isinstance(code, str)
   post_data = {
       'code': code,
       'client_id': config['client_id'],
@@ -281,38 +318,88 @@ def VerifyRefreshToken(config):
   return ''
 
 
-def Login(options):
-  """Does login procedure.
+def Login():
+  """Performs interactive login and caches authentication token.
 
-  If there is valid config, it does nothing.
-  If config is invalid, raise.
-  If there is no config, it asks the user to get refresh token.
+  Returns:
+    non-zero value on error.
   """
+  ConfirmUserAgreedToS()
+
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--browser', action='store_true',
+                      help=('Use browser to get goma OAuth2 token.'))
+  options = parser.parse_args(sys.argv[2:])
+
   config = GomaOAuth2Config()
-  if options.delete:
-    config.Delete()
-  if not config.Load():
-    config.update(DefaultOAuth2Config())
-    func = GetAuthorizationCodeViaCommandLine
-    if options.browser:
-      func = GetAuthorizationCodeViaBrowser
-    config['refresh_token'] = GetRefreshToken(func, config)
+  config.update(DefaultOAuth2Config())
+  func = GetAuthorizationCodeViaCommandLine
+  if options.browser:
+    func = GetAuthorizationCodeViaBrowser
+  config['refresh_token'] = GetRefreshToken(func, config)
 
   err = VerifyRefreshToken(config)
   if err:
     sys.stderr.write(err + '\n')
+    return 1
 
   config.Save()
+  return 0
+
+
+def Logout():
+  """Removes a cached authentication token.
+
+  Returns:
+    non-zero value on error.
+  """
+  config = GomaOAuth2Config()
+  config.Delete()
+  return 0
+
+
+def Info():
+  """Shows email associated with a cached authentication token.
+
+  Returns:
+    non-zero value on error.
+  """
+  config = GomaOAuth2Config()
+  if not config.Load():
+    sys.stderr.write('Not logged in\n')
+    return 1
+  err = VerifyRefreshToken(config)
+  if err:
+    sys.stderr.write(err + '\n')
+    return 1
+  return 0
+
+
+def Help():
+  """Print Usage"""
+  print '''Usage: %(cmd)s <command> [options]
+
+Commands are:
+  login  performs interactive login and caches authentication token
+  logout revokes cached authentication token
+  info   shows email associated with a cached authentication token
+
+Options are:
+  --browser use browser to get goma OAuth2 token (login command only)
+''' % {'cmd' : sys.argv[0]}
+  return 0
 
 
 def main():
-  parser = argparse.ArgumentParser()
-  parser.add_argument('--delete', action='store_true',
-                      help=('Delete the stored goma OAuth2 config file.'))
-  parser.add_argument('--browser', action='store_true',
-                      help=('Use browser to get goma OAuth2 token.'))
-  options = parser.parse_args()
-  Login(options)
+  action_mapping = {
+      'login': Login,
+      'logout': Logout,
+      'info': Info,
+  }
+  action = Help
+  if len(sys.argv) > 1:
+    action = action_mapping.get(sys.argv[1], Help)
+  return action()
 
 
 if __name__ == '__main__':

@@ -24,8 +24,8 @@ class CompileStats : public ExecLog {
   CompileStats();
   ~CompileStats();
 
-  size_t gcc_req_size;
-  size_t gcc_resp_size;
+  size_t gomacc_req_size;
+  size_t gomacc_resp_size;
 
   size_t input_file_rpc_size;
   size_t input_file_rpc_raw_size;

@@ -182,7 +182,7 @@ class WorkerThreadManager::WorkerThread : public PlatformThread::Delegate {
   DelayedClosureQueue delayed_pendings_;
   std::vector<std::unique_ptr<PeriodicClosure>> periodic_closures_;
 
-  std::map<int, SocketDescriptor*> descriptors_;
+  std::map<int, std::unique_ptr<SocketDescriptor>> descriptors_;
   std::unique_ptr<DescriptorPoller> poller_;
   int poll_interval_;
 

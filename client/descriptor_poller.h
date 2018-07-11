@@ -24,7 +24,7 @@ class DescriptorPoller {
 
   typedef std::map<WorkerThreadManager::Priority, std::deque<OneshotClosure*>>
       CallbackQueue;
-  typedef std::map<int, SocketDescriptor*> DescriptorMap;
+  typedef std::map<int, std::unique_ptr<SocketDescriptor>> DescriptorMap;
 
   // Creates a new DescriptorPoller instance.
   // |poll_breaker| is a special Descriptor that has no callbacks and is

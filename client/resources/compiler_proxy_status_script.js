@@ -730,8 +730,8 @@ GomaTaskView.prototype = {
     addLineBreak();
 
     // size
-    add('gcc_req_size');
-    add('gcc_resp_size');
+    add('gomacc_req_size');
+    add('gomacc_resp_size');
     add('exec_req_size');
     add('exec_resp_size');
     add('output_file_size');

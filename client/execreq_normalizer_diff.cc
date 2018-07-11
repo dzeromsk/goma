@@ -7,6 +7,7 @@
 
 #include <iostream>
 
+#include "compiler_flag_type_specific.h"
 #include "execreq_normalizer.h"
 #include "file_helper.h"
 #include "gcc_flags.h"
@@ -21,8 +22,11 @@ void NormalizeExecReq(devtools_goma::ExecReq* req) {
   std::vector<string> args(req->arg().begin(), req->arg().end());
   devtools_goma::GCCFlags flags(args, req->cwd());
 
-  devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kFlagToNormalize,
-                                             flags.fdebug_prefix_map(), req);
+  auto normalizer = devtools_goma::CompilerFlagTypeSpecific::FromArg(
+                        req->command_spec().name())
+                        .NewExecReqNormalizer();
+  normalizer->NormalizeForCacheKey(0, true, false, kFlagToNormalize,
+                                   flags.fdebug_prefix_map(), req);
 }
 
 int main(int argc, char* argv[]) {
@@ -51,9 +55,9 @@ int main(int argc, char* argv[]) {
   NormalizeExecReq(&req2);
 
   google::protobuf::util::MessageDifferencer differencer;
+  std::string difference_reason;
+  differencer.ReportDifferencesToString(&difference_reason);
   if (!differencer.Compare(req1, req2)) {
-    std::string difference_reason;
-    differencer.ReportDifferencesToString(&difference_reason);
     std::cout << "diff " << argv[1] << " " << argv[2] << "\n"
               << difference_reason << std::endl;
   }

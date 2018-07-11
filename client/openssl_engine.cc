@@ -31,7 +31,7 @@
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "http.h"
-#include "ioutil.h"
+#include "http_util.h"
 #include "mypath.h"
 #include "openssl_engine_helper.h"
 #include "path.h"
@@ -952,7 +952,7 @@ ScopedX509CRL OpenSSLContext::GetX509CrlsFromUrl(
       socket_pool->CloseSocket(std::move(sock), true);
       continue;
     }
-    crl_str->assign(string(resp.Body()));
+    crl_str->assign(resp.Body());
     ScopedX509CRL x509_crl(ParseCrl(*crl_str));
     if (x509_crl == nullptr) {
       LOG(WARNING) << "failed to parse CRL data:"

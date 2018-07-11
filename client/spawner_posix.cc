@@ -25,21 +25,24 @@
 #include "fileflag.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
-#include "timestamp.h"
 #include "mypath.h"
 #include "path.h"
+#include "platform_thread.h"
+#include "timestamp.h"
 
 namespace {
 
 static const int kInvalidProcessStatus = -256;
 
 struct SubprocExit {
-  SubprocExit() : lineno(0), last_errno(0), signal(0) {
+  SubprocExit() : lineno(0), last_errno(0), status(kInvalidProcessStatus) {
     memset(&ru, 0, sizeof(ru));
   }
   int lineno;
   int last_errno;
-  int signal;
+
+  // status of spawned process.
+  int status;
   struct rusage ru;
 };
 
@@ -59,7 +62,6 @@ namespace devtools_goma {
 SpawnerPosix::SpawnerPosix()
     : monitor_pid_(Spawner::kInvalidPid),
       prog_pid_(Spawner::kInvalidPid),
-      subprocess_dying_(false),
       is_signaled_(false),
       sent_sig_(0),
       status_(kInvalidProcessStatus),
@@ -115,6 +117,10 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
   PCHECK(pipe(pipe_fd) == 0);
   exit_fd_.reset(pipe_fd[0]);
   ScopedFd child_exit_fd(pipe_fd[1]);
+  // Make another pipe. Use this for report pid.
+  PCHECK(pipe(pipe_fd) == 0);
+  ScopedFd exit_pid_fd(pipe_fd[0]);
+  ScopedFd child_pid_fd(pipe_fd[1]);
 
   // We can't use posix_spawn, because we'd like to control
   // current directory of each subprocess.
@@ -168,7 +174,9 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
       SubprocExitReport(child_exit_fd.fd(), se, 1);
     }
     for (int i = STDERR_FILENO + 1; i < 256; ++i) {
-      if (i == child_exit_fd.fd()) continue;
+      if (i == child_exit_fd.fd() || i == child_pid_fd.fd()) {
+        continue;
+      }
       close(i);
     }
 
@@ -271,15 +279,14 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
       SubprocExitReport(child_exit_fd.fd(), se, 1);
     }
     // report prog_pid to parent.
-    if (write(child_exit_fd.fd(), &prog_pid, sizeof(prog_pid))
-        != sizeof(prog_pid)) {
+    if (write(child_pid_fd.fd(), &prog_pid, sizeof(prog_pid)) !=
+        sizeof(prog_pid)) {
       se.lineno = __LINE__ - 2;
       se.last_errno = errno;
       SubprocExitReport(child_exit_fd.fd(), se, 1);
     }
 
-    int status = -1;
-    while (waitpid(prog_pid, &status, 0) == -1) {
+    while (waitpid(prog_pid, &se.status, 0) == -1) {
       if (errno != EINTR) break;
     }
     if (getrusage(RUSAGE_CHILDREN, &se.ru) != 0) {
@@ -288,40 +295,48 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
       SubprocExitReport(child_exit_fd.fd(), se, 1);
     }
     int exit_status = -1;
-    if (WIFSIGNALED(status)) {
-      se.signal = WTERMSIG(status);
-      exit_status = 1;
-    } else if (WIFEXITED(status)) {
-      exit_status = WEXITSTATUS(status);
+
+    // The monitor process is considered as finishing successfully
+    // (exit_status = 0) regardless of spawned process exit status.
+    if (WIFSIGNALED(se.status) || WIFEXITED(se.status)) {
+      exit_status = 0;
     }
     SubprocExitReport(child_exit_fd.fd(), se, exit_status);
   }
+
+  // close writers (otherwise read(2) will be blocked)
+  child_exit_fd.Close();
+  child_pid_fd.Close();
+
   monitor_pid_ = pid;
-  int r = read(exit_fd_.fd(), &prog_pid_, sizeof(prog_pid_));
+  int r = read(exit_pid_fd.fd(), &prog_pid_, sizeof(prog_pid_));
   if (r != sizeof(prog_pid_)) {
     PLOG(ERROR) << "failed to get prog_pid for monitor_pid=" << monitor_pid_;
     prog_pid_ = Spawner::kInvalidPid;
   }
   PCHECK(sigprocmask(SIG_UNBLOCK, &sigset, nullptr) == 0);
 
-  return prog_pid_;
+  return monitor_pid_;
 }
 
-bool SpawnerPosix::Kill() {
+Spawner::ProcessStatus SpawnerPosix::Kill() {
   int sig = SIGINT;
-  if (monitor_pid_ == Spawner::kInvalidPid) {
-    // means not started yet.
-    return false;
-  }
+  CHECK_NE(monitor_pid_, Spawner::kInvalidPid)
+      << "Kill should not be called before the process has started.";
+
   if (!is_signaled_) {
     is_signaled_ = true;  // try to kill in Wait()
   } else {
     sig = SIGTERM;
   }
-  bool running = (status_ == kInvalidProcessStatus);
+
+  ProcessStatus status = status_ == kInvalidProcessStatus
+                             ? ProcessStatus::RUNNING
+                             : ProcessStatus::EXITED;
   sent_sig_ = sig;
   sig_timer_.Start();
-  if (prog_pid_ != Spawner::kInvalidPid) {
+
+  if (status == ProcessStatus::RUNNING && prog_pid_ != Spawner::kInvalidPid) {
     if (kill(-prog_pid_, sig) != 0) {
       PLOG(WARNING) << " kill "
                     << " prog_pgrp=" << prog_pid_;
@@ -331,102 +346,78 @@ bool SpawnerPosix::Kill() {
       }
     }
   }
-  return running;
+  return status;
 }
 
-bool SpawnerPosix::Wait(WaitPolicy wait_policy) {
-  int status = -1;
+SpawnerPosix::ProcessStatus SpawnerPosix::Wait(WaitPolicy wait_policy) {
   if (monitor_pid_ != Spawner::kInvalidPid) {
-    // TODO: Use SpawnerPosix::Kill() for NEED_KILL.
     const bool need_kill = (wait_policy == NEED_KILL);
     const int waitpid_options = (wait_policy == WAIT_INFINITE) ? 0 : WNOHANG;
     int r;
-    bool pgrp_dead = false;
-    bool process_dead = false;
-    if ((r = waitpid(-monitor_pid_, &status, waitpid_options)) == -1) {
-      if (errno == ECHILD) {
-        pgrp_dead = true;
-      } else {
-        PLOG(ERROR) << "waitpid "
-                    << " pgrp=" << monitor_pid_;
+    int status = -1;
+    while ((r = waitpid(monitor_pid_, &status, waitpid_options)) == -1) {
+      if (errno == EINTR) {
+        // Retry after 10 milliseconds wait.
+        PlatformThread::Sleep(10);
+        continue;
       }
+      PLOG(FATAL) << "waitpid failed, monitor process id=" << monitor_pid_
+                  << " waitpid_options=" << waitpid_options;
     }
-    if (r == -1) {
-      // process might be killed before setting process group.
-      if ((r = waitpid(monitor_pid_, &status, waitpid_options)) == -1) {
-        if (errno == ECHILD) {
-          process_dead = true;
-        } else {
-          PLOG(ERROR) << "waitpid "
-                      << " monitor_pid=" << monitor_pid_;
-        }
-      }
-    }
+
+    DCHECK_NE(r, -1);
     if (r == 0) {
-      // one or more children in the process group exist, but have not yet
-      // changed state.
+      // monitor still running
       if (!need_kill) {
-        // process is still running.
-        DCHECK(!pgrp_dead || !process_dead);
-        return false;
+        CHECK_EQ(wait_policy, NO_HANG)
+            << "process is alive in not NO_HANG policy."
+            << " monitor_pid=" << monitor_pid_ << " prog_pid=" << prog_pid_;
+        return ProcessStatus::RUNNING;
       }
+      CHECK_EQ(wait_policy, NEED_KILL)
+          << "try to kill process in other than NEED_KILL policy."
+          << " monitor_pid=" << monitor_pid_ << " prog_pid=" << prog_pid_;
+
+      CHECK_EQ(ProcessStatus::RUNNING, Kill())
+          << "Should not call Kill when monitor process is not running.";
+
+      while ((r = waitpid(monitor_pid_, &status, 0)) == -1) {
+        if (errno == EINTR) {
+          // Retry after 10 milliseconds wait.
+          PlatformThread::Sleep(10);
+          continue;
+        }
+        PLOG(FATAL) << "waitpid failed, monitor process id=" << monitor_pid_
+                    << " waitpid_options=" << waitpid_options;
+      }
+
+      CHECK_EQ(r, monitor_pid_)
+          << "unexpected waitpid returns, r=" << r << " status=" << status
+          << " monitor_pid=" << monitor_pid_ << " prog_pid=" << prog_pid_;
+
+      CHECK(WIFEXITED(status) || WIFSIGNALED(status))
+          << "unexpected state change, r=" << r << " status=" << status
+          << " monitor_pid=" << monitor_pid_ << " prog_pid=" << prog_pid_;
     } else if (r == monitor_pid_) {
-      status_ = WEXITSTATUS(status);
-    }
-    // Check subprocess itself and its process group still exist.
-    // Note that subprocess didn't set own process group yet, so we need
-    // check monitor_pid_ too.
-    if (need_kill) {
-      int sig = SIGINT;
-      if (!pgrp_dead) {
-        if (sent_sig_ == 0) {
-          sent_sig_ = sig;
-          sig_timer_.Start();
-        }
-        if (kill(-monitor_pid_, sig) == -1) {
-          pgrp_dead = true;
-        }
-      }
-      if (!process_dead) {
-        if (sent_sig_ == 0) {
-          sent_sig_ = sig;
-          sig_timer_.Start();
-        }
-        if (kill(monitor_pid_, sig) == -1) {
-          process_dead = true;
-        }
-      }
-    }
-    if (!pgrp_dead && kill(-monitor_pid_, 0) == -1) {
-      pgrp_dead = true;
-    }
-    if (!process_dead && kill(monitor_pid_, 0) == -1) {
-      process_dead = true;
-    }
-    if (pgrp_dead && process_dead) {
-      if (subprocess_dying_) {
-        LOG(INFO) << "all process were finished. monitor_pid=" << monitor_pid_;
-      } else {
-        VLOG(2) << "all processes were finished. monitor_pid=" << monitor_pid_;
+      // monitor changed the status.
+      CHECK(WIFEXITED(status))
+          << "unexpected waitpid status:"
+          << " status=" << status << " monitor_pid=" << monitor_pid_
+          << " prog_pid=" << prog_pid_;
+
+      if (WEXITSTATUS(status) != 0) {
+        LOG(ERROR) << "monitor process died with non-zero exit status,"
+                   << " exit_status=" << WEXITSTATUS(status)
+                   << " status=" << status;
       }
     } else {
-      if (is_signaled_) {
-        LOG_IF(INFO, !subprocess_dying_)
-            << "process may still exist "
-            << " need_kill=" << need_kill << " pgrp_dead=" << pgrp_dead
-            << " process_dead=" << process_dead
-            << " monitor_pid=" << monitor_pid_;
-        subprocess_dying_ = true;
-      } else {
-        LOG_EVERY_N(INFO, 100)
-            << "process is running "
-            << " monitor_pid=" << monitor_pid_ << " need_kill=" << need_kill
-            << " pgrp_dead=" << pgrp_dead << " process_dead=" << process_dead
-            << " is_signaled=" << is_signaled_;
-      }
-      return false;
+      LOG(FATAL) << "Unexpected waitpid is returned: r=" << r
+                 << " status=" << status << " wait_policy=" << wait_policy
+                 << " monitor_pid=" << monitor_pid_
+                 << " prog_pid=" << prog_pid_;
     }
   }
+
   string sig_source;
   if (exit_fd_.valid()) {
     SubprocExit se;
@@ -439,25 +430,31 @@ bool SpawnerPosix::Wait(WaitPolicy wait_policy) {
                      << se.last_errno << "]";
       }
       process_mem_kb_ = se.ru.ru_maxrss;
-      signal_ = se.signal;
-      sig_source = "subproc_exit";
-      if (signal_ != 0 && signal_ != SIGINT && signal_ != SIGTERM) {
-        LOG(WARNING) << "subproc was terminated unexpectedly."
+      if (se.status != kInvalidProcessStatus) {
+        if (WIFSIGNALED(se.status)) {
+          signal_ = WTERMSIG(se.status);
+          sig_source = "wtermsig";
+          status_ = 1;
+        } else if (WIFEXITED(se.status)) {
+          sig_source = "subproc_exit";
+          status_ = WEXITSTATUS(se.status);
+        } else {
+          LOG(FATAL) << "Unexpected status from subproc."
                      << " monitor_pid=" << monitor_pid_
-                     << " signal=" << signal_;
-      } else if (signal_ == 0 && WIFSIGNALED(status)) {
-        signal_ = WTERMSIG(status);
-        sig_source = "wtermsig";
-        if (signal_ != 0 && signal_ != SIGINT && signal_ != SIGTERM) {
-          LOG(WARNING) << "mediator process was terminated unexpectedly."
-                       << " monitor_pid=" << monitor_pid_
-                       << " signal=" << signal_;
+                     << " prog_pid=" << prog_pid_ << " status=" << se.status;
         }
+      }
+
+      if (signal_ != 0 && signal_ != sent_sig_) {
+        LOG(ERROR) << "subproc was terminated unexpectedly."
+                   << " monitor_pid=" << monitor_pid_
+                   << " sent_sig=" << sent_sig_ << " prog_pid=" << prog_pid_
+                   << " signal=" << signal_ << " status=" << se.status;
       }
     } else {
       sig_source = "exit_fd_read_err";
-      PLOG(WARNING) << "read SubprocExit:"
-                    << " monitor_pid=" << monitor_pid_ << " ret=" << r;
+      PLOG(ERROR) << "read SubprocExit:"
+                  << " monitor_pid=" << monitor_pid_ << " ret=" << r;
     }
   } else {
     sig_source = "exit_fd_invalid";
@@ -471,7 +468,8 @@ bool SpawnerPosix::Wait(WaitPolicy wait_policy) {
       << " prog_pid=" << prog_pid_ << " " << sig_timer_.GetInMs() << "msec ago,"
       << " terminated by signal=" << signal_ << " from " << sig_source
       << " exit=" << status_;
-  return true;
+  monitor_pid_ = Spawner::kInvalidPid;
+  return ProcessStatus::EXITED;
 }
 
 bool SpawnerPosix::IsChildRunning() const {

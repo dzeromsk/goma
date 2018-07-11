@@ -1,0 +1,39 @@
+# Copyright 2018 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+static_library("clang_tidy_compiler_info_builder_lib") {
+  sources = [
+    "clang_tidy_compiler_info_builder.cc",
+    "clang_tidy_compiler_info_builder.h",
+  ]
+
+  public_deps = [
+    "//client:compiler_info_lib",
+    "//lib",
+  ]
+
+  deps = [
+    "//client:common",
+    "//client:ioutil_lib",
+    "//client/cxx:clang_compiler_info_builder_helper_lib",
+    "//client/cxx:cxx_compiler_info_builder_lib",
+    "//lib:clang_tidy_specific",
+    "//third_party:glog",
+    "//third_party/abseil",
+  ]
+
+  public_configs = [ "//client:client_config" ]
+}
+
+executable("clang_tidy_compiler_info_builder_unittest") {
+  testonly = true
+  sources = [
+    "clang_tidy_compiler_info_builder_unittest.cc",
+  ]
+  deps = [
+    ":clang_tidy_compiler_info_builder_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:goma_test_lib",
+  ]
+}

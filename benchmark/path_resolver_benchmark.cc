@@ -25,6 +25,8 @@ void BM_ResolvePath(benchmark::State& state) {
         "WebGLVertexArrayObjectOES.cpp");
 #endif
   }
+
+  state.SetItemsProcessed(state.iterations());
 }
 
 BENCHMARK(BM_ResolvePath);

@@ -17,10 +17,12 @@
 #include "absl/memory/memory.h"
 #include "compiler_flags.h"
 #include "compiler_info.h"
+#include "cxx/cxx_compiler_info.h"
+#include "cxx/include_processor/include_cache.h"
 #include "file.h"
 #include "file_helper.h"
 #include "gcc_flags.h"
-#include "include_cache.h"
+#include "java/java_compiler_info.h"
 #include "java_flags.h"
 #include "path.h"
 #include "path_resolver.h"
@@ -158,6 +160,7 @@ class DepsCacheTest : public testing::Test {
     cid->set_found(true);
     cid->set_name(name);
     cid->set_hash(name + "1234567890");
+    cid->mutable_cxx();
     return cid;
   }
 
@@ -1037,7 +1040,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     args.push_back("test.c");
 
     GCCFlags flags(args, "/tmp");
-    CompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
     identifier = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier.has_value());
   }
@@ -1050,7 +1053,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     args.push_back("test.c");
 
     GCCFlags flags(args, "/tmp");
-    CompilerInfo info(CreateBarebornCompilerInfo(bare_clang));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo(bare_clang));
     identifier_compiler = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier_compiler.has_value());
   }
@@ -1063,7 +1066,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     args.push_back("test2.c");  // this differs.
 
     GCCFlags flags(args, "/tmp");
-    CompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
     identifier_filename = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier_filename.has_value());
   }
@@ -1077,7 +1080,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     args.push_back("test.c");
 
     GCCFlags flags(args, "/tmp");
-    CompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
     identifier_include = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier_include.has_value());
   }
@@ -1091,7 +1094,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     args.push_back("test.c");
 
     GCCFlags flags(args, "/tmp");
-    CompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
     identifier_systeminclude = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier_systeminclude.has_value());
   }
@@ -1105,7 +1108,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     args.push_back("test.c");
 
     GCCFlags flags(args, "/tmp");
-    CompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
     identifier_macro = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier_macro.has_value());
   }
@@ -1118,7 +1121,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierGcc) {
     args.push_back("test.c");
 
     GCCFlags flags(args, "/tmp2");  // this differs.
-    CompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo(bare_gcc));
     identifier_cwd = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier_cwd.has_value());
   }
@@ -1142,7 +1145,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierVC) {
     args.push_back("test.c");
 
     VCFlags flags(args, "C:\\tmp");
-    CompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
     identifier = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier.has_value());
   }
@@ -1155,7 +1158,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierVC) {
     args.push_back("test2.c");  // this differs.
 
     VCFlags flags(args, "C:\\tmp");
-    CompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
     identifier_filename = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier_filename.has_value());
   }
@@ -1169,7 +1172,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierVC) {
     args.push_back("test.c");
 
     VCFlags flags(args, "C:\\tmp");
-    CompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
     identifier_include = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier_include.has_value());
   }
@@ -1182,7 +1185,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierVC) {
     args.push_back("test.c");
 
     VCFlags flags(args, "C:\\tmp");
-    CompilerInfo info(CreateBarebornCompilerInfo("C:\\clang-cl.exe"));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo("C:\\clang-cl.exe"));
     identifier_compiler = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier_compiler.has_value());
   }
@@ -1196,7 +1199,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierVC) {
     args.push_back("test.c");
 
     VCFlags flags(args, "C:\\tmp");
-    CompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
     identifier_macro = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier_macro.has_value());
   }
@@ -1209,7 +1212,7 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierVC) {
     args.push_back("test.c");
 
     VCFlags flags(args, "C:\\tmp2");  // this differs.
-    CompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
+    CxxCompilerInfo info(CreateBarebornCompilerInfo(bare_cl));
     identifier_cwd = MakeDepsIdentifier(info, flags);
     EXPECT_TRUE(identifier_cwd.has_value());
   }
@@ -1232,7 +1235,8 @@ TEST_F(DepsCacheTest, MakeDepsIdentifierJavac) {
   JavacFlags flags(args, "/tmp");
   std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
   cid->set_found(true);
-  CompilerInfo info(std::move(cid));
+  cid->mutable_javac();
+  JavacCompilerInfo info(std::move(cid));
   DepsCache::Identifier identifier = MakeDepsIdentifier(info, flags);
   EXPECT_FALSE(identifier.has_value());
 }

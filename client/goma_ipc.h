@@ -69,6 +69,8 @@ class GomaIPC {
     size_t resp_size;
     double req_send_time;
     double resp_recv_time;
+
+    string DebugString() const;
   };
 
   class ChanFactory {

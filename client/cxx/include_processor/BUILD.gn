@@ -1,0 +1,392 @@
+# Copyright 2018 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+static_library("directive_filter_lib") {
+  sources = [
+    "directive_filter.cc",
+    "directive_filter.h",
+  ]
+  public_deps = [
+    "//client:content_lib",
+    "//third_party:gtest_prod",
+  ]
+  deps = [
+    "//third_party:glog",
+    "//third_party/abseil",
+  ]
+  public_configs = [ "//client:client_config" ]
+}
+
+# cpp_directive_lib contains cpp directive. This should not depend on
+# CompilerInfo.
+static_library("cpp_directive_lib") {
+  sources = [
+    "cpp_directive.cc",
+    "cpp_directive.h",
+    "cpp_directive_optimizer.cc",
+    "cpp_directive_optimizer.h",
+    "cpp_directive_parser.cc",
+    "cpp_directive_parser.h",
+    "cpp_input.h",
+    "cpp_input_stream.cc",
+    "cpp_input_stream.h",
+    "cpp_macro.cc",
+    "cpp_macro.h",
+    "cpp_token.cc",
+    "cpp_token.h",
+    "cpp_tokenizer.cc",
+    "cpp_tokenizer.h",
+    "include_guard_detector.cc",
+    "include_guard_detector.h",
+    "include_item.h",
+    "predefined_macros.h",
+  ]
+
+  deps = [
+    ":directive_filter_lib",
+    "//client:common",
+    "//client:content_lib",
+  ]
+
+  public_deps = [
+    "//base",
+    "//third_party:glog",
+    "//third_party:gtest_prod",
+    "//third_party/abseil",
+  ]
+
+  # Do not depend on compiler-type specific libraries, and compiler_info.
+  assert_no_deps = [
+    "//lib:compiler_flag_type_specific",
+    "//lib:gcc_specific",
+    "//lib:vc_specific",
+    "//lib:clang_tidy_specific",
+    "//lib:java_specific",
+    "//client:compiler_info_lib",
+  ]
+}
+
+# cpp_parser_lib contains c pre processor evaluation code. This can depend on
+# CompilerInfo.
+static_library("cpp_parser_lib") {
+  sources = [
+    "cpp_integer_constant_evaluator.cc",
+    "cpp_integer_constant_evaluator.h",
+    "cpp_macro_env.h",
+    "cpp_macro_expander.cc",
+    "cpp_macro_expander.h",
+    "cpp_macro_expander_cbv.cc",
+    "cpp_macro_expander_cbv.h",
+    "cpp_macro_expander_naive.cc",
+    "cpp_macro_expander_naive.h",
+    "cpp_macro_set.h",
+    "cpp_parser.cc",
+    "cpp_parser.h",
+    "include_file_finder.cc",
+    "include_file_finder.h",
+    "include_file_utils.cc",
+    "include_file_utils.h",
+  ]
+  deps = [
+    ":directive_filter_lib",
+    "//client:compiler_proxy_base_lib",
+    "//client:content_lib",
+    "//client:file_stat_cache_lib",
+    "//client:ioutil_lib",
+  ]
+  public_deps = [
+    ":cpp_directive_lib",
+    "//client:common",
+    "//client:compiler_info_lib",
+    "//client/cxx:cxx_compiler_info_lib",
+    "//third_party/tensorflow_core:flat_map",
+  ]
+  public_configs = [ "//client:client_config" ]
+}
+
+static_library("cpp_include_processor_lib") {
+  sources = [
+    "cpp_include_processor.cc",
+    "cpp_include_processor.h",
+  ]
+  deps = [
+    ":directive_filter_lib",
+    ":include_cache_lib",
+    "//client:compiler_proxy_base_lib",
+    "//client:content_lib",
+    "//client:file_stat_cache_lib",
+    "//client:ioutil_lib",
+    "//lib:gcc_specific",
+    "//lib:vc_specific",
+  ]
+  public_deps = [
+    ":cpp_parser_lib",
+    "//client/cxx:cxx_compiler_info_lib",
+    "//lib:clang_tidy_specific",
+  ]
+}
+
+static_library("include_cache_lib") {
+  sources = [
+    "include_cache.cc",
+    "include_cache.h",
+  ]
+
+  deps = [
+    ":cpp_directive_lib",
+    ":directive_filter_lib",
+    "//client:common",
+    "//client:compiler_proxy_base_lib",
+    "//client:content_lib",
+    "//lib:goma_stats_proto",
+  ]
+
+  public_deps = [
+    "//third_party/abseil",
+  ]
+}
+
+executable("cpp_parser") {
+  sources = [
+    "cpp_parser_main.cc",
+  ]
+  include_dirs = [ "." ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:ioutil_lib",
+  ]
+}
+
+executable("directive_filter") {
+  sources = [
+    "directive_filter_main.cc",
+  ]
+  include_dirs = [ "." ]
+  deps = [
+    ":directive_filter_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+  ]
+}
+
+executable("cpp_include_processor") {
+  sources = [
+    "cpp_include_processor_main.cc",
+  ]
+  include_dirs = [ "." ]
+  deps = [
+    ":cpp_include_processor_lib",
+    ":include_cache_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:ioutil_lib",
+    "//client:scoped_tmp_file_lib",
+    "//client:subprocess_lib",
+    "//client/cxx:cxx_compiler_info_builder_lib",
+    "//lib:compiler_flag_type_specific",
+  ]
+}
+
+executable("cpp_directive_parser") {
+  sources = [
+    "cpp_directive_parser_main.cc",
+  ]
+  include_dirs = [ "." ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+  ]
+}
+
+executable("cpp_macro_expander_unittest") {
+  testonly = true
+  sources = [
+    "cpp_macro_expander_unittest.cc",
+  ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:content_lib",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("cpp_macro_expander_cbv_unittest") {
+  testonly = true
+  sources = [
+    "cpp_macro_expander_cbv_unittest.cc",
+  ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("cpp_macro_expander_naive_unittest") {
+  testonly = true
+  sources = [
+    "cpp_macro_expander_naive_unittest.cc",
+  ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("cpp_macro_set_unittest") {
+  testonly = true
+  sources = [
+    "cpp_macro_set_unittest.cc",
+  ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("cpp_macro_unittest") {
+  testonly = true
+  sources = [
+    "cpp_macro_unittest.cc",
+  ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("cpp_parser_unittest") {
+  testonly = true
+  sources = [
+    "cpp_parser_unittest.cc",
+  ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:goma_test_lib",
+    "//client/cxx:cxx_compiler_info_lib",
+  ]
+}
+
+executable("cpp_tokenizer_unittest") {
+  testonly = true
+  sources = [
+    "cpp_tokenizer_unittest.cc",
+  ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("cpp_directive_optimizer_unittest") {
+  testonly = true
+  sources = [
+    "cpp_directive_optimizer_unittest.cc",
+  ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("cpp_directive_parser_unittest") {
+  testonly = true
+  sources = [
+    "cpp_directive_parser_unittest.cc",
+  ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("directive_filter_unittest") {
+  testonly = true
+  sources = [
+    "directive_filter_unittest.cc",
+  ]
+  deps = [
+    ":directive_filter_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("include_file_utils_unittest") {
+  testonly = true
+  sources = [
+    "include_file_utils_unittest.cc",
+  ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("include_guard_detector_unittest") {
+  testonly = true
+  sources = [
+    "include_guard_detector_unittest.cc",
+  ]
+  deps = [
+    ":cpp_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("cpp_include_processor_unittest") {
+  testonly = true
+  sources = [
+    "cpp_include_processor_unittest.cc",
+  ]
+  deps = [
+    ":cpp_include_processor_lib",
+    ":include_cache_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_info_lib",
+    "//client:compiler_proxy_lib",
+    "//client:file_stat_cache_lib",
+    "//client:goma_test_lib",
+    "//client:ioutil_lib",
+    "//client:subprocess_lib",
+    "//client/cxx:cxx_compiler_info_builder_lib",
+    "//lib:compiler_flag_type_specific",
+  ]
+}
+
+executable("include_cache_unittest") {
+  testonly = true
+  sources = [
+    "include_cache_unittest.cc",
+  ]
+  deps = [
+    ":include_cache_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:content_lib",
+    "//client:file_stat_cache_lib",
+    "//client:goma_test_lib",
+    "//client/cxx/include_processor:cpp_parser_lib",
+  ]
+}

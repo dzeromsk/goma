@@ -23,19 +23,21 @@
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
 #include "content.h"
-#include "directive_filter.h"
+#include "cxx/cxx_compiler_info.h"
+#include "cxx/include_processor/directive_filter.h"
+#include "cxx/include_processor/include_cache.h"
 #include "file.h"
 #include "gcc_flags.h"
 #include "goma_hash.h"
-#include "include_cache.h"
 #include "path.h"
 #include "path_resolver.h"
+#include "util.h"
+#include "vc_flags.h"
+
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/deps_cache_data.pb.h"
 #include "prototmp/goma_stats.pb.h"
 MSVC_POP_WARNING()
-#include "util.h"
-#include "vc_flags.h"
 
 using std::string;
 
@@ -580,18 +582,27 @@ bool DepsCache::SaveGomaDeps() {
 DepsCache::Identifier DepsCache::MakeDepsIdentifier(
     const CompilerInfo& compiler_info,
     const CompilerFlags& compiler_flags) {
+  // TODO: Support javac.
+  if (compiler_info.type() != CompilerInfoType::Cxx) {
+    LOG(INFO) << "Only CxxCompilerInfo is supported: type="
+              << compiler_info.type();
+    return DepsCache::Identifier();
+  }
+
+  const CxxCompilerInfo& cxxci = ToCxxCompilerInfo(compiler_info);
+
   std::stringstream ss;
 
   // TODO: Maybe we need to merge some code with IncludeProcessor
   // to enumerate what information is necessary for enumerating headers?
 
-  ss << "compiler_name=" << compiler_info.name();
-  ss << ":compiler_path=" << compiler_info.real_compiler_path();
+  ss << "compiler_name=" << cxxci.name();
+  ss << ":compiler_path=" << cxxci.real_compiler_path();
 
   // Some buildbot always copies nacl-gcc compiler to target directory.
   // In that case, FileStat is different per build. So, we'd like to use
   // compiler hash.
-  ss << ":compiler_hash=" << compiler_info.real_compiler_hash();
+  ss << ":compiler_hash=" << cxxci.real_compiler_hash();
 
   ss << ":cwd=" << compiler_flags.cwd();
 
@@ -601,23 +612,23 @@ DepsCache::Identifier DepsCache::MakeDepsIdentifier(
   }
 
   ss << ":cxx_system_include_paths=";
-  for (const auto& path : compiler_info.cxx_system_include_paths()) {
+  for (const auto& path : cxxci.cxx_system_include_paths()) {
     ss << path << ",";
   }
   ss << ":system_include_paths=";
-  for (const auto& path : compiler_info.system_include_paths()) {
+  for (const auto& path : cxxci.system_include_paths()) {
     ss << path << ",";
   }
   ss << ":system_framework_paths=";
-  for (const auto& path : compiler_info.system_framework_paths()) {
+  for (const auto& path : cxxci.system_framework_paths()) {
     ss << path << ",";
   }
-  ss << ":predefined_macros=" << compiler_info.predefined_macros();
+  ss << ":predefined_macros=" << cxxci.predefined_macros();
 
-  if (compiler_flags.type() == CompilerType::Gcc) {
+  if (compiler_flags.type() == CompilerFlagType::Gcc) {
     const GCCFlags& flags = static_cast<const GCCFlags&>(compiler_flags);
     AppendCompilerFlagsInfo(flags, &ss);
-  } else if (compiler_flags.type() == CompilerType::Clexe) {
+  } else if (compiler_flags.type() == CompilerFlagType::Clexe) {
     const VCFlags& flags = static_cast<const VCFlags&>(compiler_flags);
     AppendCompilerFlagsInfo(flags, &ss);
   } else {

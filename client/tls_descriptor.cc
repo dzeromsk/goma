@@ -13,7 +13,7 @@
 #include "compiler_specific.h"
 #include "socket_descriptor.h"
 #include "glog/logging.h"
-#include "ioutil.h"
+#include "http_util.h"
 
 namespace devtools_goma {
 

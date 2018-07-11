@@ -15,7 +15,7 @@
 
 
 #include "absl/strings/string_view.h"
-#include "compiler_type.h"
+#include "compiler_flag_type.h"
 #include "flag_parser.h"
 using std::string;
 
@@ -23,15 +23,6 @@ namespace devtools_goma {
 
 class CompilerFlags {
  public:
-  // Returns new instance of subclass of CompilerFlags based on |args|.
-  // Returns NULL if args is empty or args[0] is unsupported command.
-  static std::unique_ptr<CompilerFlags> New(const std::vector<string>& args,
-                                            const string& cwd);
-
-  // MustNew is like New but causes FATAL crash if New returns NULL.
-  static std::unique_ptr<CompilerFlags> MustNew(const std::vector<string>& args,
-                                                const string& cwd);
-
   virtual ~CompilerFlags() {}
 
   const std::vector<string>& args() const { return args_; }
@@ -56,7 +47,7 @@ class CompilerFlags {
   virtual string compiler_name() const = 0;
 
   virtual string lang() const { return lang_; }
-  virtual CompilerType type() const = 0;
+  virtual CompilerFlagType type() const = 0;
 
   // Returns true if the |env| is important for compiler_proxy running env.
   // This will be sent from gomacc to compiler_proxy.
@@ -89,8 +80,6 @@ class CompilerFlags {
   }
 
   string DebugString() const;
-
-  static string GetCompilerName(absl::string_view arg);
 
   // Expands @response_file in |args| and sets in |expand_args| and
   // |optional_input_filenames| on posix environments (for gcc/javac).

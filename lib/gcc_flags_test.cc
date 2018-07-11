@@ -13,6 +13,7 @@
 
 
 #include "absl/strings/str_cat.h"
+#include "compiler_flags_parser.h"
 #include "file.h"
 #include "file_dir.h"
 #include "file_helper.h"
@@ -230,7 +231,7 @@ TEST_F(GCCFlagsTest, Basic) {
   EXPECT_FALSE(flags.has_no_integrated_as());
   EXPECT_FALSE(flags.has_pipe());
   EXPECT_EQ("/tmp", flags.isysroot());
-  EXPECT_EQ(CompilerType::Gcc, flags.type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags.type());
 }
 
 TEST_F(GCCFlagsTest, Optimize) {
@@ -265,7 +266,7 @@ TEST_F(GCCFlagsTest, Optimize) {
   EXPECT_FALSE(flags.has_nostdinc());
   EXPECT_FALSE(flags.has_no_integrated_as());
   EXPECT_FALSE(flags.has_pipe());
-  EXPECT_EQ(CompilerType::Gcc, flags.type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags.type());
 }
 
 TEST_F(GCCFlagsTest, GxxBaseName) {
@@ -306,7 +307,7 @@ TEST_F(GCCFlagsTest, Fission) {
   EXPECT_FALSE(flags.has_nostdinc());
   EXPECT_FALSE(flags.has_no_integrated_as());
   EXPECT_FALSE(flags.has_pipe());
-  EXPECT_EQ(CompilerType::Gcc, flags.type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags.type());
 }
 
 TEST_F(GCCFlagsTest, FissionNoO) {
@@ -334,7 +335,7 @@ TEST_F(GCCFlagsTest, FissionNoO) {
   EXPECT_FALSE(flags.has_nostdinc());
   EXPECT_FALSE(flags.has_no_integrated_as());
   EXPECT_FALSE(flags.has_pipe());
-  EXPECT_EQ(CompilerType::Gcc, flags.type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags.type());
 }
 
 TEST_F(GCCFlagsTest, FissionDifferentOutput) {
@@ -364,7 +365,7 @@ TEST_F(GCCFlagsTest, FissionDifferentOutput) {
   EXPECT_FALSE(flags.has_nostdinc());
   EXPECT_FALSE(flags.has_no_integrated_as());
   EXPECT_FALSE(flags.has_pipe());
-  EXPECT_EQ(CompilerType::Gcc, flags.type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags.type());
 }
 
 TEST_F(GCCFlagsTest, FissionCompileAndLink) {
@@ -393,7 +394,7 @@ TEST_F(GCCFlagsTest, FissionCompileAndLink) {
   EXPECT_FALSE(flags.has_nostdinc());
   EXPECT_FALSE(flags.has_no_integrated_as());
   EXPECT_FALSE(flags.has_pipe());
-  EXPECT_EQ(CompilerType::Gcc, flags.type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags.type());
 }
 
 TEST_F(GCCFlagsTest, FissionJustLink) {
@@ -421,7 +422,7 @@ TEST_F(GCCFlagsTest, FissionJustLink) {
   EXPECT_FALSE(flags.has_nostdinc());
   EXPECT_FALSE(flags.has_no_integrated_as());
   EXPECT_FALSE(flags.has_pipe());
-  EXPECT_EQ(CompilerType::Gcc, flags.type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags.type());
 }
 
 TEST_F(GCCFlagsTest, ClangBaseName) {
@@ -991,13 +992,13 @@ TEST_F(GCCFlagsTest, AtFile) {
   args.push_back("@" + at_file);
 
   // The at-file doesn't exist.
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
   EXPECT_FALSE(flags->is_successful());
 
   ASSERT_TRUE(WriteStringToFile("-c -DFOO '-DBAR=\"a b\\c\"' foo.cc", at_file));
-  flags = CompilerFlags::MustNew(args, ".");
+  flags = CompilerFlagsParser::MustNew(args, ".");
   EXPECT_TRUE(flags->is_successful());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_EQ("gcc", flags->compiler_name());
   EXPECT_EQ(5U, flags->expanded_args().size());
   EXPECT_EQ("gcc", flags->expanded_args()[0]);
@@ -1013,9 +1014,9 @@ TEST_F(GCCFlagsTest, AtFile) {
 
   ASSERT_TRUE(
       WriteStringToFile(" -c -DFOO '-DBAR=\"a b\\c\"' \n foo.cc\n", at_file));
-  flags = CompilerFlags::MustNew(args, ".");
+  flags = CompilerFlagsParser::MustNew(args, ".");
   EXPECT_TRUE(flags->is_successful());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_EQ("gcc", flags->compiler_name());
   EXPECT_EQ(5U, flags->expanded_args().size());
   EXPECT_EQ("gcc", flags->expanded_args()[0]);
@@ -1366,7 +1367,8 @@ TEST_F(GCCFlagsTest, GccFlags) {
   args.push_back("gcc");
   args.push_back("-c");
   args.push_back("hello.c");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.o", flags->output_files()[0]);
@@ -1376,7 +1378,7 @@ TEST_F(GCCFlagsTest, GccFlags) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("gcc", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_EQ("/tmp", flags->cwd());
 
   const size_t env_array_length = 10;
@@ -1431,7 +1433,8 @@ TEST_F(GCCFlagsTest, ClangImportantEnv) {
   args.push_back("gcc");
   args.push_back("-c");
   args.push_back("hello.c");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
 
   const size_t env_array_length = 9;
   const char** env =
@@ -1499,7 +1502,8 @@ TEST_F(GCCFlagsTest, IsImportantEnvGCC) {
   std::vector<string> args {
     "gcc", "-c", "hello.c",
   };
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
 
   for (const auto& tc : kTestCases) {
     ASSERT_TRUE(!tc.server_important || tc.client_important);
@@ -1545,7 +1549,7 @@ TEST_F(GCCFlagsTest, ChromeLinuxCompileFlag) {
   args.push_back("out/Release/obj.target/chrome/chrome/app/chrome_main.o");
   args.push_back("chrome/app/chrome_main.cc");
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "/usr/local/src"));
+      CompilerFlagsParser::MustNew(args, "/usr/local/src"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(2U, flags->output_files().size());
@@ -1560,7 +1564,7 @@ TEST_F(GCCFlagsTest, ChromeLinuxCompileFlag) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("g++", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_EQ("/usr/local/src", flags->cwd());
 
   devtools_goma::GCCFlags* gcc_flags = static_cast<devtools_goma::GCCFlags*>(
@@ -1634,7 +1638,7 @@ TEST_F(GCCFlagsTest, ChromeLinuxLinkFlag) {
   args.push_back("-lX11");
   args.push_back("-ldl");
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "/usr/local/src"));
+      CompilerFlagsParser::MustNew(args, "/usr/local/src"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
@@ -1649,7 +1653,7 @@ TEST_F(GCCFlagsTest, ChromeLinuxLinkFlag) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("g++", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_EQ("/usr/local/src", flags->cwd());
 
   devtools_goma::GCCFlags* gcc_flags = static_cast<devtools_goma::GCCFlags*>(
@@ -1703,7 +1707,7 @@ TEST_F(GCCFlagsTest, ChromeLinuxClangCompileFlag) {
   args.push_back("out/Release/obj.target/chrome/chrome/app/chrome_main.o");
   args.push_back("chrome/app/chrome_main.cc");
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "/usr/local/src"));
+      CompilerFlagsParser::MustNew(args, "/usr/local/src"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(2U, flags->output_files().size());
@@ -1718,7 +1722,7 @@ TEST_F(GCCFlagsTest, ChromeLinuxClangCompileFlag) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang++", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_EQ("/usr/local/src", flags->cwd());
 
   devtools_goma::GCCFlags* gcc_flags = static_cast<devtools_goma::GCCFlags*>(
@@ -1794,7 +1798,7 @@ TEST_F(GCCFlagsTest, ChromeLinuxClangLinkFlag) {
   args.push_back("-lX11");
   args.push_back("-ldl");
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "/usr/local/src"));
+      CompilerFlagsParser::MustNew(args, "/usr/local/src"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
@@ -1809,7 +1813,7 @@ TEST_F(GCCFlagsTest, ChromeLinuxClangLinkFlag) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang++", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_EQ("/usr/local/src", flags->cwd());
 
   devtools_goma::GCCFlags* gcc_flags = static_cast<devtools_goma::GCCFlags*>(
@@ -1860,7 +1864,7 @@ TEST_F(GCCFlagsTest, ChromeASANCompileFlag) {
                  "base/message_loop_unittest.o base/message_loop_unittest.cc");
 
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "/usr/src/chrome/src"));
+      CompilerFlagsParser::MustNew(args, "/usr/src/chrome/src"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(2U, flags->output_files().size());
@@ -1881,7 +1885,7 @@ TEST_F(GCCFlagsTest, ChromeASANCompileFlag) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang++", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_EQ("/usr/src/chrome/src", flags->cwd());
 
   devtools_goma::GCCFlags* gcc_flags = static_cast<devtools_goma::GCCFlags*>(
@@ -1946,7 +1950,7 @@ TEST_F(GCCFlagsTest, ChromeTSANCompileFlag) {
                  "base_unittests.message_loop_unittest.o");
 
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "/usr/src/chrome/src/out/Release"));
+      CompilerFlagsParser::MustNew(args, "/usr/src/chrome/src/out/Release"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(2U, flags->output_files().size());
@@ -1964,7 +1968,7 @@ TEST_F(GCCFlagsTest, ChromeTSANCompileFlag) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang++", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_EQ("/usr/src/chrome/src/out/Release", flags->cwd());
 
   devtools_goma::GCCFlags* gcc_flags = static_cast<devtools_goma::GCCFlags*>(
@@ -2029,7 +2033,7 @@ TEST_F(GCCFlagsTest, ChromeTSANCompileFlagWithSanitizeBlacklist) {
                  "base_unittests.message_loop_unittest.o");
 
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "/usr/src/chrome/src/out/Release"));
+      CompilerFlagsParser::MustNew(args, "/usr/src/chrome/src/out/Release"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(2U, flags->output_files().size());
@@ -2047,7 +2051,7 @@ TEST_F(GCCFlagsTest, ChromeTSANCompileFlagWithSanitizeBlacklist) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang++", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_EQ("/usr/src/chrome/src/out/Release", flags->cwd());
 
   devtools_goma::GCCFlags* gcc_flags = static_cast<devtools_goma::GCCFlags*>(
@@ -2104,7 +2108,7 @@ TEST_F(GCCFlagsTest, ChromeMacDylibLink) {
                  "content/browser/mac/closure_blocks_leopard_compat.o");
 
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "/usr/src/chrome/src"));
+      CompilerFlagsParser::MustNew(args, "/usr/src/chrome/src"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
@@ -2118,7 +2122,7 @@ TEST_F(GCCFlagsTest, ChromeMacDylibLink) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang++", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_EQ("/usr/src/chrome/src", flags->cwd());
 
   devtools_goma::GCCFlags* gcc_flags = static_cast<devtools_goma::GCCFlags*>(
@@ -2148,7 +2152,7 @@ TEST_F(GCCFlagsTest, ChromeMacInstallName) {
                  "Versions/A/Content Shell Framework");
 
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "/usr/src/chrome/src"));
+      CompilerFlagsParser::MustNew(args, "/usr/src/chrome/src"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_TRUE(flags->is_successful());
@@ -2165,7 +2169,7 @@ TEST_F(GCCFlagsTest, ChromeMacRpath) {
                  "Content Shell Helper");
 
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "/usr/src/chrome/src"));
+      CompilerFlagsParser::MustNew(args, "/usr/src/chrome/src"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_TRUE(flags->is_successful());
@@ -2189,7 +2193,7 @@ TEST_F(GCCFlagsTest, ChromeMacLinkerRpath) {
   args.push_back("obj/base/x64/base_unittests");
 
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "/usr/src/chrome/src"));
+      CompilerFlagsParser::MustNew(args, "/usr/src/chrome/src"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_TRUE(flags->is_successful());
@@ -2321,7 +2325,8 @@ TEST_F(GCCFlagsTest, bazel) {
     "-o", "path/to/foo.o",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(2U, flags->output_files().size());
   ExpectHasElement(flags->output_files(), "path/to/foo.o");
@@ -2332,7 +2337,7 @@ TEST_F(GCCFlagsTest, bazel) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
 
   devtools_goma::GCCFlags* gcc_flags = static_cast<devtools_goma::GCCFlags*>(
       flags.get());
@@ -2357,7 +2362,8 @@ TEST_F(GCCFlagsTest, NoCanonicalPrefixes) {
     "-o", "path/to/foo.o",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   ExpectHasElement(flags->output_files(), "path/to/foo.o");
@@ -2367,7 +2373,7 @@ TEST_F(GCCFlagsTest, NoCanonicalPrefixes) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
 
   devtools_goma::GCCFlags* gcc_flags = static_cast<devtools_goma::GCCFlags*>(
       flags.get());
@@ -2386,10 +2392,11 @@ TEST_F(GCCFlagsTest, FProfileSampleUse) {
     "-o", "path/to/foo.o",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   EXPECT_EQ(args, flags->args());
 
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang", flags->compiler_base_name());
@@ -2417,9 +2424,10 @@ TEST_F(GCCFlagsTest, FThinltoIndex) {
     "-fthinlto-index=./dir/file.o.chrome.thinlto.bc",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   EXPECT_EQ(args, flags->args());
-  EXPECT_EQ(CompilerType::Gcc, flags->type());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
 
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());

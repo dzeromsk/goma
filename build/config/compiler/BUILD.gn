@@ -9,6 +9,18 @@ if (os == "win") {
 
 import("//build/toolchain/toolchain.gni")
 
+# default_include_dirs ---------------------------------------------------------
+#
+# This is a separate config so that third_party code (which would not use the
+# source root and might have conflicting versions of some headers) can remove
+# this and specify their own include paths.
+config("default_include_dirs") {
+  include_dirs = [
+    "//",
+    root_gen_dir,
+  ]
+}
+
 config("compiler") {
   asmflags = []
   cflags = []
@@ -202,6 +214,12 @@ config("tsan") {
   cflags = [ "-fsanitize=thread" ]
   ldflags = [ "-fsanitize=thread" ]
   defines = [ "THREAD_SANITIZER" ]
+}
+
+config("msan") {
+  cflags = [ "-fsanitize=memory" ]
+  ldflags = [ "-fsanitize=memory" ]
+  defines = [ "MEMORY_SANITIZER" ]
 }
 
 config("cpu_profiling") {

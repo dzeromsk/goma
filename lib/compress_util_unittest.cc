@@ -6,8 +6,10 @@
 
 #include "compress_util.h"
 
+#include <memory>
 #include <vector>
 
+#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 #include "glog/logging.h"
 #include "gtest/gtest.h"
@@ -16,6 +18,7 @@
 # include "prototmp/goma_log.pb.h"
 using google::protobuf::io::ArrayInputStream;
 using google::protobuf::io::ConcatenatingInputStream;
+using google::protobuf::io::StringOutputStream;
 #endif  // ENABLE_LZMA
 using std::string;
 
@@ -38,6 +41,34 @@ static string MakeCompressibleTestString() {
     ss << i << " ";
   }
   return ss.str();
+}
+
+// Helper function for compression test.
+static bool ReadAllLZMAStream(absl::string_view input, lzma_stream* lzma,
+                              string* output) {
+  lzma->next_in = reinterpret_cast<const uint8_t*>(input.data());
+  lzma->avail_in = input.size();
+  char buf[4096];
+  lzma->next_out = reinterpret_cast<uint8_t*>(buf);
+  lzma->avail_out = sizeof(buf);
+  bool is_success = true;
+  for (;;) {
+    lzma_ret r = lzma_code(lzma, LZMA_FINISH);
+    output->append(buf, sizeof(buf) - lzma->avail_out);
+    if (r == LZMA_OK) {
+      lzma->next_out = reinterpret_cast<uint8_t*>(buf);
+      lzma->avail_out = sizeof(buf);
+    } else {
+      if (LZMA_STREAM_END != r) {
+        LOG(DFATAL) << r;
+        is_success = false;
+        break;
+      }
+      break;
+    }
+  }
+  lzma_end(lzma);
+  return is_success;
 }
 
 class LZMATest : public testing::Test {
@@ -76,6 +107,12 @@ class LZMATest : public testing::Test {
     LOG(INFO) << "orig size=" << pbuf.size();
     Compress(pbuf, 9, LZMA_CHECK_CRC64, out);
   }
+
+  void ConvertToUncompressed(const string& in, devtools_goma::ExecLog* elog) {
+    string pbuf;
+    Uncompress(in, &pbuf);
+    elog->ParseFromString(pbuf);
+  }
 };
 
 TEST_F(LZMATest, CompressAndDecompress) {
@@ -90,8 +127,8 @@ TEST_F(LZMATest, LZMAInputStreamTestSimple) {
   string compressed;
   ConvertToCompressed(elog, &compressed);
 
-  ArrayInputStream input(&compressed[0], compressed.size());
-  LZMAInputStream lzma_input(&input);
+  LZMAInputStream lzma_input(
+      absl::make_unique<ArrayInputStream>(&compressed[0], compressed.size()));
   devtools_goma::ExecLog alog;
   EXPECT_TRUE(alog.ParseFromZeroCopyStream(&lzma_input));
   EXPECT_EQ(alog.username(), "goma-user");
@@ -108,8 +145,8 @@ TEST_F(LZMATest, LZMAInputStreamTestChunked) {
   std::vector<ZeroCopyInputStream*> inputs;
   inputs.push_back(new ArrayInputStream(&former[0], former.size()));
   inputs.push_back(new ArrayInputStream(&latter[0], latter.size()));
-  ConcatenatingInputStream concatenated(&inputs[0], inputs.size());
-  LZMAInputStream lzma_input(&concatenated);
+  LZMAInputStream lzma_input(
+      absl::make_unique<ConcatenatingInputStream>(&inputs[0], inputs.size()));
   devtools_goma::ExecLog alog;
   EXPECT_TRUE(alog.ParseFromZeroCopyStream(&lzma_input));
   LOG(INFO) << "lzma_input2. byte count: " << lzma_input.ByteCount();
@@ -117,6 +154,51 @@ TEST_F(LZMATest, LZMAInputStreamTestChunked) {
   for (auto* input : inputs) {
     delete input;
   }
+}
+
+TEST_F(LZMATest, LZMAOutputStreamTestSimple) {
+  devtools_goma::ExecLog elog;
+  elog.set_username("goma-user");
+  string compressed;
+  LZMAOutputStream lzstream(absl::make_unique<StringOutputStream>(&compressed));
+  elog.SerializeToZeroCopyStream(&lzstream);
+  EXPECT_TRUE(lzstream.Close());
+
+  devtools_goma::ExecLog alog;
+  ConvertToUncompressed(compressed, &alog);
+  EXPECT_EQ(alog.username(), "goma-user");
+}
+
+TEST_F(LZMATest, LZMAOutputStreamTestWithOption) {
+  devtools_goma::ExecLog elog;
+  elog.set_username("goma-user");
+  string compressed;
+  LZMAOutputStream::Options options;
+  options.preset = 1;
+  options.check = LZMA_CHECK_NONE;
+  options.buffer_size = 1;
+  LZMAOutputStream lzstream(absl::make_unique<StringOutputStream>(&compressed));
+  elog.SerializeToZeroCopyStream(&lzstream);
+  EXPECT_TRUE(lzstream.Close());
+
+  devtools_goma::ExecLog alog;
+  ConvertToUncompressed(compressed, &alog);
+  EXPECT_EQ(alog.username(), "goma-user");
+}
+
+TEST_F(LZMATest, LZMAStreamEndToEnd) {
+  devtools_goma::ExecLog elog;
+  elog.set_username("goma-user");
+  string compressed;
+  LZMAOutputStream lzstream(absl::make_unique<StringOutputStream>(&compressed));
+  elog.SerializeToZeroCopyStream(&lzstream);
+  EXPECT_TRUE(lzstream.Close());
+
+  LZMAInputStream lzma_input(
+      absl::make_unique<ArrayInputStream>(&compressed[0], compressed.size()));
+  devtools_goma::ExecLog alog;
+  EXPECT_TRUE(alog.ParseFromZeroCopyStream(&lzma_input));
+  EXPECT_EQ(alog.username(), "goma-user");
 }
 
 #endif

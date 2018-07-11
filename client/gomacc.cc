@@ -30,6 +30,7 @@
 #include "basictypes.h"
 #include "breakpad.h"
 #include "compiler_flags.h"
+#include "compiler_flags_parser.h"
 #include "compiler_specific.h"
 #include "cros_util.h"
 #include "env_flags.h"
@@ -71,6 +72,7 @@ GOMA_DECLARE_bool(FAN_OUT_EXEC_REQ);
 #endif
 
 using devtools_goma::CompilerFlags;
+using devtools_goma::CompilerFlagsParser;
 using devtools_goma::FileStat;
 using devtools_goma::GomaIPC;
 using devtools_goma::GetMyDirectory;
@@ -357,7 +359,7 @@ int main(int argc, char* argv[], const char* envp[]) {
 #endif
   }
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::New(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::New(args, "."));
   if (flags.get() == nullptr) {
     // TODO: handle all commands in compiler_proxy
     if (local_command_path.empty()) {

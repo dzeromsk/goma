@@ -11,11 +11,12 @@
 #include <string>
 #include <vector>
 
+#include "cxx/cxx_compiler_info.h"
+
 using std::string;
 
 namespace devtools_goma {
 
-class CompilerInfo;
 
 class CompilerFlagsUtil {
  public:
@@ -37,7 +38,7 @@ class CompilerFlagsUtil {
   static std::vector<string> MakeWeakRelative(
       const std::vector<string>& args,
       const string& cwd,
-      const CompilerInfo& compiler_info);
+      const CxxCompilerInfo& compiler_info);
 };
 
 }  // namespace devtools_goma

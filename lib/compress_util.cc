@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 #include "glog/logging.h"
 
@@ -47,35 +48,9 @@ EncodingType GetEncodingFromHeader(const char* header) {
 }
 
 #ifdef ENABLE_LZMA
-bool ReadAllLZMAStream(absl::string_view input, lzma_stream* lzma,
-                       string* output) {
-  lzma->next_in = reinterpret_cast<const uint8_t*>(input.data());
-  lzma->avail_in = input.size();
-  char buf[4096];
-  lzma->next_out = reinterpret_cast<uint8_t*>(buf);
-  lzma->avail_out = sizeof(buf);
-  bool is_success = true;
-  for (;;) {
-    lzma_ret r = lzma_code(lzma, LZMA_FINISH);
-    output->append(buf, sizeof(buf) - lzma->avail_out);
-    if (r == LZMA_OK) {
-      lzma->next_out = reinterpret_cast<uint8_t*>(buf);
-      lzma->avail_out = sizeof(buf);
-    } else {
-      if (LZMA_STREAM_END != r) {
-        LOG(DFATAL) << r;
-        is_success = false;
-        break;
-      }
-      break;
-    }
-  }
-  lzma_end(lzma);
-  return is_success;
-}
-
-LZMAInputStream::LZMAInputStream(ZeroCopyInputStream* sub_stream)
-    : sub_stream_(sub_stream),
+LZMAInputStream::LZMAInputStream(
+    std::unique_ptr<ZeroCopyInputStream> sub_stream)
+    : sub_stream_(std::move(sub_stream)),
       lzma_context_(LZMA_STREAM_INIT), lzma_error_(LZMA_OK),
       byte_count_(0) {
   lzma_context_.next_in = nullptr;
@@ -201,6 +176,130 @@ int64 LZMAInputStream::ByteCount() const {
   return ret;
 }
 
+LZMAOutputStream::Options::Options()
+    : preset(LZMA_PRESET_DEFAULT), check(LZMA_CHECK_CRC64),
+      buffer_size(kDefaultLZMAOutputBufSize) {
+}
+
+LZMAOutputStream::LZMAOutputStream(
+    std::unique_ptr<ZeroCopyOutputStream> sub_stream) {
+  LZMAOutputStream::Options options;
+  Init(std::move(sub_stream), options);
+}
+
+LZMAOutputStream::LZMAOutputStream(
+    std::unique_ptr<ZeroCopyOutputStream> sub_stream, const Options& options) {
+  Init(std::move(sub_stream), options);
+}
+
+LZMAOutputStream::~LZMAOutputStream() {
+  lzma_end(&lzma_context_);
+}
+
+void LZMAOutputStream::Init(std::unique_ptr<ZeroCopyOutputStream> sub_stream,
+                            const Options& options) {
+  sub_stream_ = std::move(sub_stream);
+  sub_data_ = nullptr;
+  sub_data_size_ = 0;
+
+  input_buffer_length_ = options.buffer_size;
+  CHECK_GT(input_buffer_length_, 0);
+  input_buffer_ = absl::make_unique<uint8_t[]>(input_buffer_length_);
+  CHECK(input_buffer_ != nullptr);
+
+  // LZMA_STREAM_INIT clears all fields, we do not need to clear them by
+  // ourselves.
+  lzma_context_ = LZMA_STREAM_INIT;
+  lzma_error_ = lzma_easy_encoder(&lzma_context_,
+                                  options.preset,
+                                  options.check);
+}
+
+lzma_ret LZMAOutputStream::Encode(lzma_action action) {
+  lzma_ret error = LZMA_OK;
+  do {
+    if (sub_data_ == nullptr || lzma_context_.avail_out == 0) {
+      bool ok = sub_stream_->Next(&sub_data_, &sub_data_size_);
+      if (!ok) {
+        sub_data_ = nullptr;
+        sub_data_size_ = 0;
+        return LZMA_BUF_ERROR;
+      }
+      CHECK_GT(sub_data_size_, 0);
+      lzma_context_.next_out = static_cast<uint8_t*>(sub_data_);
+      lzma_context_.avail_out = sub_data_size_;
+    }
+    error = lzma_code(&lzma_context_, action);
+  } while (error == LZMA_OK && lzma_context_.avail_out == 0);
+  if (action == LZMA_FULL_FLUSH || action == LZMA_FINISH) {
+    // Notify lower layer of data.
+    sub_stream_->BackUp(lzma_context_.avail_out);
+    // We don't own the buffer any more.
+    sub_data_ = nullptr;
+    sub_data_size_ = 0;
+  }
+  return error;
+}
+
+bool LZMAOutputStream::Next(void** data, int* size) {
+  if (lzma_error_ != LZMA_OK && lzma_error_ == LZMA_BUF_ERROR) {
+    return false;
+  }
+  if (lzma_context_.avail_in != 0) {
+    lzma_error_ = Encode(LZMA_RUN);
+    if (lzma_error_ != LZMA_OK) {
+      return false;
+    }
+  }
+  if (lzma_context_.avail_in == 0) {
+    VLOG(3) << "updated avail_in"
+            << " size=" << input_buffer_length_;
+    lzma_context_.next_in = input_buffer_.get();
+    lzma_context_.avail_in = input_buffer_length_;
+    *data = input_buffer_.get();
+    *size = input_buffer_length_;
+  } else {
+    LOG(DFATAL) << "lzma left bytes unconsumed";
+  }
+
+  return true;
+}
+
+void LZMAOutputStream::BackUp(int count) {
+  CHECK_GE(lzma_context_.avail_in, count);
+  lzma_context_.avail_in -= count;
+}
+
+int64 LZMAOutputStream::ByteCount() const {
+  return lzma_context_.total_in + lzma_context_.avail_in;
+}
+
+bool LZMAOutputStream::Close() {
+  if (lzma_error_ != LZMA_OK && lzma_error_ != LZMA_BUF_ERROR) {
+    return false;
+  }
+  do {
+    lzma_error_ = Encode(LZMA_FINISH);
+  } while (lzma_error_ == LZMA_OK);
+  return lzma_error_ == LZMA_STREAM_END;
+}
+
 #endif
+
+InflateInputStream::InflateInputStream(
+    std::unique_ptr<ZeroCopyInputStream> sub_stream)
+    : zlib_content_(std::move(sub_stream)) {
+  // see chrome/src/net/filter/gzip_source_stream.cc InsertZlibHeader.
+  static const char kZlibHeader[2] = {0x78, 0x01};
+  zlib_header_ = absl::make_unique<ArrayInputStream>(kZlibHeader, 2);
+  sub_stream_inputs_.push_back(zlib_header_.get());
+  sub_stream_inputs_.push_back(zlib_content_.get());
+  sub_stream_ =
+      absl::make_unique<ConcatenatingInputStream>(
+          &sub_stream_inputs_[0], sub_stream_inputs_.size());
+
+  zlib_stream_ = absl::make_unique<GzipInputStream>(
+      sub_stream_.get(), GzipInputStream::ZLIB);
+}
 
 }  // namespace devtools_goma

@@ -63,6 +63,8 @@ void BM_FastLock(benchmark::State& state) {
 
     CHECK_EQ(loop_num * thread_num, x);
   }
+
+  state.SetItemsProcessed(state.iterations());
 }
 
 BENCHMARK(BM_FastLock);
@@ -94,6 +96,8 @@ void BM_NormalLock(benchmark::State& state) {
 
     CHECK_EQ(loop_num * thread_num, x);
   }
+
+  state.SetItemsProcessed(state.iterations());
 }
 
 BENCHMARK(BM_NormalLock);

@@ -87,4 +87,26 @@ TEST_F(JarParserTest, ReadManifest) {
   EXPECT_EQ(foo_jar, jar_files[1]);
 }
 
+TEST_F(JarParserTest, GetJarFilesShouldIgnoreNonExistJarFiles) {
+  // Note that ReadManifest.jar has foo.jar and bar.jar in MANIFEST class-path.
+  // However, we won't create bar.jar to confirm GetJarFiles ignores bar.jar.
+  const string& base_jar = CopyArchiveIntoTestDir("ReadManifest", "base.jar");
+  const string& foo_jar = CopyArchiveIntoTestDir("Basic", "foo.jar");
+
+  std::vector<string> input_jar_files {
+    // Also, there are no "nonexist.jar".  GetJarFiles should also ignore
+    // nonexist.jar.
+    file::JoinPath(tmpdir_util_->tmpdir(), "nonexist.jar"),
+    base_jar,
+  };
+  JarParser parser;
+  std::set<string> jar_files_set;
+  parser.GetJarFiles(input_jar_files, tmpdir_util_->tmpdir(), &jar_files_set);
+  std::set<string> expected_jar_files_set {
+    base_jar,
+    foo_jar,
+  };
+  EXPECT_EQ(expected_jar_files_set, jar_files_set);
+}
+
 }  // namespace devtools_goma

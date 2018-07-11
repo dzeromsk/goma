@@ -8,6 +8,7 @@ declare_args() {
   is_debug = true
   is_asan = false
   is_tsan = false
+  is_msan = false
 
   # Enables incremental link. Currently effective only on Win.
   use_incremental_link = false
@@ -29,6 +30,9 @@ declare_args() {
 
   enable_lzma = false
   cpu_arch = host_cpu
+
+  # Enabling this generates symbol files and sha256 hash.
+  is_official_build = true
 }
 
 declare_args() {
@@ -49,7 +53,7 @@ if (current_os == "") {
 }
 
 is_posix = os == "mac" || os == "linux"
-using_sanitizer = is_asan || is_tsan
+using_sanitizer = is_asan || is_tsan || is_msan
 
 # Since we cannot read result of perftools if we create position independent
 # executable (PIE), let me disable hardening if profiling options are set.
@@ -59,6 +63,8 @@ default_compiler_configs = [
   "//build/config/compiler:compiler",
   "//build/config/compiler:no_rtti",
   "//build/config/compiler:goma_code",
+  "//build/config/compiler:default_include_dirs",
+  "//build/config/coverage:default_coverage",
   "//build/config:default_libs",
   "//build/config/sanitizers:default_sanitizer_flags",
 ]
@@ -97,6 +103,10 @@ if (is_asan) {
 }
 if (is_tsan) {
   default_compiler_configs += [ "//build/config/compiler:tsan" ]
+  is_clang = true
+}
+if (is_msan) {
+  default_compiler_configs += [ "//build/config/compiler:msan" ]
   is_clang = true
 }
 if (enable_lzma) {

@@ -20,7 +20,7 @@ class JavacFlags : public CompilerFlags {
 
   string compiler_name() const override { return "javac"; }
 
-  CompilerType type() const override { return CompilerType::Javac; }
+  CompilerFlagType type() const override { return CompilerFlagType::Javac; }
 
   bool IsClientImportantEnv(const char* env) const override { return false; }
   bool IsServerImportantEnv(const char* env) const override { return false; }
@@ -46,7 +46,7 @@ class JavaFlags : public CompilerFlags {
 
   string compiler_name() const override { return "java"; }
 
-  CompilerType type() const override { return CompilerType::Java; }
+  CompilerFlagType type() const override { return CompilerFlagType::Java; }
 
   bool IsClientImportantEnv(const char* env) const override { return false; }
   bool IsServerImportantEnv(const char* env) const override { return false; }

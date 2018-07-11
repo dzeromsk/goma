@@ -605,7 +605,7 @@ class HttpResponse : public HttpClient::Response {
   HttpResponse();
   ~HttpResponse() override;
 
-  absl::string_view Body() const;
+  const string& Body() const;
 
  protected:
   // ParseBody parses body.

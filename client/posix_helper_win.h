@@ -21,6 +21,8 @@
 
 namespace devtools_goma {
 
+// access will return -1 if path is dir, different from posix.
+// TODO: fix this?
 int access(const char* path, int amode);
 
 char *mkdtemp(char *tmpl);

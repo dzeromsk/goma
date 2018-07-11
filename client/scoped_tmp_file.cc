@@ -15,6 +15,7 @@
 #include "glog/logging.h"
 #include "mypath.h"
 #include "path.h"
+#include "rand_util.h"
 #include "scoped_fd.h"
 
 #ifdef _WIN32
@@ -50,7 +51,7 @@ ScopedTmpFile::ScopedTmpFile(const string& prefix, const string& extension) {
   for (int retry = 0; retry < kNumRetries; ++retry) {
     std::ostringstream ss;
     ss << prefix;
-    ss << rand();
+    ss << GetRandomAlphanumeric(10);
     ss << extension;
     filename_ = file::JoinPath(GetGomaTmpDir(), ss.str());
     fd_.reset(ScopedFd::CreateExclusive(filename_, 0600));

@@ -20,17 +20,14 @@ def CheckChangeLintsClean(input_api, output_api, source_file_filter=None):
   """
   _RE_IS_TEST = input_api.re.compile(r'.*tests?.(cc|h)$')
   result = []
-  import cpplint
-  # pylint: disable=W0212
-  cpplint._cpplint_state.ResetErrorCounts()
-
-  getHeaderGuardCPPVariable = cpplint.GetHeaderGuardCPPVariable
+  input_api.cpplint._cpplint_state.ResetErrorCounts()
+  getHeaderGuardCPPVariable = input_api.cpplint.GetHeaderGuardCPPVariable
   def gomaGetHeaderGuardCPPVariable(filename):
     return 'DEVTOOLS_GOMA_' + getHeaderGuardCPPVariable(filename)
-  cpplint.GetHeaderGuardCPPVariable = gomaGetHeaderGuardCPPVariable
+  input_api.cpplint.GetHeaderGuardCPPVariable = gomaGetHeaderGuardCPPVariable
 
-  cpplint._SetFilters('-build/include,-build/include_order,'
-                      '-readability/casting,-runtime/int')
+  input_api.cpplint._SetFilters('-build/include,-build/include_order,'
+                                '-readability/casting,-runtime/int')
   files = [f.AbsoluteLocalPath() for f in
            input_api.AffectedSourceFiles(source_file_filter)]
   for file_name in files:
@@ -38,9 +35,9 @@ def CheckChangeLintsClean(input_api, output_api, source_file_filter=None):
       level = 5
     else:
       level = 4
-    cpplint.ProcessFile(file_name, level)
+    input_api.cpplint.ProcessFile(file_name, level)
 
-  if cpplint._cpplint_state.error_count > 0:
+  if input_api.cpplint._cpplint_state.error_count > 0:
     if input_api.is_committing:
       res_type = output_api.PresubmitError
     else:
@@ -48,6 +45,32 @@ def CheckChangeLintsClean(input_api, output_api, source_file_filter=None):
     result = [res_type('Changelist failed cpplint.py check.')]
 
   return result
+
+
+def CheckGNGenChecked(input_api, output_api):
+  if not input_api.AffectedFiles(
+      file_filter=lambda x: x.LocalPath().endswith('.c') or
+                            x.LocalPath().endswith('.cc') or
+                            x.LocalPath().endswith('.gn') or
+                            x.LocalPath().endswith('.gni') or
+                            x.LocalPath().endswith('.h') or
+                            x.LocalPath().endswith('.typemap')):
+    return []
+
+  warnings = []
+  with input_api.gclient_utils.temporary_directory() as tmpdir:
+    gn_path = input_api.os_path.join(
+        input_api.gclient_utils.GetBuildtoolsPlatformBinaryPath(),
+        'gn' + input_api.gclient_utils.GetExeSuffix())
+    cmd = [gn_path, 'gen', '--root=%s' % input_api.change.RepositoryRoot(),
+           '--check', tmpdir]
+    proc = input_api.subprocess.Popen(
+        cmd, stdout=input_api.subprocess.PIPE, stderr=input_api.subprocess.PIPE)
+    proc.wait()
+    if proc.returncode != 0:
+      warnings.append(output_api.PresubmitPromptWarning(
+          'Failed to run "gn gen --check".'))
+  return warnings
 
 
 def CheckChangeOnUpload(input_api, output_api):
@@ -80,6 +103,7 @@ def CheckChangeOnUpload(input_api, output_api):
                   r'out[\\/].*',
                   r'build[\\/](Debug|Release).*'))
   results += input_api.canned_checks.CheckGNFormatted(input_api, output_api)
+  results += CheckGNGenChecked(input_api, output_api)
   return results
 
 

@@ -5,7 +5,7 @@
 #include <string>
 
 #include "benchmark/benchmark.h"
-#include "cpp_parser.h"
+#include "cxx/include_processor/cpp_parser.h"
 #include "glog/logging.h"
 
 using std::string;
@@ -31,6 +31,8 @@ void BM_ReadObjectMacro(benchmark::State& state) {
     cpp_parser.AddStringInput(directives, "a.cc");
     CHECK(cpp_parser.ProcessDirectives());
   }
+
+  state.SetItemsProcessed(state.iterations());
 }
 
 BENCHMARK(BM_ReadObjectMacro)->RangeMultiplier(2)->Range(1, 16);
@@ -54,6 +56,8 @@ void BM_ReadFunctionMacro(benchmark::State& state) {
     cpp_parser.AddStringInput(directives, "a.cc");
     CHECK(cpp_parser.ProcessDirectives());
   }
+
+  state.SetItemsProcessed(state.iterations());
 }
 
 BENCHMARK(BM_ReadFunctionMacro)->RangeMultiplier(2)->Range(1, 32);

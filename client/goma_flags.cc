@@ -448,10 +448,6 @@ GOMA_DEFINE_int32(DEPS_CACHE_TABLE_THRESHOLD, 70000,
 GOMA_DEFINE_int32(DEPS_CACHE_MAX_PROTO_SIZE_IN_MB, 128,
                   "The max size of DepsCache file. If the file size exceeds "
                   "this limit, loading will fail. Unit is MB.");
-// TODO: Remove this after ENABLE_MACRO_CACHE is removed from bots.
-// b/77247879
-GOMA_DEFINE_bool(ENABLE_MACRO_CACHE, false,
-                 "(deprecated)");
 GOMA_DEFINE_string(COMPILER_INFO_CACHE_FILE, "compiler_info_cache",
                    "Filename of compiler_info's cache. "
                    "If empty, compiler_info cache file is not used. "
@@ -519,7 +515,8 @@ GOMA_DEFINE_bool(COMPILER_PROXY_ENABLE_CRASH_DUMP, false,
 
 // We keep this flag to provide future workarounds for subproc bugs.
 //
-// clang left crash report scripts and data if killed.
+// clang left crash report scripts and data if only clang's child process
+// (not driver process) killed.
 // https://bugs.chromium.org/p/chromium/issues/detail?id=668548
 // goma failed to kill nacl compiler process? goma killed wrapper script,
 // but it failed to wait for nacl compiler?
@@ -530,7 +527,7 @@ GOMA_DEFINE_bool(COMPILER_PROXY_ENABLE_CRASH_DUMP, false,
 // jam@ confirmed the recent MacOSX does not affected by this bug.
 // https://code.google.com/p/chromium/issues/detail?id=387934
 GOMA_DEFINE_bool(DONT_KILL_SUBPROCESS,
-                 true,
+                 false,
                  "Don't kill subprocess.");
 
 #ifdef _WIN32
@@ -603,9 +600,6 @@ GOMA_DEFINE_bool(FAIL_FOR_UNSUPPORTED_COMPILER_FLAGS, true,
                  "compile fails if a compile request is rejected by goma "
                  "server and the rejection reason is the compile request "
                  "contains unsupoprted compiler flags.");
-
-// TODO: remove this in the future release.
-GOMA_DEFINE_string(CLANG_NECESSARY_BLACKLIST_FILES, "", "(deprecated");
 
 GOMA_DEFINE_int32(MAX_ACTIVE_FAIL_FALLBACK_TASKS, -1,
                   "Compiler_proxy will make compile error without trying local "

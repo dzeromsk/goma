@@ -2,9 +2,12 @@ abseil/src
 benchmark/src
 boringssl/src
 cctz/src
+depot_tools
 glog
 gtest
+jinja2
 jsoncpp/source
+markupsafe
 protobuf/protobuf
 xz
 zlib

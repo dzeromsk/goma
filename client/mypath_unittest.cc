@@ -12,7 +12,9 @@
 #include "filesystem.h"
 #include "ioutil.h"
 #include "path.h"
+#include "path_resolver.h"
 #include "util.h"
+#include "unittest_util.h"
 
 TEST(Util, GetUsername) {
   const string& user = devtools_goma::GetUsername();
@@ -37,6 +39,20 @@ TEST(Util, GetUsernameWithoutEnv) {
   EXPECT_NE(username, "unknown");
   EXPECT_EQ(username, devtools_goma::GetUsername());
   EXPECT_EQ(username, devtools_goma::GetUsernameEnv());
+}
+
+TEST(Util, GetMyPathname) {
+  // Make sure that GetMyPathname is resolved.
+  EXPECT_EQ(
+      devtools_goma::PathResolver::ResolvePath(devtools_goma::GetMyPathname()),
+      devtools_goma::GetMyPathname());
+}
+
+TEST(Util, GetMyDirectory) {
+  // Make sure that GetMyDirectory is resolved.
+  EXPECT_EQ(
+      devtools_goma::PathResolver::ResolvePath(devtools_goma::GetMyDirectory()),
+      devtools_goma::GetMyDirectory());
 }
 
 #if GTEST_HAS_DEATH_TEST
@@ -76,3 +92,71 @@ TEST(Util, CheckTempDiretoryBadPermission) {
 }
 #endif
 #endif  // GTEST_HAS_DEATH_TEST
+
+#ifndef _WIN32
+TEST(Util, GetCurrentDirNameOrDie) {
+  using devtools_goma::GetCurrentDirNameOrDie;
+  // NOTE: '1' in setenv mean overwrite.
+
+  std::unique_ptr<char, decltype(&free)> original_env_pwd(nullptr, free);
+  std::unique_ptr<char, decltype(&free)> original_cwd(nullptr, free);
+  {
+    const char* pwd = getenv("PWD");
+    if (pwd != nullptr) {
+      original_env_pwd.reset(strdup(pwd));
+    }
+
+    // Assuming we can obtain the resolved absolute cwd.
+    original_cwd.reset(getcwd(nullptr, 0));
+    ASSERT_NE(original_cwd.get(), nullptr);
+  }
+
+  // When PWD is invalid place, it should not be used.
+  {
+    ASSERT_EQ(setenv("PWD", "/somewhere/invalid/place", 1), 0);
+    std::string cwd = GetCurrentDirNameOrDie();
+    EXPECT_NE("/somewhere/invalid/place", cwd);
+    // should be the same as getcwd.
+    EXPECT_EQ(original_cwd.get(), cwd);
+  }
+
+  // When PWD is /proc/self/cwd, it should not be used.
+  // Since the meaning of /proc/self/cwd is different among gomacc and
+  // compiler_proxy, we should not use /proc/self/cwd.
+  {
+    ASSERT_EQ(setenv("PWD", "/proc/self/cwd", 1), 0);
+    std::string cwd = GetCurrentDirNameOrDie();
+    EXPECT_NE("/proc/self/cwd", cwd);
+    // should be the same as getcwd.
+    EXPECT_EQ(original_cwd.get(), cwd);
+  }
+
+  {
+    devtools_goma::TmpdirUtil tmpdir("ioutil_tmpdir");
+    // TODO: TmpdirUtil does not make cwd. why?
+    tmpdir.MkdirForPath(tmpdir.cwd(), true);
+
+    // Make a symlink $tmpdir_cwd/cwd --> real cwd.
+    std::string newpath = tmpdir.FullPath("cwd");
+    ASSERT_EQ(symlink(original_cwd.get(), newpath.c_str()), 0)
+        << "from=" << newpath << " to=" << original_cwd.get();
+    ASSERT_NE(original_cwd.get(), newpath);
+
+    // set PWD as new path. Then the new path should be taken.
+    setenv("PWD", newpath.c_str(), 1);
+    std::string cwd = GetCurrentDirNameOrDie();
+    EXPECT_EQ(cwd, newpath);
+
+    // Need to unlink symlink. Otherwise. TmpdirUtil will recursively delete
+    // the current working directory. Awful (>x<).
+    ASSERT_EQ(unlink(newpath.c_str()), 0);
+  }
+
+  // ----- tear down the test for the safe.
+  if (original_env_pwd) {
+    setenv("PWD", original_cwd.get(), 1);
+  } else {
+    unsetenv("PWD");
+  }
+}
+#endif

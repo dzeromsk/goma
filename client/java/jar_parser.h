@@ -19,6 +19,8 @@ class JarParser {
   JarParser();
 
   // Reads |input_jar_files| and push required jar files into |jar_files|.
+  // Note that we will not add non-existing .jar files to |jar_files| even
+  // if they are listed in class path of MANIFEST files.
   // TODO: We may want to return additional class pathes as well.
   void GetJarFiles(const std::vector<string>& input_jar_files,
                    const string& cwd,

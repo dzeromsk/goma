@@ -9,7 +9,7 @@ executable("cpp_parser_benchmark") {
   ]
   deps = [
     "//build/config:exe_and_shlib_deps",
-    "//client:cpp_parser_lib",
+    "//client/cxx/include_processor:cpp_parser_lib",
     "//third_party:glog",
     "//third_party/benchmark",
   ]
@@ -22,7 +22,7 @@ executable("cpp_macro_expander_benchmark") {
   ]
   deps = [
     "//build/config:exe_and_shlib_deps",
-    "//client:cpp_parser_lib",
+    "//client/cxx/include_processor:cpp_parser_lib",
     "//third_party:glog",
     "//third_party/benchmark",
   ]

@@ -2,6 +2,17 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+static_library("java_compiler_info_lib") {
+  sources = [
+    "java_compiler_info.cc",
+    "java_compiler_info.h",
+  ]
+
+  public_deps = [
+    "//client:compiler_info_lib",
+  ]
+}
+
 static_library("jarfile_reader_lib") {
   sources = [
     "jarfile_reader.cc",
@@ -10,12 +21,10 @@ static_library("jarfile_reader_lib") {
 
   public_deps = [
     "//lib",
-  ]
-
-  public_configs = [
-    "//client:client_config",
     "//third_party:gtest_prod",
   ]
+
+  public_configs = [ "//client:client_config" ]
 }
 
 static_library("jar_parser_lib") {
@@ -27,6 +36,26 @@ static_library("jar_parser_lib") {
     "//client:common",
     "//third_party:glog",
     "//third_party:minizip",
+  ]
+
+  public_configs = [ "//client:client_config" ]
+}
+
+static_library("java_compiler_info_builder_lib") {
+  sources = [
+    "java_compiler_info_builder.cc",
+    "java_compiler_info_builder.h",
+  ]
+  deps = [
+    "//client:common",
+    "//client:ioutil_lib",
+    "//lib:java_specific",
+    "//third_party:glog",
+    "//third_party/abseil",
+  ]
+  public_deps = [
+    "//client:compiler_info_lib",
+    "//lib",
   ]
 
   public_configs = [ "//client:client_config" ]
@@ -55,7 +84,9 @@ executable("jar_parser_unittest") {
     ":jar_parser_lib",
     "//base",
     "//build/config:exe_and_shlib_deps",
+    "//client:common",
     "//client:goma_test_lib",
+    "//client:ioutil_lib",
     "//third_party:glog",
   ]
 }
@@ -68,6 +99,19 @@ executable("jarfile_reader_unittest") {
   deps = [
     "//build/config:exe_and_shlib_deps",
     "//client:compiler_proxy_lib",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("java_compiler_info_builder_unittest") {
+  testonly = true
+  sources = [
+    "java_compiler_info_builder_unittest.cc",
+  ]
+  deps = [
+    ":java_compiler_info_builder_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_info_lib",
     "//client:goma_test_lib",
   ]
 }

@@ -39,20 +39,20 @@ namespace {
 class Fetcher {
  public:
   // Takes ownership of HttpClient.
-  explicit Fetcher(std::unique_ptr<HttpClient> client)
-      : client_(std::move(client)) {
+  Fetcher(string method, std::unique_ptr<HttpClient> client)
+      : method_(std::move(method)),
+        client_(std::move(client)) {
   }
   ~Fetcher() {
   }
 
   void Run() {
-    client_->InitHttpRequest(&req_, "GET", "");
-    req_.AddHeader("Connection", "close");
-
     int backoff_ms = client_->options().min_retry_backoff_ms;
 
-    std::string err_messages;
+    string err_messages;
     for (int i = 0; i < FLAGS_FETCH_RETRY; ++i) {
+      client_->InitHttpRequest(&req_, method_, "");
+      req_.AddHeader("Connection", "close");
       err_messages += status_.err_message + " ";
       status_ = HttpClient::Status();
       client_->Do(&req_, &resp_, &status_);
@@ -60,7 +60,8 @@ class Fetcher {
         if (status_.http_return_code >= 400 && status_.http_return_code < 500) {
           break;
         }
-        if (status_.http_return_code == 200) {
+        if (status_.http_return_code == 200 ||
+            status_.http_return_code == 204) {
           break;
         }
       }
@@ -90,6 +91,7 @@ class Fetcher {
   }
 
  private:
+  const string method_;
   std::unique_ptr<HttpClient> client_;
   devtools_goma::HttpRequest req_;
   devtools_goma::HttpResponse resp_;
@@ -98,17 +100,33 @@ class Fetcher {
   DISALLOW_COPY_AND_ASSIGN(Fetcher);
 };
 
+void usage(const char* prog) {
+  std::cerr << "usage: " << prog << "[--head] url" << std::endl;
+}
+
 }  // anonymous namespace
 
 int main(int argc, char* argv[], const char* envp[]) {
   devtools_goma::Init(argc, argv, envp);
   if (argc < 2) {
-    std::cerr << "usage: " << argv[0] << " url" << std::endl;
+    usage(argv[0]);
     exit(1);
   }
   // Initialize rand.
   srand(static_cast<unsigned int>(time(nullptr)));
   devtools_goma::InitLogging(argv[0]);
+
+  absl::string_view method = "GET";
+  absl::string_view url = argv[1];
+  if (strcmp(argv[1], "--head") == 0) {
+    method = "HEAD";
+    if (argc < 3) {
+      usage(argv[0]);
+      exit(1);
+    }
+    url = argv[2];
+  }
+
 #ifdef _WIN32
   WinsockHelper wsa;
 #endif
@@ -121,18 +139,19 @@ int main(int argc, char* argv[], const char* envp[]) {
   // clear extra params, like "?win".
   // request paths should be passed via argv[1].
   http_options.extra_params = "";
-  if (!http_options.InitFromURL(argv[1])) {
+  if (!http_options.InitFromURL(url)) {
     LOG(FATAL) << "Failed to initialize HttpClient::Options from URL:"
-               << argv[1];
+               << url;
   }
-  LOG(INFO) << "fetch " << argv[1];
+  LOG(INFO) << "fetch " << method << " " << url;
 
   std::unique_ptr<HttpClient> client(new HttpClient(
       HttpClient::NewSocketFactoryFromOptions(http_options),
       HttpClient::NewTLSEngineFactoryFromOptions(http_options),
       http_options, &wm));
 
-  std::unique_ptr<Fetcher> fetcher(new Fetcher(std::move(client)));
+  std::unique_ptr<Fetcher> fetcher(
+      new Fetcher(string(method), std::move(client)));
 
   std::unique_ptr<WorkerThreadRunner> fetch(
       new WorkerThreadRunner(
@@ -149,7 +168,7 @@ int main(int argc, char* argv[], const char* envp[]) {
   devtools_goma::FlushLogFiles();
   const HttpClient::Status& status = fetcher->status();
   if (status.err) {
-    LOG(ERROR) << "fetch " << argv[1]
+    LOG(ERROR) << "fetch " << method << " " << url
                << " err=" << status.err
                << " " << status.err_message
                << " " << http_options.DebugString();
@@ -157,8 +176,8 @@ int main(int argc, char* argv[], const char* envp[]) {
   }
   LOG(INFO) << status.DebugString();
   absl::string_view body = fetcher->resp().Body();
-  if (status.http_return_code != 200) {
-    LOG(ERROR) << "fetch " << argv[1]
+  if (status.http_return_code != 200 && status.http_return_code != 204) {
+    LOG(ERROR) << "fetch " << method << " " << url
                << " http code:" << status.http_return_code
                << " " << status.err_message;
     LOG(INFO) << body;

@@ -15,6 +15,9 @@
 
 #include "absl/memory/memory.h"
 #include "compiler_flags.h"
+#include "compiler_flags_parser.h"
+#include "compiler_info_builder_facade.h"
+#include "compiler_info_state.h"
 #include "path.h"
 #include "subprocess.h"
 #include "unittest_util.h"
@@ -106,7 +109,7 @@ class CompilerInfoCacheTest : public testing::Test {
     // error message has been changed only if new CompilerInfo data is stored.
     CompilerInfoBuilder::OverrideError(
         "error message by SetFailedAt()", failed_at,
-        state->compiler_info_.data_.get());
+        state->compiler_info_->data_.get());
   }
 
   void SetValidator(CompilerInfoCache::CompilerInfoValidator* validator) {
@@ -140,7 +143,8 @@ class CompilerInfoCacheTest : public testing::Test {
 TEST_F(CompilerInfoCacheTest, Lookup) {
   std::vector<string> args;
   args.push_back("/usr/bin/gcc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::New(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   std::vector<string> key_env;
 
   CompilerInfoCache::Key key(CompilerInfoCache::CreateKey(
@@ -151,6 +155,7 @@ TEST_F(CompilerInfoCacheTest, Lookup) {
   // get valid compiler info.
   std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
   cid->set_found(true);
+  cid->mutable_cxx();
 
   cis.reset(cache_->Store(key, std::move(cid)));
   EXPECT_EQ(2, cis.get()->refcnt());  // caller & in cache
@@ -178,8 +183,10 @@ TEST_F(CompilerInfoCacheTest, CompilerInfoCacheKeyRelative) {
   std::vector<string> args {"./clang"};
   std::vector<string> key_env;
 
-  std::unique_ptr<CompilerFlags> flags1(CompilerFlags::New(args, "/dir1"));
-  std::unique_ptr<CompilerFlags> flags2(CompilerFlags::New(args, "/dir2"));
+  std::unique_ptr<CompilerFlags> flags1(
+      CompilerFlagsParser::MustNew(args, "/dir1"));
+  std::unique_ptr<CompilerFlags> flags2(
+      CompilerFlagsParser::MustNew(args, "/dir2"));
 
   CompilerInfoCache::Key key1(CompilerInfoCache::CreateKey(
       *flags1, "./clang", key_env));
@@ -197,8 +204,10 @@ TEST_F(CompilerInfoCacheTest, CompilerInfoCacheKeyAbsolute) {
   std::vector<string> args {"/usr/bin/clang"};
   std::vector<string> key_env;
 
-  std::unique_ptr<CompilerFlags> flags1(CompilerFlags::New(args, "/dir1"));
-  std::unique_ptr<CompilerFlags> flags2(CompilerFlags::New(args, "/dir2"));
+  std::unique_ptr<CompilerFlags> flags1(
+      CompilerFlagsParser::MustNew(args, "/dir1"));
+  std::unique_ptr<CompilerFlags> flags2(
+      CompilerFlagsParser::MustNew(args, "/dir2"));
 
   CompilerInfoCache::Key key1(CompilerInfoCache::CreateKey(
       *flags1, "/usr/bin/clang", key_env));
@@ -218,7 +227,8 @@ TEST_F(CompilerInfoCacheTest, CompilerInfoCacheKeyAbsolute) {
 TEST_F(CompilerInfoCacheTest, DupStore) {
   std::vector<string> args;
   args.push_back("/usr/bin/gcc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::New(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   std::vector<string> key_env;
 
   CompilerInfoCache::Key key(CompilerInfoCache::CreateKey(
@@ -231,6 +241,7 @@ TEST_F(CompilerInfoCacheTest, DupStore) {
   std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
   cid->set_last_used_at(now);
   cid->set_found(true);
+  cid->mutable_cxx();
 
   cis.reset(cache_->Store(key, std::move(cid)));
   EXPECT_EQ(2, cis.get()->refcnt());  // caller & in cache
@@ -253,7 +264,7 @@ TEST_F(CompilerInfoCacheTest, DupStore) {
 
   // different compiler_info_key;
   args.push_back("-fPIC");
-  flags = CompilerFlags::New(args, "/tmp");
+  flags = CompilerFlagsParser::MustNew(args, "/tmp");
 
   CompilerInfoCache::Key key2(CompilerInfoCache::CreateKey(
       *flags, "/usr/bin/gcc", key_env));
@@ -270,6 +281,7 @@ TEST_F(CompilerInfoCacheTest, DupStore) {
   cid = absl::make_unique<CompilerInfoData>();
   cid->set_last_used_at(now);
   cid->set_found(true);
+  cid->mutable_cxx();
 
   cis.reset(cache_->Store(key2, std::move(cid)));
   EXPECT_EQ(3, cis.get()->refcnt());  // caller & in cache (for key and key2).
@@ -286,6 +298,7 @@ TEST_F(CompilerInfoCacheTest, DupStore) {
   cid->set_last_used_at(now);
   cid->set_name("gcc");
   cid->set_found(true);
+  cid->mutable_cxx();
 
   cis.reset(cache_->Store(key2, std::move(cid)));
   EXPECT_EQ(2, cis.get()->refcnt());  // caller & in cache (for key2).
@@ -308,7 +321,8 @@ TEST_F(CompilerInfoCacheTest, NegativeCache) {
 
   std::vector<string> args;
   args.push_back(compiler_path);
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::New(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   std::vector<string> key_env;
 
   CompilerInfoCache::Key key(CompilerInfoCache::CreateKey(
@@ -321,6 +335,7 @@ TEST_F(CompilerInfoCacheTest, NegativeCache) {
   // get error compiler info
   std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
   cid->set_found(true);
+  cid->mutable_cxx();
   CompilerInfoBuilder::AddErrorMessage("invalid gcc", cid.get());
 
   cis.reset(cache_->Store(key, std::move(cid)));
@@ -355,6 +370,7 @@ TEST_F(CompilerInfoCacheTest, NegativeCache) {
   // get compiler info again, and update.
   std::unique_ptr<CompilerInfoData> cid2(new CompilerInfoData);
   cid2->set_found(true);
+  cid2->mutable_cxx();
   CompilerInfoBuilder::AddErrorMessage("invalid gcc", cid2.get());
 
   cis2.reset(cache_->Store(key, std::move(cid2)));
@@ -369,7 +385,8 @@ TEST_F(CompilerInfoCacheTest, MissingCompilerCache) {
 
   std::vector<string> args;
   args.push_back(compiler_path);
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::New(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   std::vector<string> key_env;
 
   CompilerInfoCache::Key key(CompilerInfoCache::CreateKey(
@@ -380,6 +397,7 @@ TEST_F(CompilerInfoCacheTest, MissingCompilerCache) {
   EXPECT_TRUE(cis.get() == nullptr);
 
   std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
+  cid->mutable_cxx();
   CompilerInfoBuilder::AddErrorMessage("Couldn't open local compiler file",
                                        cid.get());
   cis.reset(cache_->Store(key, std::move(cid)));
@@ -415,6 +433,7 @@ TEST_F(CompilerInfoCacheTest, MissingCompilerCache) {
 
   // get compiler info again, and update.
   std::unique_ptr<CompilerInfoData> cid2(new CompilerInfoData);
+  cid2->mutable_cxx();
   CompilerInfoBuilder::AddErrorMessage("Couldn't open local compiler file",
                                        cid2.get());
   cis2.reset(cache_->Store(key, std::move(cid2)));
@@ -438,6 +457,7 @@ TEST_F(CompilerInfoCacheTest, Marshal) {
   cid->set_name("gcc");
   cid->set_lang("c");
   cid->set_found(true);
+  cid->mutable_cxx();
   const string hash1 = HashKey(*cid.get());
 
   ASSERT_TRUE(file::IsAbsolutePath(key.local_compiler_path));
@@ -450,6 +470,7 @@ TEST_F(CompilerInfoCacheTest, Marshal) {
   cid->set_name("gcc");
   cid->set_lang("c");
   cid->set_found(true);
+  cid->mutable_cxx();
   EXPECT_EQ(hash1, HashKey(*cid.get()));
   ASSERT_TRUE(file::IsAbsolutePath(key.local_compiler_path));
   const string key2 = key.ToString(
@@ -463,6 +484,7 @@ TEST_F(CompilerInfoCacheTest, Marshal) {
   cid->set_name("g++");
   cid->set_lang("c++");
   cid->set_found(true);
+  cid->mutable_cxx();
   const string hash3 = HashKey(*cid.get());
   EXPECT_NE(hash1, hash3);
   ASSERT_TRUE(file::IsAbsolutePath(key.local_compiler_path));
@@ -478,6 +500,7 @@ TEST_F(CompilerInfoCacheTest, Marshal) {
   cid->set_name("clang");
   cid->set_lang("c");
   cid->set_found(true);
+  cid->mutable_cxx();
   const string hash4 = HashKey(*cid.get());
   EXPECT_NE(hash1, hash4);
   EXPECT_NE(hash3, hash4);
@@ -542,6 +565,7 @@ TEST_F(CompilerInfoCacheTest, Unmarshal) {
   data->set_name("gcc");
   data->set_lang("c");
   data->set_found(true);
+  data->mutable_cxx();
 
   entry = table.add_compiler_info_data();
   entry->add_keys("/usr/bin/g++ -O2 @");
@@ -549,6 +573,7 @@ TEST_F(CompilerInfoCacheTest, Unmarshal) {
   data->set_name("g++");
   data->set_lang("c++");
   data->set_found(true);
+  data->mutable_cxx();
 
   EXPECT_TRUE(Unmarshal(table));
 
@@ -610,7 +635,8 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
 
   std::vector<string> args;
   args.push_back("/usr/bin/gcc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::New(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   std::vector<string> key_env;
 
   CompilerInfoCache::Key key(CompilerInfoCache::CreateKey(
@@ -621,7 +647,7 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
   std::vector<string> old_args;
   old_args.push_back("/usr/bin/oldgcc");
   std::unique_ptr<CompilerFlags> old_flags(
-      CompilerFlags::New(old_args, "/tmp"));
+      CompilerFlagsParser::MustNew(old_args, "/tmp"));
   std::vector<string> old_key_env;
 
   CompilerInfoCache::Key old_key(CompilerInfoCache::CreateKey(
@@ -638,6 +664,7 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
     cid->mutable_local_compiler_stat()->set_size(valid_filestat.size);
     cid->set_local_compiler_hash(valid_hash);
     cid->set_hash(valid_hash);
+    cid->mutable_cxx();
 
     cis.reset(cache_->Store(key, std::move(cid)));
     EXPECT_EQ(2, cis.get()->refcnt());  // caller & in cache
@@ -653,6 +680,7 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
     cid->mutable_local_compiler_stat()->set_size(valid_filestat.size);
     cid->set_local_compiler_hash(valid_hash);
     cid->set_hash(valid_hash);
+    cid->mutable_cxx();
 
     old_cis.reset(cache_->Store(old_key, std::move(cid)));
     EXPECT_EQ(2, old_cis.get()->refcnt());  // caller & in cache
@@ -708,6 +736,35 @@ TEST_F(CompilerInfoCacheTest, Clear) {
   data->set_name("gcc");
   data->set_lang("c");
   data->set_found(true);
+  data->mutable_cxx();
+
+  entry = table.add_compiler_info_data();
+  entry->add_keys("/usr/bin/g++ -O2 @");
+  data = entry->mutable_data();
+  data->set_name("g++");
+  data->set_lang("c++");
+  data->set_found(true);
+  data->mutable_cxx();
+
+  EXPECT_TRUE(Unmarshal(table));
+
+  EXPECT_FALSE(compiler_info().empty());
+  EXPECT_FALSE(keys_by_hash().empty());
+
+  Clear();
+  EXPECT_TRUE(compiler_info().empty());
+  EXPECT_TRUE(keys_by_hash().empty());
+}
+
+TEST_F(CompilerInfoCacheTest, NoLanguageExtension) {
+  CompilerInfoDataTable table;
+  CompilerInfoDataTable::Entry* entry = table.add_compiler_info_data();
+  entry->add_keys("/usr/bin/gcc -O2 @");
+  entry->add_keys("/usr/bin/gcc -O2 -fno-diagnostics-show-option @");
+  CompilerInfoData* data = entry->mutable_data();
+  data->set_name("gcc");
+  data->set_lang("c");
+  data->set_found(true);
 
   entry = table.add_compiler_info_data();
   entry->add_keys("/usr/bin/g++ -O2 @");
@@ -718,10 +775,6 @@ TEST_F(CompilerInfoCacheTest, Clear) {
 
   EXPECT_TRUE(Unmarshal(table));
 
-  EXPECT_FALSE(compiler_info().empty());
-  EXPECT_FALSE(keys_by_hash().empty());
-
-  Clear();
   EXPECT_TRUE(compiler_info().empty());
   EXPECT_TRUE(keys_by_hash().empty());
 }
@@ -737,14 +790,14 @@ TEST_F(CompilerInfoCacheTest, RelativePathCompiler) {
   static const char kCompilerInfoCache[] = "compiler_info_cache";
 
   CompilerInfoCache::Init(tmpdir_util.tmpdir(), kCompilerInfoCache, 3600);
-  CompilerInfoBuilder cib;
+  CompilerInfoBuilderFacade cib;
   const std::vector<string> empty_env;
   CompilerInfoCache::Key key1, key2, key3;
 
   {
     std::vector<string> args { "usr/bin/gcc" };
     std::unique_ptr<CompilerFlags> flags(
-        CompilerFlags::MustNew(args, "/"));
+        CompilerFlagsParser::MustNew(args, "/"));
     std::unique_ptr<CompilerInfoData> cid(
         cib.FillFromCompilerOutputs(*flags, "usr/bin/gcc", empty_env));
     EXPECT_NE(nullptr, cid);
@@ -758,7 +811,7 @@ TEST_F(CompilerInfoCacheTest, RelativePathCompiler) {
   {
     std::vector<string> args { "../usr/bin/gcc" };
     std::unique_ptr<CompilerFlags> flags(
-        CompilerFlags::MustNew(args, "/bin"));
+        CompilerFlagsParser::MustNew(args, "/bin"));
     std::unique_ptr<CompilerInfoData> cid(
         cib.FillFromCompilerOutputs(*flags, "../usr/bin/gcc", empty_env));
     EXPECT_NE(nullptr, cid);
@@ -772,7 +825,7 @@ TEST_F(CompilerInfoCacheTest, RelativePathCompiler) {
   {
     std::vector<string> args { "/usr/bin/gcc" };
     std::unique_ptr<CompilerFlags> flags(
-        CompilerFlags::MustNew(args, tmpdir_util.cwd()));
+        CompilerFlagsParser::MustNew(args, tmpdir_util.cwd()));
     std::unique_ptr<CompilerInfoData> cid(
         cib.FillFromCompilerOutputs(*flags, "/usr/bin/gcc", empty_env));
     EXPECT_NE(nullptr, cid);

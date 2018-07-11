@@ -427,13 +427,13 @@ string HttpRPC::CallRequest::CreateMessage() const {
 void HttpRPC::CallResponse::ParseBody(
     google::protobuf::io::ZeroCopyInputStream* input) {
   if (resp_) {
-    status_->raw_resp_size = resp_->ByteSize();
     if (!resp_->ParseFromZeroCopyStream(input)) {
       LOG(WARNING) << trace_id_ << " Parse response failed";
       err_message_ = "Parse response failed";
       result_ = FAIL;
       return;
     }
+    status_->raw_resp_size = resp_->ByteSize();
   }
   result_ = OK;
   return;

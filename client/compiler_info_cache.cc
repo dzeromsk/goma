@@ -13,11 +13,13 @@
 #include "absl/strings/str_join.h"
 #include "autolock_timer.h"
 #include "compiler_flags.h"
+#include "compiler_info_state.h"
 #include "compiler_proxy_info.h"
 #include "file.h"
 #include "glog/logging.h"
 #include "goma_hash.h"
 #include "path.h"
+
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/compiler_info_data.pb.h"
 MSVC_POP_WARNING()
@@ -474,7 +476,7 @@ void CompilerInfoCache::UpdateOlderCompilerInfoUnlocked() {
     CompilerInfoState* state = entry.second;
 
     const std::string& abs_local_compiler_path =
-        state->compiler_info_.abs_local_compiler_path();
+        state->compiler_info_->abs_local_compiler_path();
 
     // if the cache is not used recently, we do not reuse it.
     time_t time_diff = now - state->info().last_used_at();
@@ -492,7 +494,7 @@ void CompilerInfoCache::UpdateOlderCompilerInfoUnlocked() {
       continue;
     }
 
-    if (state->compiler_info_.UpdateFileStatIfHashMatch(&sha256_cache)) {
+    if (state->compiler_info_->UpdateFileStatIfHashMatch(&sha256_cache)) {
       LOG(INFO) << "compiler filestat didn't match, but hash matched: "
                 << abs_local_compiler_path;
       continue;
@@ -525,6 +527,11 @@ bool CompilerInfoCache::UnmarshalUnlocked(const CompilerInfoDataTable& table) {
       keys->insert(key);
     }
     const CompilerInfoData& data = it.data();
+    if (data.language_extension_case() ==
+        CompilerInfoData::LANGUAGE_EXTENSION_NOT_SET) {
+      // No langauge extension. Ignore this entry.
+      continue;
+    }
     std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
     *cid = data;
     const string& hash = HashKey(*cid);

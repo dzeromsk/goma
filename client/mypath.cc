@@ -34,8 +34,11 @@
 #include "file.h"
 #include "file_dir.h"
 #include "filesystem.h"
+#include "file_stat.h"
 #include "mypath_helper.h"
 #include "path.h"
+#include "path_resolver.h"
+#include "path_util.h"
 #include "util.h"
 
 GOMA_DECLARE_string(CACHE_DIR);
@@ -178,7 +181,9 @@ string GetMyPathname() {
   buf[len] = '\0';
   myself_fullpath = buf;
 #endif
-  return myself_fullpath;
+  // Mac's _dyld_get_image_name(0) sometimes returns path containing ".".
+  // Not to confuse caller, normalize path here.
+  return PathResolver::ResolvePath(myself_fullpath);
 }
 
 string GetMyDirectory() {
@@ -251,6 +256,42 @@ string GetCacheDirectory() {
   }
 
   return file::JoinPath(GetGomaTmpDir(), kGomaCacheDir);
+}
+
+string GetCurrentDirNameOrDie(void) {
+#ifndef _WIN32
+  // get_cwd() returns the current resolved directory. However, a compiler is
+  // taking PWD as current working directory. PWD might contain unresolved
+  // directory.
+  // We don't return /proc/self/cwd if it is set in PWD, since the corresponding
+  // directory is different among gomacc and compiler_proxy.
+  // See also: b/37259278
+
+  const char* pwd = getenv("PWD");
+  if (pwd != nullptr && IsPosixAbsolutePath(pwd) &&
+      !HasPrefixDir(pwd, "/proc/self/cwd")) {
+    // Align with llvm current_path().
+    // llvm checking PWD id and "." id are the same.
+    FileStat pwd_stat(pwd);
+    FileStat dot_stat(".");
+    if (pwd_stat.IsValid() && dot_stat.IsValid() && pwd_stat.is_directory &&
+        pwd_stat == dot_stat) {
+      return pwd;
+    }
+  }
+
+  char *dir = getcwd(nullptr, 0);
+  CHECK(dir) << "GOMA: Cannot find current directory ";
+  string dir_str(dir);
+  free(dir);
+  return dir_str;
+#else
+  char dir[PATH_MAX];
+  CHECK_NE(GetCurrentDirectoryA(PATH_MAX, dir), (DWORD)0) <<
+      "GOMA: Cannot find current directory: " << GetLastError();
+  string dir_str(dir);
+  return dir_str;
+#endif
 }
 
 }  // namespace devtools_goma

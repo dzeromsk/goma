@@ -18,16 +18,12 @@ config("lib_config") {
 }
 static_library("lib") {
   sources = [
-    "clang_tidy_flags.cc",
-    "clang_tidy_flags.h",
     "cmdline_parser.cc",
     "cmdline_parser.h",
+    "compiler_flag_type.cc",
+    "compiler_flag_type.h",
     "compiler_flags.cc",
     "compiler_flags.h",
-    "compiler_type.cc",
-    "compiler_type.h",
-    "compiler_type_specific.cc",
-    "compiler_type_specific.h",
     "compress_util.cc",
     "compress_util.h",
     "execreq_normalizer.cc",
@@ -42,12 +38,8 @@ static_library("lib") {
     "fileflag.h",
     "flag_parser.cc",
     "flag_parser.h",
-    "gcc_flags.cc",
-    "gcc_flags.h",
     "goma_data_util.cc",
     "goma_data_util.h",
-    "java_flags.cc",
-    "java_flags.h",
     "known_warning_options.h",
     "path_resolver.cc",
     "path_resolver.h",
@@ -55,8 +47,6 @@ static_library("lib") {
     "path_util.h",
     "scoped_fd.cc",
     "scoped_fd.h",
-    "vc_flags.cc",
-    "vc_flags.h",
   ]
 
   public_configs = [ ":lib_config" ]
@@ -71,6 +61,86 @@ static_library("lib") {
   if (enable_lzma) {
     public_deps += [ "//third_party:liblzma" ]
   }
+}
+
+static_library("gcc_specific") {
+  sources = [
+    "gcc_execreq_normalizer.cc",
+    "gcc_execreq_normalizer.h",
+    "gcc_flags.cc",
+    "gcc_flags.h",
+  ]
+  deps = [
+    ":clang_flags_helper",
+    ":lib",
+  ]
+}
+
+static_library("clang_flags_helper") {
+  sources = [
+    "clang_flags_helper.cc",
+    "clang_flags_helper.h",
+  ]
+  public_deps = [
+    "//third_party/abseil",
+  ]
+  deps = [
+    ":lib",
+  ]
+}
+
+static_library("vc_specific") {
+  sources = [
+    "vc_execreq_normalizer.cc",
+    "vc_execreq_normalizer.h",
+    "vc_flags.cc",
+    "vc_flags.h",
+  ]
+  deps = [
+    ":clang_flags_helper",
+    ":lib",
+  ]
+}
+
+static_library("clang_tidy_specific") {
+  sources = [
+    "clang_tidy_execreq_normalizer.cc",
+    "clang_tidy_execreq_normalizer.h",
+    "clang_tidy_flags.cc",
+    "clang_tidy_flags.h",
+  ]
+  deps = [
+    ":gcc_specific",
+    ":lib",
+  ]
+}
+
+static_library("java_specific") {
+  sources = [
+    "java_execreq_normalizer.cc",
+    "java_execreq_normalizer.h",
+    "java_flags.cc",
+    "java_flags.h",
+  ]
+  deps = [
+    ":lib",
+  ]
+}
+
+static_library("compiler_flag_type_specific") {
+  sources = [
+    "compiler_flag_type_specific.cc",
+    "compiler_flag_type_specific.h",
+    "compiler_flags_parser.cc",
+    "compiler_flags_parser.h",
+  ]
+  public_deps = [
+    ":clang_tidy_specific",
+    ":gcc_specific",
+    ":java_specific",
+    ":lib",
+    ":vc_specific",
+  ]
 }
 
 static_library("goma_hash") {
@@ -107,12 +177,27 @@ static_library("goma_file") {
   ]
 }
 
+executable("clang_flags_helper_unittest") {
+  testonly = true
+  sources = [
+    "clang_flags_helper_unittest.cc",
+  ]
+
+  deps = [
+    ":clang_flags_helper",
+    "//base:goma_unittest",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:gtest",
+  ]
+}
+
 executable("clang_tidy_execreq_normalizer_unittest") {
   testonly = true
   sources = [
     "clang_tidy_execreq_normalizer_unittest.cc",
   ]
   deps = [
+    ":compiler_flag_type_specific",
     ":lib",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
@@ -126,6 +211,8 @@ executable("clang_tidy_flags_unittest") {
     "clang_tidy_flags_unittest.cc",
   ]
   deps = [
+    ":clang_tidy_specific",
+    ":compiler_flag_type_specific",
     ":lib",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
@@ -153,6 +240,8 @@ executable("compiler_flags_test") {
     "compiler_flags_test.cc",
   ]
   deps = [
+    ":clang_tidy_specific",
+    ":compiler_flag_type_specific",
     ":lib",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
@@ -161,12 +250,13 @@ executable("compiler_flags_test") {
   ]
 }
 
-executable("compiler_type_specific_unittest") {
+executable("compiler_flag_type_specific_unittest") {
   testonly = true
   sources = [
-    "compiler_type_specific_unittest.cc",
+    "compiler_flag_type_specific_unittest.cc",
   ]
   deps = [
+    ":compiler_flag_type_specific",
     ":lib",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
@@ -250,6 +340,8 @@ executable("gcc_execreq_normalizer_unittest") {
     "gcc_execreq_normalizer_unittest.cc",
   ]
   deps = [
+    ":compiler_flag_type_specific",
+    ":gcc_specific",
     ":lib",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
@@ -264,6 +356,8 @@ executable("gcc_flags_unittest") {
     "gcc_flags_test.cc",
   ]
   deps = [
+    ":compiler_flag_type_specific",
+    ":gcc_specific",
     ":lib",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
@@ -318,6 +412,7 @@ executable("java_execreq_normalizer_unittest") {
   ]
 
   deps = [
+    ":compiler_flag_type_specific",
     ":lib",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
@@ -332,6 +427,8 @@ executable("java_flags_unittest") {
   ]
 
   deps = [
+    ":compiler_flag_type_specific",
+    ":java_specific",
     ":lib",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
@@ -384,7 +481,9 @@ executable("vc_execreq_normalizer_unittest") {
     "vc_execreq_normalizer_unittest.cc",
   ]
   deps = [
+    ":compiler_flag_type_specific",
     ":lib",
+    ":vc_specific",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
     "//third_party:gtest",
@@ -397,7 +496,9 @@ executable("vc_flags_unittest") {
     "vc_flags_unittest.cc",
   ]
   deps = [
+    ":compiler_flag_type_specific",
     ":lib",
+    ":vc_specific",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
     "//third_party:gtest",

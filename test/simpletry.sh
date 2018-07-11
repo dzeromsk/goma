@@ -640,40 +640,40 @@ rm -f out.o
 # GOMA_HERMETIC=error
 
 if [ "$(uname)" = "Linux" ]; then
-  OBJCOPY=$test_dir/third_party/binutils/Linux_x64/Release/bin/objcopy
-  if [ ! -f $OBJCOPY ]; then
-    OBJCOPY=$test_dir/third_party/binutils/Linux_ia32/Release/bin/objcopy
+  AS=$test_dir/third_party/binutils/Linux_x64/Release/bin/as
+  if [ ! -f $AS ]; then
+    AS=$test_dir/third_party/binutils/Linux_ia32/Release/bin/as
   fi
-  #if objcopy does not exist, fallbacks to system's objcopy.
-  if [ ! -f $OBJCOPY ]; then
-    OBJCOPY=$(which objcopy)
+  #if as does not exist, fallbacks to system's as.
+  if [ ! -f $AS ]; then
+    AS=$(which as)
   fi
-  echo "Using objcopy: ${OBJCOPY}" 1>&2
-  cp -p ${OBJCOPY} ./objcopy
-  expect_success "${CC}_unmodified_objcopy_with_hermetic" \
+  echo "Using as: ${AS}" 1>&2
+  cp -p ${AS} ./as
+  expect_success "${CC}_unmodified_as_with_hermetic" \
     "${GOMACC} ${LOCAL_CC} -gsplit-dwarf -B. -c -o out.o test/hello.c"
-  rm -f ./objcopy
+  rm -f ./as
   rm -f out.o
 
-  # create objcopy with different SHA256.
-  cp -p ${OBJCOPY} ./objcopy
-  echo >> ./objcopy
-  # Since chromeos toolchain has
-  # force_store_output_file_for_unmatched_subprograms,
-  # mismatch of objcopy should not be treated as mismatch error.
+  # create as with different SHA256.
+  cp -p ${AS} ./as
+  echo >> ./as
   if [ "$CC" = "gcc" -a "$(is_cros_gcc $CC)" = "yes" ]; then
-    expect_success "unknown_objcopy_with_hermetic_for_cros_gcc" \
-      "${GOMACC} ${LOCAL_CC} -gsplit-dwarf -B. -c -o out.o test/hello.c"
+    expect_success "unknown_as_with_hermetic_for_cros_gcc" \
+      "${GOMACC} ${LOCAL_CC} -B. -c -o out.o test/hello.c"
+  elif [ "$CC" = "clang" ]; then
+    expect_failure "${CC}_unknown_as_with_hermetic" \
+      "${GOMACC} ${LOCAL_CC} -no-integrated-as -B. -c -o out.o test/hello.c"
   else
-    expect_failure "${CC}_unknown_objcopy_with_hermetic" \
-      "${GOMACC} ${LOCAL_CC} -gsplit-dwarf -B. -c -o out.o test/hello.c"
+    expect_failure "${CC}_unknown_as_with_hermetic" \
+      "${GOMACC} ${LOCAL_CC} -B. -c -o out.o test/hello.c"
   fi
-  rm -f ./objcopy
+  rm -f ./as
 
-  cp -p ${OBJCOPY} ./objcopy
-  expect_success "${CC}_after_unknown_objcopy_with_hermetic" \
+  cp -p ${AS} ./as
+  expect_success "${CC}_after_unknown_as_with_hermetic" \
     "${GOMACC} ${LOCAL_CC} -gsplit-dwarf -B. -c -o out.o test/hello.c"
-  rm -f ./objcopy
+  rm -f ./as
   rm -f out.o
 
   # check PWD=/proc/self/cwd gcc -fdebug-prefix-map=/proc/self/cwd=

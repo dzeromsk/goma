@@ -4,6 +4,7 @@
 
 #include "clang_tidy_flags.h"
 
+#include "compiler_flags_parser.h"
 #include "gtest/gtest.h"
 #include "path.h"
 using std::string;
@@ -36,7 +37,8 @@ TEST_F(ClangTidyFlagsTest, ClangTidyFlag) {
     "foo.cc",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   EXPECT_EQ(args, flags->args());
 
   EXPECT_EQ(1U, flags->output_files().size());
@@ -48,7 +50,7 @@ TEST_F(ClangTidyFlagsTest, ClangTidyFlag) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-tidy", flags->compiler_name());
-  EXPECT_EQ(CompilerType::ClangTidy, flags->type());
+  EXPECT_EQ(CompilerFlagType::ClangTidy, flags->type());
   EXPECT_EQ("/tmp", flags->cwd());
 
   const ClangTidyFlags& clang_tidy_flags =
@@ -87,7 +89,8 @@ TEST_F(ClangTidyFlagsTest, ClangTidyFlagWithClangArgs) {
     "-DBAR",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   EXPECT_EQ(args, flags->args());
 
   EXPECT_EQ(1U, flags->output_files().size());
@@ -99,7 +102,7 @@ TEST_F(ClangTidyFlagsTest, ClangTidyFlagWithClangArgs) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-tidy", flags->compiler_name());
-  EXPECT_EQ(CompilerType::ClangTidy, flags->type());
+  EXPECT_EQ(CompilerFlagType::ClangTidy, flags->type());
   EXPECT_EQ("/tmp", flags->cwd());
 
   const ClangTidyFlags& clang_tidy_flags =
@@ -137,7 +140,8 @@ TEST_F(ClangTidyFlagsTest, ClangTidyFlagWithClangArgsEndingWithHyphenHyphen) {
     "--",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "/tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
   EXPECT_EQ(args, flags->args());
 
   EXPECT_EQ(1U, flags->output_files().size());
@@ -149,7 +153,7 @@ TEST_F(ClangTidyFlagsTest, ClangTidyFlagWithClangArgsEndingWithHyphenHyphen) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-tidy", flags->compiler_name());
-  EXPECT_EQ(CompilerType::ClangTidy, flags->type());
+  EXPECT_EQ(CompilerFlagType::ClangTidy, flags->type());
   EXPECT_EQ("/tmp", flags->cwd());
 
   const ClangTidyFlags& clang_tidy_flags =

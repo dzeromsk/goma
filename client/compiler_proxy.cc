@@ -64,8 +64,10 @@
 #include "compilerz_script.h"
 #include "compilerz_style.h"
 #include "counterz.h"
-#include "cpp_directive_optimizer.h"
-#include "cpp_macro.h"
+#include "cxx/include_processor/cpp_directive_optimizer.h"
+#include "cxx/include_processor/cpp_macro.h"
+#include "cxx/include_processor/include_cache.h"
+#include "cxx/include_processor/include_file_finder.h"
 #include "deps_cache.h"
 #include "env_flags.h"
 #include "file_hash_cache.h"
@@ -81,8 +83,7 @@
 #include "http_init.h"
 #include "http_rpc.h"
 #include "http_rpc_init.h"
-#include "include_cache.h"
-#include "include_file_finder.h"
+#include "http_util.h"
 #include "ioutil.h"
 #include "java/jarfile_reader.h"
 #include "jquery.min.h"
@@ -96,9 +97,6 @@
 #include "oauth2_token.h"
 #include "path.h"
 #include "platform_thread.h"
-MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
-#include "prototmp/goma_data.pb.h"
-MSVC_POP_WARNING()
 #include "rand_util.h"
 #include "scoped_fd.h"
 #include "settings.h"
@@ -113,6 +111,10 @@ MSVC_POP_WARNING()
 #include "util.h"
 #include "watchdog.h"
 #include "worker_thread_manager.h"
+
+MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
+#include "prototmp/goma_data.pb.h"
+MSVC_POP_WARNING()
 
 
 #if HAVE_HEAP_PROFILER
@@ -434,15 +436,6 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
     internal_http_handlers_.insert(
         std::make_pair("/api/compilerz",
                        &CompilerProxyHttpHandler::HandleCompilerJSONRequest));
-    internal_http_handlers_.insert(
-        std::make_pair("/api/loginz",
-                       &CompilerProxyHttpHandler::HandleLoginRequest));
-    internal_http_handlers_.insert(
-        std::make_pair("/api/authz",
-                       &CompilerProxyHttpHandler::HandleAuthRequest));
-    internal_http_handlers_.insert(
-        std::make_pair("/api/logoutz",
-                       &CompilerProxyHttpHandler::HandleLogoutRequest));
     http_handlers_.insert(
         std::make_pair("/statz",
                        &CompilerProxyHttpHandler::HandleStatsRequest));
@@ -1063,115 +1056,14 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
     if (!account.empty()) {
       ss << ", \"account\": " << EscapeString(account);
     }
-    OAuth2Config config;
-    service_.http_client()->GetOAuth2Config(&config);
-    if (config.enabled()) {
-      if (config.refresh_token.empty()) {
-        ss << ", \"text\": \"login\""
-           << ", \"href\": \"/api/loginz\"";
-      } else if (account.empty()) {
-        // even if refresh_token exists, account is empty.
-        // maybe, bad oauth2 setup.
-        ss << ", \"text\": \"bad oauth2 config - login\""
-           << ", \"href\": \"/api/loginz\"";
-      }
-      // TODO: add logout.
-    } else {
-      LOG(WARNING) << "oauth2 config disabled";
+    if (account.empty()) {
+      ss << ", \"text\": \"not logged in\"";
     }
     ss << "}";
     *response = ss.str();
     return 200;
   }
 
-  int HandleLoginRequest(const HttpServerRequest& request,
-                         string* response) {
-    OAuth2Config config;
-    service_.http_client()->GetOAuth2Config(&config);
-    if (config.valid()) {
-      const string& account = service_.http_client()->GetAccount();
-      if (!account.empty()) {
-        // already login.
-        return BadRequest(response);
-      }
-      // bad oauth2 config?
-    }
-    // TODO: limit access?
-    LOG(INFO) << "start login";
-    DefaultOAuth2Config(&config);
-    SaveOAuth2Config(FLAGS_OAUTH2_CONFIG_FILE, config);
-    service_.http_client()->SetOAuth2Config(config);
-    string login_state;
-    string redirect_uri;
-    NewLoginState(request.server().port(), &login_state, &redirect_uri);
-    std::ostringstream url;
-    url << config.auth_uri << "?scope=" << config.scope
-        << "&redirect_uri=" << redirect_uri
-        << "&client_id=" << config.client_id
-        << "&state=" << login_state
-        << "&response_type=code";
-    return Redirect(url.str(), response);
-  }
-
-  int HandleAuthRequest(const HttpServerRequest& request,
-                        string* response) {
-    const string& query = request.query();
-    std::map<string, string> params = ParseQuery(query);
-    if (!CheckLoginState(params["state"])) {
-      LOG(WARNING) << "login state mismatch:" << params["state"];
-      return BadRequest(response);
-    }
-    const string& code = params["code"];
-    if (code.empty()) {
-      LOG(WARNING) << "missing code:" << query;
-      return BadRequest(response);
-    }
-    LOG(INFO) << "got auth code";
-    OAuth2Config config;
-    service_.http_client()->GetOAuth2Config(&config);
-    if (config.valid()) {
-      const string& account = service_.http_client()->GetAccount();
-      if (!account.empty()) {
-        // already login.
-        return BadRequest(response);
-      }
-    }
-    config.refresh_token =
-        ExchangeOAuth2RefreshToken(service_.wm(),
-                                   http_options_,
-                                   config,
-                                   code, GetRedirectURI());
-    if (config.refresh_token.empty()) {
-      LOG(WARNING) << "failed to get refresh token";
-      return BadRequest(response);
-    }
-    LOG(INFO) << "got refresh token";
-    SaveOAuth2Config(FLAGS_OAUTH2_CONFIG_FILE, config);
-    service_.http_client()->SetOAuth2Config(config);
-    if (InitialPing()) {
-      LOG(INFO) << "Login as " << service_.http_client()->GetAccount();
-    }
-    return Redirect("/", response);
-  }
-
-  int HandleLogoutRequest(const HttpServerRequest& /* req */,
-                          string* response) {
-    // TODO: limit access only for the authenticated user.
-    *response = "HTTP/1.1 501 Not Implemented\r\n\r\n";
-    return 501;
-#if 0
-    std::ostringstream ss;
-    OAuth2Config config;
-    if (!service_.http_client()->GetOAuth2Config(&config)) {
-      return BadRequest(response);
-    }
-    config.refresh_token = "";
-    service_.http_client()->SetOAuth2Config(config);
-    SaveOAuth2Config(FLAGS_OAUTH2_CONFIG_FILE, config);
-    LOG(INFO) << "logout";
-    return Redirect("/", response);
-#endif
-  }
 
   int HandleStatsRequest(const HttpServerRequest& request,
                          string* response) {
@@ -1951,12 +1843,7 @@ int main(int argc, char* argv[], const char* envp[]) {
   int max_nfile = 0;
   InitResourceLimits(&max_nfile);
   CHECK_GT(max_nfile, 0);
-#if defined(USE_EPOLL) || defined(USE_KQUEUE) || defined(_WIN32)
   int max_num_sockets = max_nfile;
-#else
-  // UNIX select doesn't accept descriptors greater than FD_SETSIZE.
-  int max_num_sockets = std::min<int>(max_nfile, FD_SETSIZE);
-#endif
   LOG(INFO) << "max_num_sockets=" << max_num_sockets
             << " max_nfile=" << max_nfile;
 

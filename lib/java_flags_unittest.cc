@@ -5,13 +5,14 @@
 
 #include "java_flags.h"
 
-#include "glog/logging.h"
 #include "absl/strings/str_cat.h"
+#include "compiler_flags_parser.h"
+#include "file.h"
+#include "file_helper.h"
+#include "filesystem.h"
+#include "glog/logging.h"
 #include "gtest/gtest.h"
 #include "path.h"
-#include "file.h"
-#include "filesystem.h"
-#include "file_helper.h"
 #include "path_resolver.h"
 using google::GetExistingTempDirectories;
 using std::string;
@@ -69,9 +70,9 @@ TEST_F(JavacFlagsTest, Basic) {
   args.push_back("boot1.jar:boot2.jar");
   args.push_back("Hello.java");
   args.push_back("World.java");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
   EXPECT_TRUE(flags->is_successful());
-  EXPECT_EQ(CompilerType::Javac, flags->type());
+  EXPECT_EQ(CompilerFlagType::Javac, flags->type());
   JavacFlags* javac_flags = static_cast<JavacFlags*>(flags.get());
   EXPECT_EQ("javac", flags->compiler_name());
   ASSERT_EQ(2U, flags->input_filenames().size());
@@ -98,15 +99,15 @@ TEST_F(JavacFlagsTest, AtFile) {
   args.push_back("@" + at_file);
 
   // The at-file doesn't exist.
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
   EXPECT_FALSE(flags->is_successful());
 
   ASSERT_TRUE(
       WriteStringToFile("Hello.java World.java\r\n\t-d dst\r\n-s src",
                         at_file));
-  flags = CompilerFlags::MustNew(args, ".");
+  flags = CompilerFlagsParser::MustNew(args, ".");
   EXPECT_TRUE(flags->is_successful());
-  EXPECT_EQ(CompilerType::Javac, flags->type());
+  EXPECT_EQ(CompilerFlagType::Javac, flags->type());
   EXPECT_EQ("javac", flags->compiler_name());
   EXPECT_EQ(7U, flags->expanded_args().size());
   EXPECT_EQ("javac", flags->expanded_args()[0]);
@@ -133,9 +134,9 @@ TEST_F(JavacFlagsTest, NoDestination) {
   args.push_back("javac");
   args.push_back("Hello.java");
   args.push_back("World.java");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
   EXPECT_TRUE(flags->is_successful());
-  EXPECT_EQ(CompilerType::Javac, flags->type());
+  EXPECT_EQ(CompilerFlagType::Javac, flags->type());
   EXPECT_EQ("javac", flags->compiler_name());
   ASSERT_EQ(2U, flags->input_filenames().size());
   EXPECT_EQ("Hello.java", flags->input_filenames()[0]);
@@ -155,9 +156,9 @@ TEST_F(JavacFlagsTest, Processor) {
     "dagger.internal.codegen.ComponentProcessor",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
   EXPECT_TRUE(flags->is_successful());
-  EXPECT_EQ(CompilerType::Javac, flags->type());
+  EXPECT_EQ(CompilerFlagType::Javac, flags->type());
 
   JavacFlags* javac_flags = static_cast<JavacFlags*>(flags.get());
   EXPECT_EQ(expected_processors, javac_flags->processors());
@@ -175,9 +176,9 @@ TEST_F(JavacFlagsTest, MultipleProcessorArgs) {
     "com.google.auto.value.processor.AutoValueProcessor",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
   EXPECT_TRUE(flags->is_successful());
-  EXPECT_EQ(CompilerType::Javac, flags->type());
+  EXPECT_EQ(CompilerFlagType::Javac, flags->type());
 
   JavacFlags* javac_flags = static_cast<JavacFlags*>(flags.get());
   EXPECT_EQ(expected_processors, javac_flags->processors());
@@ -196,9 +197,9 @@ TEST_F(JavacFlagsTest, MultipleProcessorsInArg) {
     "com.google.auto.value.processor.AutoValueProcessor",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
   EXPECT_TRUE(flags->is_successful());
-  EXPECT_EQ(CompilerType::Javac, flags->type());
+  EXPECT_EQ(CompilerFlagType::Javac, flags->type());
 
   JavacFlags* javac_flags = static_cast<JavacFlags*>(flags.get());
   EXPECT_EQ(expected_processors, javac_flags->processors());
@@ -227,7 +228,7 @@ TEST_F(JavacFlagsTest, UnknownFlags) {
     "-unknown1", "--unknown2",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
   EXPECT_EQ(expected, flags->unknown_flags());
 }
 
@@ -281,9 +282,9 @@ TEST_F(JavaFlagsTest, Basic) {
     "-cp","/tmp:a.jar:b.jar",
     "-classpath", "c.jar",
   };
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
   EXPECT_TRUE(flags->is_successful());
-  EXPECT_EQ(CompilerType::Java, flags->type());
+  EXPECT_EQ(CompilerFlagType::Java, flags->type());
   EXPECT_EQ("java", flags->compiler_name());
   ASSERT_EQ(1U, flags->input_filenames().size());
   EXPECT_EQ("out/host/linux-x86/framework/desugar.jar",

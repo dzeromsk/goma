@@ -33,7 +33,7 @@ class VCFlags : public CompilerFlags {
 
   string compiler_name() const override;
 
-  CompilerType type() const override { return CompilerType::Clexe; }
+  CompilerFlagType type() const override { return CompilerFlagType::Clexe; }
 
   bool IsClientImportantEnv(const char* env) const override;
   bool IsServerImportantEnv(const char* env) const override;
@@ -47,6 +47,7 @@ class VCFlags : public CompilerFlags {
   const string& creating_pch() const { return creating_pch_; }
   const string& using_pch() const { return using_pch_; }
   const string& using_pch_filename() const { return using_pch_filename_; }
+  const string& resource_dir() const { return resource_dir_; }
 
   static bool IsClangClCommand(absl::string_view arg);
   static bool IsVCCommand(absl::string_view arg);
@@ -71,6 +72,7 @@ class VCFlags : public CompilerFlags {
   // The filename of .pch, if specified.
   string using_pch_filename_;
   bool require_mspdbserv_;
+  string resource_dir_;
 };
 
 }  // namespace devtools_goma

@@ -17,6 +17,7 @@
 #include <json/json.h>
 
 #include "absl/base/call_once.h"
+#include "absl/base/thread_annotations.h"
 #include "basictypes.h"
 #include "compile_service.h"
 #include "compiler_info.h"
@@ -66,8 +67,8 @@ class CompileTask {
   };
   CompileTask(CompileService* service, int id);
 
-  void Ref();
-  void Deref();
+  void Ref() LOCKS_EXCLUDED(refcnt_mu_);
+  void Deref() LOCKS_EXCLUDED(refcnt_mu_);
 
   // Task ID, a serial number.
   int id() const { return id_; }
@@ -391,6 +392,9 @@ class CompileTask {
   string stdout_;
   string stderr_;
 
+  // Protects subproc_ and http_rpc_status_.
+  mutable Lock mu_;
+
   // HttpRPC stt for ExecRequest.
   std::unique_ptr<HttpRPC::Status> http_rpc_status_;
 
@@ -459,9 +463,8 @@ class CompileTask {
   // the key.
   std::string local_output_cache_key_;
 
-  // Protects ref counts, subproc_ and http_rpc_status_.
-  mutable Lock mu_;
-  int refcnt_;
+  mutable Lock refcnt_mu_;
+  int refcnt_ GUARDED_BY(refcnt_mu_);
 
   PlatformThreadId thread_id_;
 

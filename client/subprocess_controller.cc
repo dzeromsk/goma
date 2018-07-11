@@ -96,9 +96,6 @@ void SubProcessController::Initialize(
     google::InitGoogleLogging(argv0.c_str());
     google::InstallFailureSignalHandler();
     if (FLAGS_COMPILER_PROXY_ENABLE_CRASH_DUMP) {
-      // sleep 1s to get other GUID for minidump than main compiler_proxy's.
-      // need this only for linux?
-      PlatformThread::Sleep(1000);
       devtools_goma::InitCrashReporter(devtools_goma::GetCrashDumpDirectory());
     }
     LOG(INFO) << "goma built revision " << kBuiltRevisionString;

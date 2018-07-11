@@ -3,8 +3,6 @@
 // found in the LICENSE file.
 
 
-#if !USE_EPOLL && !USE_KQUEUE
-
 #include "descriptor_poller.h"
 
 #include <algorithm>
@@ -20,6 +18,7 @@
 # include "socket_helper_win.h"
 #endif
 
+#include "absl/base/call_once.h"
 #include "absl/memory/memory.h"
 #include "counterz.h"
 #include "glog/logging.h"
@@ -33,12 +32,17 @@ class SelectDescriptorPoller : public DescriptorPollerBase {
                          ScopedSocket&& poll_signaler)
       : DescriptorPollerBase(std::move(breaker), std::move(poll_signaler)),
         max_fd_(-1) {
+    absl::call_once(s_init_once_, LogDescriptorPollerType);
     // Socket number ranges from 1 to 32767 on Windows, where the FD_SETSIZE is
     // 64. There's no guarantee on Windows that the value of socket fd is
     // smaller than FD_SETSIZE.
 #ifndef _WIN32
     CHECK_LT(poll_breaker()->fd(), FD_SETSIZE);
 #endif
+  }
+
+  static void LogDescriptorPollerType() {
+    LOG(INFO) << "descriptor_poller will use \"select\"";
   }
 
   // No-op. We register polling descriptors in PreparePollEvents.
@@ -58,7 +62,7 @@ class SelectDescriptorPoller : public DescriptorPollerBase {
 
     std::vector<SocketDescriptor*> waiting_descriptors;
     for (const auto& iter : descriptors) {
-      SocketDescriptor* d = iter.second;
+      SocketDescriptor* d = iter.second.get();
       fd = d->fd();
       if (fd < 0) {
         VLOG(1) << "closed? " << d;
@@ -138,7 +142,7 @@ class SelectDescriptorPoller : public DescriptorPollerBase {
     SocketDescriptor* Next() override {
       // Iterates over descriptors.
       if (iter_ != descriptors_.end()) {
-        SocketDescriptor* d = iter_->second;
+        SocketDescriptor* d = iter_->second.get();
         current_fd_ = d->fd();
         ++iter_;
         return d;
@@ -175,11 +179,14 @@ class SelectDescriptorPoller : public DescriptorPollerBase {
 
  private:
   friend class SelectEventEnumerator;
+  static absl::once_flag s_init_once_;
   fd_set read_fd_;
   fd_set write_fd_;
   int max_fd_;
   DISALLOW_COPY_AND_ASSIGN(SelectDescriptorPoller);
 };
+
+absl::once_flag SelectDescriptorPoller::s_init_once_;
 
 // static
 std::unique_ptr<DescriptorPoller> DescriptorPoller::NewDescriptorPoller(
@@ -190,5 +197,3 @@ std::unique_ptr<DescriptorPoller> DescriptorPoller::NewDescriptorPoller(
 }
 
 }  // namespace devtools_goma
-
-#endif

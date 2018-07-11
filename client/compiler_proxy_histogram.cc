@@ -32,8 +32,8 @@ static const char* GetHistogramItemName(size_t i) {
     "RPCCallTime",
     "FileResponseTime",
     "CompilerProxyHandlerTime",
-    "GccReqSize",
-    "GccRespSize",
+    "GomaccReqSize",
+    "GomaccRespSize",
     "ExecReqSize",
     "ExecReqRawSize",
     "ExecReqCompressionRatio",
@@ -126,10 +126,10 @@ void CompilerProxyHistogram::UpdateCompileStat(const CompileStats& stats) {
     histogram_[FileResponseTime].Add(stats.file_response_time());
   if (stats.handler_time())
     histogram_[CompilerProxyHandlerTime].Add(stats.handler_time());
-  if (stats.gcc_req_size)
-    histogram_[GccReqSize].Add(stats.gcc_req_size);
-  if (stats.gcc_resp_size)
-    histogram_[GccRespSize].Add(stats.gcc_resp_size);
+  if (stats.gomacc_req_size)
+    histogram_[GomaccReqSize].Add(stats.gomacc_req_size);
+  if (stats.gomacc_resp_size)
+    histogram_[GomaccRespSize].Add(stats.gomacc_resp_size);
 
   // Exec call.
   int64_t rpc_req_size = 0;

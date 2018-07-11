@@ -27,10 +27,13 @@ JarParser::JarParser() {}
 
 static void AddJarFile(absl::string_view jar_file,
                        absl::string_view cwd,
+                       std::set<string>* checked_files,
                        std::set<string>* jar_files);
 
-static void ReadManifest(char* content,
+static void ReadManifest(absl::string_view source_file,
+                         char* content,
                          absl::string_view cwd,
+                         std::set<string>* checked_files,
                          std::set<string>* jar_files) {
   // The format of manifest files is similar to HTTP header
   // (i.e., "key1: value1<CRLF>key2: value2<CRLF>")
@@ -58,7 +61,10 @@ static void ReadManifest(char* content,
 
   for (auto&& path : absl::StrSplit(p, ' ', absl::SkipEmpty())) {
     if (absl::EndsWith(path, ".jar")) {
-      AddJarFile(path, cwd, jar_files);
+      LOG(INFO) << ".jar file depends on other .jar file."
+                << " source=" << source_file
+                << " dependency=" << path;
+      AddJarFile(path, cwd, checked_files, jar_files);
     }
   }
 }
@@ -129,9 +135,10 @@ class ScopedUnzFile {
 
 static void AddJarFile(absl::string_view jar_file,
                        absl::string_view cwd,
+                       std::set<string>* checked_files,
                        std::set<string>* jar_files) {
   const string& jar_path = file::JoinPathRespectAbsolute(cwd, jar_file);
-  if (!jar_files->insert(jar_path).second) {
+  if (!checked_files->insert(jar_path).second) {
     return;
   }
 
@@ -144,6 +151,12 @@ static void AddJarFile(absl::string_view jar_file,
     LOG(WARNING) << "Not jar archive? (unzOpen64):" << jar_path;
     return;
   }
+  // Sometimes .jar file specifies non-existing .jar file in its manifest.
+  // If it is not used for compiling, we can ignore such .jar file.
+  // Thus, we only mark files required when they can be opened as zip files.
+  CHECK(jar_files->insert(jar_path).second)
+      << "jar file has already been stored to jar_files."
+      << " jar_path=" << jar_path;
 
   int err;
   unz_global_info64 jar_info;
@@ -183,7 +196,7 @@ static void AddJarFile(absl::string_view jar_file,
         return;
       }
       buf.get()[fileinfo.uncompressed_size] = '\0';
-      ReadManifest(buf.get(), basedir, jar_files);
+      ReadManifest(jar_file, buf.get(), basedir, checked_files, jar_files);
       err = scoped_jar.CloseCurrentFile();
       LOG_IF(WARNING, err != UNZ_OK)
           << "CloseCurrentFile: " << jar_path << " err=" << err;
@@ -209,8 +222,9 @@ static void AddJarFile(absl::string_view jar_file,
 void JarParser::GetJarFiles(const std::vector<string>& input_jar_files,
                             const string& cwd,
                             std::set<string>* jar_files) {
+  std::set<string> checked_files;
   for (const auto& input_jar_file : input_jar_files) {
-    AddJarFile(input_jar_file, cwd, jar_files);
+    AddJarFile(input_jar_file, cwd, &checked_files, jar_files);
   }
 }
 

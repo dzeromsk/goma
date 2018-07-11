@@ -64,7 +64,7 @@ class SubProcessControllerServer: public SubProcessController {
 #endif
   void DoTimeout();
 
-  std::map<int, SubProcessImpl*> subprocs_;
+  std::map<int, std::unique_ptr<SubProcessImpl>> subprocs_;
   ScopedSocket sock_fd_;
 #ifndef _WIN32
   ScopedFd signal_fd_;

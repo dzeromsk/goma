@@ -7,16 +7,12 @@
 
 #ifndef _WIN32
 #include <fcntl.h>
-#ifdef ENABLE_LZMA
-#include <lzma.h>
-#endif
 #include <netdb.h>
 #include <stdio.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #endif
 #include <time.h>
-#include <zlib.h>
 
 #include <algorithm>
 #include <iostream>
@@ -26,7 +22,9 @@
 #include <string>
 
 #include "absl/memory/memory.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/string_view.h"
+#include "absl/strings/strip.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_proxy_info.h"
@@ -38,13 +36,10 @@
 #include "glog/logging.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "google/protobuf/message.h"
-#include "google/protobuf/io/gzip_stream.h"
 #include "google/protobuf/io/zero_copy_stream.h"
-#include "google/protobuf/io/zero_copy_stream_impl.h"
-#include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 MSVC_POP_WARNING()
 #include "histogram.h"
-#include "ioutil.h"
+#include "http_util.h"
 #include "oauth2.h"
 #include "oauth2_token.h"
 #include "openssl_engine.h"
@@ -1749,37 +1744,23 @@ string HttpRequest::CreateMessage() const {
   return BuildMessage(headers, body_);
 }
 
-// GetConentEncoding rerpots EncodingType specified in header.
-// If it has X-Goma-Length: header, the value number will be stored in
-// dest_size.
-static EncodingType GetContentEncoding(absl::string_view header,
-                                       size_t* dest_size) {
-  EncodingType encoding = NO_ENCODING;
+// GetConentEncoding reports EncodingType specified in header.
+// not http_util because it depends lib/compress_util EncodingType.
+static EncodingType GetContentEncoding(absl::string_view header) {
   // TODO: Might be better to migrate to lib/compress_util
   absl::string_view::size_type content_encoding_header =
       header.find("Content-Encoding: deflate\r\n");
   if (content_encoding_header != absl::string_view::npos) {
-    encoding = ENCODING_DEFLATE;
+    return ENCODING_DEFLATE;
   } else {
 #ifdef ENABLE_LZMA
     content_encoding_header = header.find("Content-Encoding: lzma2\r\n");
     if (content_encoding_header != absl::string_view::npos) {
-      encoding = ENCODING_LZMA2;
-    } else {
-      return NO_ENCODING;
+      return ENCODING_LZMA2;
     }
-#else
-    return NO_ENCODING;
 #endif
   }
-  absl::string_view::size_type goma_content_length_header =
-      header.find(HttpClient::kGomaLength);
-  if (goma_content_length_header != absl::string_view::npos) {
-    *dest_size =
-        atoi(header.data() + goma_content_length_header +
-             strlen(HttpClient::kGomaLength));
-  }
-  return encoding;
+  return NO_ENCODING;
 }
 
 HttpClient::Response::Response()
@@ -1995,54 +1976,15 @@ void HttpClient::Response::Parse() {
     return;
   }
 
-  string lzma_buf;
   ChunkedInputStream chunk_stream(chunks_);
   std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> input(
       chunk_stream.stream());
-  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> zlib_header;
-  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> zlib_content;
-  google::protobuf::io::ZeroCopyInputStream* zlib_streams[2] =
-      {nullptr, nullptr};
-  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> sub_stream;
-  size_t content_size = chunk_stream.size();
-  EncodingType encoding = GetContentEncoding(Header(), &content_size);
+  EncodingType encoding = GetContentEncoding(Header());
   if (encoding == ENCODING_DEFLATE) {
-    // see chrome/src/net/base/gzip_filter.cc Insert ZlibHeader.
-    static const char kZlibHeader[2] = {0x78, 0x01};
-    zlib_header = absl::make_unique<google::protobuf::io::ArrayInputStream>(
-        kZlibHeader, 2);
-    zlib_content = std::move(input);
-    zlib_streams[0] = zlib_header.get();
-    zlib_streams[1] = zlib_content.get();
-    sub_stream =
-        absl::make_unique<google::protobuf::io::ConcatenatingInputStream>(
-            zlib_streams, 2);
-    input = absl::make_unique<google::protobuf::io::GzipInputStream>(
-
-        sub_stream.get(), google::protobuf::io::GzipInputStream::ZLIB);
+    input = absl::make_unique<InflateInputStream>(std::move(input));
   } else if (encoding == ENCODING_LZMA2) {
 #ifdef ENABLE_LZMA
-    // TODO: We might want Lzma2InputStream
-    lzma_stream lzma = LZMA_STREAM_INIT;
-    lzma_ret r =
-        lzma_stream_decoder(&lzma, lzma_easy_decoder_memusage(9), 0);
-    if (r == LZMA_OK) {
-      const string parsed_raw_body = CombineChunks(chunks_);
-      lzma_buf.reserve(content_size);
-      if (ReadAllLZMAStream(parsed_raw_body, &lzma, &lzma_buf)) {
-        input.reset(
-            new google::protobuf::io::ArrayInputStream(
-                &lzma_buf[0], lzma_buf.size()));
-      } else {
-        LOG(WARNING) << trace_id_ << " Failed to uncompress lzma2 stream";
-        input.reset();
-      }
-    } else {
-      LOG(WARNING) << trace_id_
-                   << " Failed to initialize lzma2 decoder r=" << r;
-      input.reset();
-    }
-    lzma_end(&lzma);
+    input = absl::make_unique<LZMAInputStream>(std::move(input));
 #else
     LOG(ERROR) << trace_id_ << " lzma is not supported";
 #endif
@@ -2067,13 +2009,13 @@ void HttpResponse::ParseBody(google::protobuf::io::ZeroCopyInputStream* input) {
   const void* buffer;
   int size;
   while (input->Next(&buffer, &size)) {
-    ss << string(static_cast<const char*>(buffer), size);
+    ss.write(static_cast<const char*>(buffer), size);
   }
   parsed_body_ = ss.str();
   result_ = OK;
 }
 
-absl::string_view HttpResponse::Body() const {
+const string& HttpResponse::Body() const {
   return parsed_body_;
 }
 

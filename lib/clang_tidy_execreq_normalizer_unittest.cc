@@ -5,6 +5,7 @@
 
 #include "execreq_normalizer.h"
 
+#include "compiler_flag_type_specific.h"
 #include "compiler_flags.h"
 #include "execreq_verifier.h"
 #include "google/protobuf/text_format.h"
@@ -15,6 +16,24 @@ using google::protobuf::TextFormat;
 using google::protobuf::util::MessageDifferencer;
 
 namespace devtools_goma {
+
+namespace {
+
+void NormalizeExecReqForCacheKey(
+    int id,
+    bool normalize_include_path,
+    bool is_linking,
+    const std::vector<string>& normalize_weak_relative_for_arg,
+    const std::map<string, string>& debug_prefix_map,
+    ExecReq* req) {
+  CompilerFlagTypeSpecific::FromArg(req->command_spec().name())
+      .NewExecReqNormalizer()
+      ->NormalizeForCacheKey(id, normalize_include_path, is_linking,
+                             normalize_weak_relative_for_arg, debug_prefix_map,
+                             req);
+}
+
+}  // namespace
 
 TEST(ClangTidyExecReqNormalizerTest, Normalize) {
   static const char kExecReq[] = R"(

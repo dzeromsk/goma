@@ -26,23 +26,25 @@
 #include "auto_updater.h"
 #include "autolock_timer.h"
 #include "callback.h"
+#include "client_util.h"
 #include "compile_stats.h"
 #include "compile_task.h"
 #include "compiler_flags.h"
 #include "compiler_proxy_histogram.h"
 #include "compiler_proxy_info.h"
-#include "cpp_include_processor.h"
+#include "cxx/include_processor/cpp_include_processor.h"
+#include "cxx/include_processor/include_cache.h"
 #include "deps_cache.h"
 #include "file_hash_cache.h"
 #include "file_helper.h"
 #include "file_stat.h"
 #include "glog/logging.h"
+#include "goma_blob.h"
 #include "goma_file_http.h"
 #include "goma_hash.h"
 #include "google/protobuf/util/json_util.h"
 #include "http.h"
 #include "http_rpc.h"
-#include "include_cache.h"
 #include "ioutil.h"
 #include "local_output_cache.h"
 #include "lockhelper.h"
@@ -52,15 +54,16 @@
 #include "mypath.h"
 #include "path.h"
 #include "path_resolver.h"
+#include "timestamp.h"
+#include "util.h"
+#include "watchdog.h"
+#include "worker_thread_manager.h"
+
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/error_notice.pb.h"
 #include "prototmp/goma_stats.pb.h"
 #include "prototmp/goma_statz_stats.pb.h"
 MSVC_POP_WARNING()
-#include "timestamp.h"
-#include "util.h"
-#include "watchdog.h"
-#include "worker_thread_manager.h"
 
 #ifdef _WIN32
 # include "file_helper.h"
@@ -88,14 +91,13 @@ class CompareTaskHandlerTime {
 };
 
 CompileService::RpcController::RpcController(
-     ThreadpoolHttpServer::HttpServerRequest* http_server_request)
-  : http_server_request_(http_server_request),
-    server_port_(http_server_request->server().port()),
+    ThreadpoolHttpServer::HttpServerRequest* http_server_request)
+    : http_server_request_(http_server_request),
+      server_port_(http_server_request->server().port()),
 #ifdef _WIN32
-    multi_rpc_(nullptr),
+      multi_rpc_(nullptr),
 #endif
-    gcc_req_size_(0),
-    gcc_resp_size_(nullptr) {
+      gomacc_req_size_(0) {
   DCHECK(http_server_request_ != nullptr);
 }
 
@@ -106,7 +108,7 @@ CompileService::RpcController::~RpcController() {
 #ifdef _WIN32
 void CompileService::RpcController::AttachMultiRpcController(
     CompileService::MultiRpcController* multi_rpc) {
-  CHECK_EQ(gcc_req_size_, 0U);
+  CHECK_EQ(gomacc_req_size_, 0U);
   multi_rpc_ = multi_rpc;
   http_server_request_ = nullptr;
 }
@@ -142,7 +144,7 @@ bool CompileService::RpcController::ParseRequest(ExecReq* req) {
     return false;
   }
 
-  gcc_req_size_ = http_server_request_->request_content_length();
+  gomacc_req_size_ = http_server_request_->request_content_length();
   return req->ParseFromArray(
         http_server_request_->request_content(),
         http_server_request_->request_content_length());
@@ -151,20 +153,18 @@ bool CompileService::RpcController::ParseRequest(ExecReq* req) {
 void CompileService::RpcController::SendReply(const ExecResp& resp) {
   CHECK(http_server_request_ != nullptr);
 
-  size_t gcc_resp_size = resp.ByteSize();
+  size_t gomacc_resp_size = resp.ByteSize();
   std::ostringstream http_response_message;
   http_response_message
     << "HTTP/1.1 200 OK\r\n"
     << "Content-Type: binary/x-protocol-buffer\r\n"
-    << "Content-Length: " << gcc_resp_size << "\r\n\r\n";
+    << "Content-Length: " << gomacc_resp_size << "\r\n\r\n";
   string response_string = http_response_message.str();
   int header_size = response_string.size();
-  response_string.resize(header_size + gcc_resp_size);
-  resp.SerializeToArray(&response_string[header_size], gcc_resp_size);
+  response_string.resize(header_size + gomacc_resp_size);
+  resp.SerializeToArray(&response_string[header_size], gomacc_resp_size);
   http_server_request_->SendReply(response_string);
   http_server_request_ = nullptr;
-  if (gcc_resp_size_ != nullptr)
-    *gcc_resp_size_ = gcc_resp_size;
 }
 
 void CompileService::RpcController::NotifyWhenClosed(OneshotClosure* callback) {
@@ -189,7 +189,7 @@ CompileService::MultiRpcController::MultiRpcController(
       ALLOW_THIS_IN_INITIALIZER_LIST(
           closed_callback_(NewCallback(
               this, &CompileService::MultiRpcController::RequestClosed))),
-      gcc_req_size_(0) {
+      gomacc_req_size_(0) {
   DCHECK(http_server_request_ != nullptr);
   http_server_request_->NotifyWhenClosed(closed_callback_);
 }
@@ -207,7 +207,7 @@ bool CompileService::MultiRpcController::ParseRequest(MultiExecReq* req) {
                  << http_server_request_->request();
     return false;
   }
-  gcc_req_size_ = http_server_request_->request_content_length();
+  gomacc_req_size_ = http_server_request_->request_content_length();
   bool ok = req->ParseFromArray(
         http_server_request_->request_content(),
         http_server_request_->request_content_length());
@@ -260,16 +260,16 @@ void CompileService::MultiRpcController::SendReply() {
   CHECK(http_server_request_ != nullptr);
   CHECK(rpcs_.empty());
 
-  size_t gcc_resp_size = resp_->ByteSize();
+  size_t gomacc_resp_size = resp_->ByteSize();
   std::ostringstream http_response_message;
   http_response_message
     << "HTTP/1.1 200 OK\r\n"
     << "Content-Type: binary/x-protocol-buffer\r\n"
-    << "Content-Length: " << gcc_resp_size << "\r\n\r\n";
+    << "Content-Length: " << gomacc_resp_size << "\r\n\r\n";
   string response_string = http_response_message.str();
   int header_size = response_string.size();
-  response_string.resize(header_size + gcc_resp_size);
-  resp_->SerializeToArray(&response_string[header_size], gcc_resp_size);
+  response_string.resize(header_size + gomacc_resp_size);
+  resp_->SerializeToArray(&response_string[header_size], gomacc_resp_size);
   http_server_request_->SendReply(response_string);
   http_server_request_ = nullptr;
 }
@@ -319,7 +319,7 @@ CompileService::CompileService(WorkerThreadManager* wm, int compiler_info_pool)
       username_(GetUsername()),
       nodename_(GetNodename()),
       start_time_(time(nullptr)),
-      compiler_info_builder_(new CompilerInfoBuilder),
+      compiler_info_builder_facade_(new CompilerInfoBuilderFacade),
       compiler_info_pool_(wm_->StartPool(compiler_info_pool, "compiler_info")),
       file_hash_cache_(new FileHashCache),
       include_processor_pool_(WorkerThreadManager::kFreePool),
@@ -433,7 +433,16 @@ void CompileService::SetMultiFileStore(
 
 void CompileService::SetFileServiceHttpClient(
     std::unique_ptr<FileServiceHttpClient> file_service) {
-  file_service_ = std::move(file_service);
+  blob_client_ = absl::make_unique<FileServiceBlobClient>(
+      std::move(file_service));
+}
+
+FileServiceHttpClient* CompileService::file_service() const {
+  return blob_client_->file_service();
+}
+
+BlobClient* CompileService::blob_client() const {
+  return blob_client_.get();
 }
 
 void CompileService::StartIncludeProcessorWorkers(int num_threads) {
@@ -480,8 +489,7 @@ void CompileService::Exec(
     }
 
     task = new CompileTask(this, task_id);
-    task->mutable_stats()->gcc_req_size = rpc->gcc_req_size_;
-    rpc->gcc_resp_size_ = &task->mutable_stats()->gcc_resp_size;
+    task->mutable_stats()->gomacc_req_size = rpc->gomacc_req_size_;
     task->Init(rpc, req, resp, callback);
 
     AUTOLOCK(lock, &mu_);
@@ -695,7 +703,7 @@ void CompileService::Wait() {
   file_hash_cache_.reset();
   if (multi_file_store_.get())
     multi_file_store_->Wait();
-  file_service_.reset();
+  blob_client_.reset();
   exec_service_client_.reset();
 
   // Stop all HttpClient tasks before resetting http_rpc_ b/26551623
@@ -1167,7 +1175,7 @@ void CompileService::DumpCompilerInfo(std::ostringstream* ss) {
   }
   (*ss) << "\n";
 
-  compiler_info_builder_->Dump(ss);
+  compiler_info_builder_facade_->Dump(ss);
 
   CompilerInfoCache::instance()->Dump(ss);
 
@@ -1372,7 +1380,7 @@ void CompileService::GetCompilerInfoInternal(
     std::vector<string> env(param->run_envs);
     env.push_back("GOMA_WILL_FAIL_WITH_UKNOWN_FLAG=true");
     std::unique_ptr<CompilerInfoData> cid(
-        compiler_info_builder_->FillFromCompilerOutputs(
+        compiler_info_builder_facade_->FillFromCompilerOutputs(
             *param->flags, param->key.local_compiler_path, env));
 
     param->state.reset(CompilerInfoCache::instance()->Store(
@@ -1637,6 +1645,14 @@ int CompileService::GetEstimatedSubprocessDelayTime() {
     }
     ++count;
   }
+
+  if (!dont_kill_subprocess_) {
+    // We assume that cache hit request is replied withing 5 seconds.
+    // If Exec request took more than that, we want to use local resource.
+    static const int kMaxEstimatedSubprocessDelayTimeMs = 5 * 1000;
+    delay = std::min(delay, kMaxEstimatedSubprocessDelayTimeMs);
+  }
+
   return delay;
 }
 

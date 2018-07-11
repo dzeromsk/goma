@@ -43,7 +43,10 @@ if (os == "win") {
   config("certs_resource_config") {
     include_dirs = [ "." ]
   }
-  static_library("certs_resource") {
+
+  # This needs to be source_set (instead of static_library), otherwise
+  # openssl_engine will fail to read certs.rc.
+  source_set("certs_resource") {
     sources = [
       "$roots.pem",
       "certs.rc",

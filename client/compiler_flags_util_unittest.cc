@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "compiler_info.h"
+#include "cxx/cxx_compiler_info.h"
 #include "gtest/gtest.h"
 
 using std::string;
@@ -24,13 +24,13 @@ class CompilerFlagsUtilTest : public testing::Test {
       const std::vector<string>& system_framework_paths,
       CompilerInfoData* compiler_info_data) {
     for (const auto& p : cxx_system_include_paths) {
-      compiler_info_data->add_cxx_system_include_paths(p);
+      compiler_info_data->mutable_cxx()->add_cxx_system_include_paths(p);
     }
     for (const auto& p : system_include_paths) {
-      compiler_info_data->add_system_include_paths(p);
+      compiler_info_data->mutable_cxx()->add_system_include_paths(p);
     }
     for (const auto& p : system_framework_paths) {
-      compiler_info_data->add_system_framework_paths(p);
+      compiler_info_data->mutable_cxx()->add_system_framework_paths(p);
     }
   }
 };
@@ -82,6 +82,8 @@ TEST_F(CompilerFlagsUtilTest, MakeWeakRelativeMacWebKit) {
 
   std::unique_ptr<CompilerInfoData> compiler_info_data(new CompilerInfoData);
   {
+    compiler_info_data->mutable_cxx();
+
     std::vector<string> cxx_system_include_paths;
     std::vector<string> system_include_paths;
     std::vector<string> system_framework_paths;
@@ -103,7 +105,7 @@ TEST_F(CompilerFlagsUtilTest, MakeWeakRelativeMacWebKit) {
         compiler_info_data.get());
   }
 
-  CompilerInfo compiler_info(std::move(compiler_info_data));
+  CxxCompilerInfo compiler_info(std::move(compiler_info_data));
 
   std::vector<string> parsed_args =
       CompilerFlagsUtil::MakeWeakRelative(
@@ -181,6 +183,8 @@ TEST_F(CompilerFlagsUtilTest, MakeWeakRelativeChromiumClang) {
 
   std::unique_ptr<CompilerInfoData> compiler_info_data(new CompilerInfoData);
   {
+    compiler_info_data->mutable_cxx();
+
     std::vector<string> cxx_system_include_paths;
     cxx_system_include_paths.push_back("/usr/include/c++/4.4.3");
     std::vector<string> system_include_paths;
@@ -193,7 +197,7 @@ TEST_F(CompilerFlagsUtilTest, MakeWeakRelativeChromiumClang) {
         compiler_info_data.get());
   }
 
-  CompilerInfo compiler_info(std::move(compiler_info_data));
+  CxxCompilerInfo compiler_info(std::move(compiler_info_data));
 
   std::vector<string> parsed_args =
       CompilerFlagsUtil::MakeWeakRelative(

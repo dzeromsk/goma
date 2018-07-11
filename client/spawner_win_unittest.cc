@@ -3,18 +3,25 @@
 // found in the LICENSE file.
 
 
-// This is a Windows-only unit test
-#ifdef _WIN32
+#ifndef _WIN32
+#error "This is a Windows-only unit test"
+#endif
+
 #include "spawner_win.h"
 
 #include "compiler_specific.h"
+#include "path.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/subprocess.pb.h"
 MSVC_POP_WARNING()
+#include "absl/strings/ascii.h"
+#include "absl/strings/match.h"
 #include "util.h"
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
+
+namespace devtools_goma {
 
 TEST(SpawnerWin, SpawnerAndLogToFile) {
   devtools_goma::SubProcessReq req;
@@ -60,10 +67,22 @@ TEST(SpawnerWin, SpawnerAndLogToFile) {
   ASSERT_TRUE(fp != nullptr);
   char temp[PATH_MAX];
   fgets(temp, PATH_MAX, fp);  // first line is the exe name
+  EXPECT_STREQ(".\\dump_env.exe\n", temp);
+
   fgets(temp, PATH_MAX, fp);
   EXPECT_STREQ("arg1\n", temp);
   fgets(temp, PATH_MAX, fp);
   EXPECT_STREQ("arg2\n", temp);
+
+  // These envs are come from "cmd /c" prepending
+  fgets(temp, PATH_MAX, fp);
+  EXPECT_TRUE(absl::StartsWith(temp, "COMSPEC="));
+  EXPECT_EQ("comspec=c:\\windows\\system32\\cmd.exe\n",
+            absl::AsciiStrToLower(temp));
+
+  fgets(temp, PATH_MAX, fp);
+  EXPECT_STREQ("PROMPT=$P$G\n", temp);
+
   fgets(temp, PATH_MAX, fp);
   EXPECT_STREQ("TEST_STRING1=goma\n", temp);
   fgets(temp, PATH_MAX, fp);
@@ -104,18 +123,57 @@ TEST(SpawnerWin, SpawnerAndLogToString) {
   char* next_token;
   char* token = strtok_s(&output[0], "\r\n", &next_token);
   EXPECT_TRUE(token != nullptr);
+  EXPECT_STREQ(".\\dump_env.exe", token);
   token = strtok_s(nullptr, "\r\n", &next_token);
   EXPECT_TRUE(token != nullptr);
   EXPECT_STREQ("arg1", token);
   token = strtok_s(nullptr, "\r\n", &next_token);
   EXPECT_TRUE(token != nullptr);
   EXPECT_STREQ("arg2", token);
+
+  // These envs are come from "cmd /c" prepending
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  EXPECT_TRUE(absl::StartsWith(token, "COMSPEC="));
+  EXPECT_EQ("comspec=c:\\windows\\system32\\cmd.exe",
+            absl::AsciiStrToLower(token));
+
+  token = strtok_s(nullptr, "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  EXPECT_STREQ("PROMPT=$P$G", token);
+
   token = strtok_s(nullptr, "\r\n", &next_token);
   EXPECT_TRUE(token != nullptr);
   EXPECT_STREQ("TEST_STRING1=goma", token);
   token = strtok_s(nullptr, "\r\n", &next_token);
   EXPECT_TRUE(token != nullptr);
   EXPECT_STREQ("TEST_STRING2=win", token);
+}
+
+TEST(SpawnerWin, SpawnerAbspath) {
+  char buffer[PATH_MAX] = {0};
+  GetModuleFileNameA(nullptr, buffer, PATH_MAX);
+  *strrchr(buffer, '\\') = 0;
+
+  std::string cwd(buffer);
+  std::string prog(file::JoinPathRespectAbsolute(cwd, "dump_env.exe"));
+  std::vector<std::string> argv{prog};
+  std::vector<std::string> env{"PATH=" + devtools_goma::GetEnv("PATH"),
+                               "PATHEXT=" + devtools_goma::GetEnv("PATHEXT")};
+
+  devtools_goma::SpawnerWin spawner;
+  std::string output;
+  spawner.SetConsoleOutputBuffer(&output,
+                                 devtools_goma::Spawner::MERGE_STDOUT_STDERR);
+  int pid = spawner.Run(prog, argv, env, cwd);
+  EXPECT_NE(0, pid);
+  while (spawner.IsChildRunning())
+    spawner.Wait(devtools_goma::Spawner::WAIT_INFINITE);
+
+  char* next_token;
+  char* token = strtok_s(&output[0], "\r\n", &next_token);
+  EXPECT_TRUE(token != nullptr);
+  EXPECT_EQ(prog, token);
 }
 
 TEST(SpawnerWin, SpawnerEscapeArgs) {
@@ -177,8 +235,13 @@ TEST(SpawnerWin, SpawnerEscapeArgs) {
                                  devtools_goma::Spawner::MERGE_STDOUT_STDERR);
   int pid = spawner.Run(prog, argv, env, cwd);
   EXPECT_NE(0, pid);
-  while (spawner.IsChildRunning())
-    spawner.Wait(devtools_goma::Spawner::WAIT_INFINITE);
+
+  Spawner::ProcessStatus process_status = Spawner::ProcessStatus::RUNNING;
+  while (spawner.IsChildRunning()) {
+    process_status = spawner.Wait(devtools_goma::Spawner::WAIT_INFINITE);
+  }
+
+  EXPECT_EQ(Spawner::ProcessStatus::EXITED, process_status);
 
   char* next_token;
   char* token = strtok_s(&output[0], "\r\n", &next_token);
@@ -290,8 +353,12 @@ TEST(SpawnerWin, SpawnerLongArgs) {
                                  devtools_goma::Spawner::MERGE_STDOUT_STDERR);
   int pid = spawner.Run(prog, argv, env, cwd);
   EXPECT_NE(0, pid);
-  while (spawner.IsChildRunning())
-    spawner.Wait(devtools_goma::Spawner::WAIT_INFINITE);
+  Spawner::ProcessStatus process_status = Spawner::ProcessStatus::RUNNING;
+  while (spawner.IsChildRunning()) {
+    process_status = spawner.Wait(devtools_goma::Spawner::WAIT_INFINITE);
+  }
+
+  EXPECT_EQ(Spawner::ProcessStatus::EXITED, process_status);
 
   char* next_token;
   char* token = strtok_s(&output[0], "\r\n", &next_token);
@@ -322,4 +389,4 @@ TEST(SpawnerWin, SpawnerFailed) {
   EXPECT_EQ(0, pid);
 }
 
-#endif  // _WIN32
+}  // namespace devtools_goma

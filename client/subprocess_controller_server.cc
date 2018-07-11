@@ -50,7 +50,15 @@ static bool CanKillCommand(absl::string_view command,
 
 namespace devtools_goma {
 
+#ifdef THREAD_SANITIZER
+// When tsan is enabled, signal is swallowed by sanitizer and causing long wait
+// in select. To improve time in that case, we use small wait time for select.
+// TODO: remove this when below issue is fixed
+//               https://github.com/google/sanitizers/issues/838
+static const int kIdleIntervalMilliSec = 50;
+#else
 static const int kIdleIntervalMilliSec = 500;
+#endif
 
 #ifndef _WIN32
 static const int kWaitIntervalMilliSec = 5;
@@ -158,15 +166,12 @@ void SubProcessControllerServer::Loop() {
   }
   LOG(INFO) << "Terminating...";
   FlushLogFiles();
-  for (std::map<int, SubProcessImpl*>::iterator iter = subprocs_.begin();
-       iter != subprocs_.end();
-       ++iter) {
-    SubProcessImpl* s = iter->second;
+  for (const auto& iter : subprocs_) {
+    SubProcessImpl* s = iter.second.get();
     if (s->req().detach()) {
-      delete s;
       continue;
     }
-    const SubProcessTerminated* terminated = nullptr;
+    std::unique_ptr<SubProcessTerminated> terminated;
     s->Kill();
     // Wait for the running subprocess termination.
     // Because Wait() would emit log message and it would take some time to
@@ -175,8 +180,6 @@ void SubProcessControllerServer::Loop() {
     while ((terminated = s->Wait(true)) == nullptr) {
       devtools_goma::PlatformThread::Sleep(10000);
     }
-    delete terminated;
-    delete s;
   }
   FlushLogFiles();
   subprocs_.clear();
@@ -282,19 +285,14 @@ void SubProcessControllerServer::Terminated(
       << "id=" << terminated->id() << " Terminated"
       << " status=" << terminated->status();
 
-  std::map<int, SubProcessImpl*>::iterator found =
-      subprocs_.find(terminated->id());
-  if (found != subprocs_.end()) {
-    delete found->second;
-    subprocs_.erase(found);
-  }
+  subprocs_.erase(terminated->id());
   SendNotify(SubProcessController::TERMINATED, *terminated);
 
   TrySpawnSubProcess();
 }
 
 SubProcessImpl* SubProcessControllerServer::LookupSubProcess(int id) {
-  std::map<int, SubProcessImpl*>::iterator found = subprocs_.find(id);
+  auto found = subprocs_.find(id);
   if (found == subprocs_.end()) {
     // There is information gap between server and client.
     // The server can execute a subprocess and send SubProcessTerminated
@@ -311,7 +309,7 @@ SubProcessImpl* SubProcessControllerServer::LookupSubProcess(int id) {
     ErrorTerminate(id, SubProcessTerminated::kFailedToLookup);
     return nullptr;
   }
-  return found->second;
+  return found->second.get();
 }
 
 void SubProcessControllerServer::TrySpawnSubProcess() {
@@ -326,10 +324,8 @@ void SubProcessControllerServer::TrySpawnSubProcess() {
   // priority) will be selected.  In other words, latter subproc with the
   // same priority in the list would not be executed before former subproc.
   // subproc weight is not checked to select next candidate.
-  for (std::map<int, SubProcessImpl*>::iterator iter = subprocs_.begin();
-       iter != subprocs_.end();
-       ++iter) {
-    SubProcessImpl* s = iter->second;
+  for (const auto& iter : subprocs_) {
+    SubProcessImpl* s = iter.second.get();
     VLOG(2) << s->req().id() << " " << s->req().trace_id()
             << " " << SubProcessState::State_Name(s->state());
     if (s->state() == SubProcessState::PENDING &&
@@ -495,10 +491,8 @@ void SubProcessControllerServer::DoSignal() {
     PLOG(FATAL) << "signal_fd " << r;
   }
   LOG(INFO) << "signal pid=" << si.si_pid << " status=" << si.si_status;
-  for (std::map<int, SubProcessImpl*>::iterator iter = subprocs_.begin();
-       iter != subprocs_.end();
-       ++iter) {
-    SubProcessImpl* s = iter->second;
+  for (const auto& iter : subprocs_) {
+    SubProcessImpl* s = iter.second.get();
     if (s->started().pid() == si.si_pid) {
       s->Signaled(si.si_status);
       timeout_millisec_ = kWaitIntervalMilliSec;
@@ -517,10 +511,8 @@ void SubProcessControllerServer::DoTimeout() {
   while (check_terminated) {
     check_terminated = false;
     in_signaled = false;
-    for (std::map<int, SubProcessImpl*>::iterator iter = subprocs_.begin();
-         iter != subprocs_.end();
-         ++iter) {
-      SubProcessImpl* s = iter->second;
+    for (const auto& iter : subprocs_) {
+      SubProcessImpl* s = iter.second.get();
       if (s->started().pid() == SubProcessState::kInvalidPid)
         continue;
       bool need_kill = s->state() == SubProcessState::SIGNALED;

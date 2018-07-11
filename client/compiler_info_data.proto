@@ -9,8 +9,16 @@ package devtools_goma;
 
 // CompilerInfoData is a serializable format of CompilerInfo.
 //
-// NEXT ID TO USE: 36
+// NEXT ID TO USE: 40
 message CompilerInfoData {
+  // Type of file in ResouceInfo.
+  enum ResourceType {
+    // Files under clang's --resource-dir.
+    CLANG_RESOURCE = 1;
+    // Files to represents GCC installation in clang.
+    CLANG_GCC_INSTALLATION_MARKER = 2;
+  }
+
   // FileId of the compiler or subprogram.
   // NEXT ID TO USE: 9
   message FileId {
@@ -29,7 +37,7 @@ message CompilerInfoData {
     optional bool is_directory = 8;
   };
 
-  // FileStat of the compiler or subprogram.
+  // FileStat of the compiler, subprogram or other resource files.
   message FileStat {
     optional int64 mtime = 1;
     optional int64 size = 2;
@@ -43,9 +51,21 @@ message CompilerInfoData {
     optional FileStat file_stat = 4;
   };
 
-  message MacroValue {
-    optional string key = 1;
-    optional int64 value = 2;
+  // Implicit input files used for the compile.
+  // We should upload following files in additon to header files etc.
+  //
+  // For example, default blacklist files for clang sanitizer does not show up
+  // in its command line.  However, lack of such files may make goma server
+  // create broken object files.  It need to be set to ResourceInfo.
+  message ResourceInfo {
+    // A relative path name of the file.
+    optional string name = 1;
+    // A type of the file.
+    optional ResourceType type = 2;
+    // SHA256 of the file.  It is used for detecting update.
+    optional string hash = 3;
+    // FileStat of the file.  It is used for detecting update.
+    optional FileStat file_stat = 4;
   }
 
   // compiler name.
@@ -54,7 +74,7 @@ message CompilerInfoData {
   optional string version = 2;
   // compiler target
   optional string target = 3;
-
+  // compiler language
   optional string lang = 4;
 
   // some compiler command is just a wrapper for real compiler, and the command
@@ -77,37 +97,17 @@ message CompilerInfoData {
   // TODO: better to rename this to real_compiler_hash?
   optional string hash = 7;
 
-  repeated string quote_include_paths = 31;
-  repeated string cxx_system_include_paths = 9;
-  repeated string system_include_paths = 10;
-  repeated string system_framework_paths = 11;
-
-  optional string predefined_macros = 12;
-
-  // unordered map.
-  repeated string supported_predefined_macros = 13;
-  repeated string hidden_predefined_macros = 27;
-  // unordered map.
-  // use map<string, int64>? b/21859856
-  repeated MacroValue has_feature = 14;
-  repeated MacroValue has_extension = 15;
-  repeated MacroValue has_attribute = 16;
-  repeated MacroValue has_cpp_attribute = 17;
-  repeated MacroValue has_declspec_attribute = 18;
-  repeated MacroValue has_builtin = 33;
-
-  // Automatically prepend this path before system include paths.
-  // This is required for Windows NaCl toolchain because all system include
-  // paths are relative paths from the toolchain root.
-  //
-  optional string toolchain_root = 19;
-
   // Additional command line flags to be sent to backends.
   // (for example, -fuse-init-arrary).
   repeated string additional_flags = 20;
 
-  // A list of subprograms specified by -B flag.
+  // A list of subprograms, which a compiler can invoke during the compile.
+  // For example, subprograms specified by -B flag ("objdump", "as"), and clang
+  // plugins.
   repeated SubprogramInfo subprograms = 21;
+
+  // A list of resource files.
+  repeated ResourceInfo resource = 36;
 
   // When taking compiler info is failed, |failed_at| is not 0.
   // The error reason should be set in error_message.
@@ -117,12 +117,69 @@ message CompilerInfoData {
   // empty.
   optional bool found = 25;
 
-  // Path to compiler resource directory.
-  optional string resource_dir = 26;
-
   // Timestamp this cache is used recently.
   optional int64 last_used_at = 30;
+
+  oneof language_extension {
+    // C/C++ extension.
+    CxxCompilerInfoData cxx = 37;
+    // Javac extension
+    JavacCompilerInfoData javac = 38;
+    // Java extension
+    JavaCompilerInfoData java = 39;
+  }
+
+  reserved 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 26, 27, 31, 33;
 };
+
+// CxxCompilerInfoData contains C/C++ related CompilerInfoData.
+// NEXT ID TO USE: 16
+message CxxCompilerInfoData {
+  message MacroValue {
+    optional string key = 1;
+    optional int64 value = 2;
+  }
+
+  repeated string quote_include_paths = 1;
+  repeated string cxx_system_include_paths = 2;
+  repeated string system_include_paths = 3;
+  repeated string system_framework_paths = 4;
+
+  optional string predefined_macros = 5;
+
+  // unordered map.
+  repeated string supported_predefined_macros = 6;
+  repeated string hidden_predefined_macros = 7;
+  // unordered map.
+  // use map<string, int64>? b/21859856
+  repeated MacroValue has_feature = 8;
+  repeated MacroValue has_extension = 9;
+  repeated MacroValue has_attribute = 10;
+  repeated MacroValue has_cpp_attribute = 11;
+  repeated MacroValue has_declspec_attribute = 12;
+  repeated MacroValue has_builtin = 13;
+
+  // Path to compiler resource directory.
+  optional string resource_dir = 14;
+
+  // Automatically prepend this path before system include paths.
+  // This is required for Windows NaCl toolchain because all system include
+  // paths are relative paths from the toolchain root.
+  //
+  optional string toolchain_root = 15;
+};
+
+// JavacCompilerInfoData contains Javac related CompilerInfoData.
+// NEXT ID TO USE: 1
+message JavacCompilerInfoData {
+  // currently no extension
+}
+
+// JavaCompilerInfoData contains Javac related CompilerInfoData.
+// NEXT ID TO USE: 1
+message JavaCompilerInfoData {
+  // currently no extension
+}
 
 // CompilerInfoDataTable is a table of CompilerInfoData indexed by
 // compiler_info_key.

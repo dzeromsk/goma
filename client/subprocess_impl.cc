@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "absl/memory/memory.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #ifndef _WIN32
@@ -100,7 +101,7 @@ bool SubProcessImpl::Kill() {
               << " pid=" << started_.pid()
               << " child_signaled=" << spawner_->IsSignaled()
               << " running=" << running;
-    return spawner_->Kill();
+    return spawner_->Kill() == Spawner::ProcessStatus::RUNNING;
   }
   LOG(INFO) << "id=" << req_.id() << " ignore kill " << req_.trace_id()
             << " pid=" << started_.pid() << " running=" << running;
@@ -116,7 +117,7 @@ void SubProcessImpl::Signaled(int status) {
   state_ = SubProcessState::SIGNALED;
 }
 
-SubProcessTerminated* SubProcessImpl::Wait(bool need_kill) {
+std::unique_ptr<SubProcessTerminated> SubProcessImpl::Wait(bool need_kill) {
   VLOG(1) << "Wait " << req_.id() << " " << req_.trace_id()
           << " pid=" << started_.pid()
           << " state=" << SubProcessState::State_Name(state_);
@@ -141,7 +142,7 @@ SubProcessTerminated* SubProcessImpl::Wait(bool need_kill) {
   VLOG(1) << "Terminated " << req_.id() << " " << req_.trace_id()
           << " pid=" << started_.pid();
   terminated_.set_id(req_.id());
-  SubProcessTerminated* terminated = new SubProcessTerminated;
+  auto terminated = absl::make_unique<SubProcessTerminated>();
   *terminated = terminated_;
   return terminated;
 }

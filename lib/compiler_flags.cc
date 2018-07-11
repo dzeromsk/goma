@@ -20,7 +20,6 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "cmdline_parser.h"
-#include "compiler_type_specific.h"
 #include "file.h"
 #include "file_helper.h"
 #include "flag_parser.h"
@@ -33,25 +32,6 @@
 using std::string;
 
 namespace devtools_goma {
-
-/* static */
-std::unique_ptr<CompilerFlags> CompilerFlags::New(
-    const std::vector<string>& args, const string& cwd) {
-  if (args.empty()) {
-    LOG(ERROR) << "Empty args";
-    return nullptr;
-  }
-
-  return CompilerTypeSpecific::FromArg(args[0]).NewCompilerFlags(args, cwd);
-}
-
-/* static */
-std::unique_ptr<CompilerFlags> CompilerFlags::MustNew(
-    const std::vector<string>& args, const string& cwd) {
-  std::unique_ptr<CompilerFlags> flags = CompilerFlags::New(args, cwd);
-  LOG_IF(FATAL, !flags) << "unsupported command line:" << args;
-  return flags;
-}
 
 CompilerFlags::CompilerFlags(const std::vector<string>& args, string cwd)
     : args_(args), cwd_(std::move(cwd)), is_successful_(false) {
@@ -139,11 +119,6 @@ string CompilerFlags::compiler_base_name() const {
     compiler_base_name = compiler_base_name.substr(found_slash + 1);
   }
   return compiler_base_name;
-}
-
-/* static */
-string CompilerFlags::GetCompilerName(absl::string_view arg) {
-  return CompilerTypeSpecific::FromArg(arg).GetCompilerName(arg);
 }
 
 string CompilerFlags::DebugString() const {

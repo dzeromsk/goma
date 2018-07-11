@@ -16,7 +16,7 @@ using std::string;
 namespace devtools_goma {
 
 // Parsing Command-Line Arguments (on posix for gcc, javac)
-bool ParsePosixCommandLineToArgv(const string& cmdline,
+bool ParsePosixCommandLineToArgv(absl::string_view cmdline,
                                  std::vector<string>* argv) {
   bool dquote = false;
   bool squote = false;
@@ -96,7 +96,7 @@ bool ParsePosixCommandLineToArgv(const string& cmdline,
 
 // Parsing Command-Line Arguments (on Windows)
 // http://msdn.microsoft.com/en-us/library/windows/desktop/17w5ykft(v=vs.85).aspx
-bool ParseWinCommandLineToArgv(const string& cmdline,
+bool ParseWinCommandLineToArgv(absl::string_view cmdline,
                                std::vector<string>* argv) {
   size_t num_backslash = 0;
   bool arg_delimiter = false;

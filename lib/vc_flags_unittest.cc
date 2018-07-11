@@ -13,6 +13,7 @@
 
 
 #include "absl/strings/str_cat.h"
+#include "compiler_flags_parser.h"
 #include "file.h"
 #include "file_dir.h"
 #include "file_helper.h"
@@ -139,7 +140,7 @@ TEST_F(VCFlagsTest, Basic) {
   EXPECT_TRUE(flags.is_cplusplus());
   EXPECT_TRUE(flags.ignore_stdinc());
   EXPECT_FALSE(flags.require_mspdbserv());
-  EXPECT_EQ(CompilerType::Clexe, flags.type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags.type());
 
   ASSERT_EQ(1U, flags.root_includes().size());
   EXPECT_EQ("preprocess.h", flags.root_includes()[0]);
@@ -209,7 +210,7 @@ TEST_F(VCFlagsTest, BasicMixedDash) {
   EXPECT_TRUE(flags.is_cplusplus());
   EXPECT_TRUE(flags.ignore_stdinc());
   EXPECT_FALSE(flags.require_mspdbserv());
-  EXPECT_EQ(CompilerType::Clexe, flags.type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags.type());
 
   const std::vector<string>& output_files = flags.output_files();
   ASSERT_EQ(1, static_cast<int>(output_files.size()));
@@ -225,7 +226,7 @@ TEST_F(VCFlagsTest, AtFile) {
                                           PathResolver::kPreserveCase));
 
   // The at_file doesn't exist.
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
   EXPECT_FALSE(flags->is_successful());
 
   ASSERT_TRUE(WriteStringToFile(
@@ -236,7 +237,7 @@ TEST_F(VCFlagsTest, AtFile) {
       "/Fd\"D:/foobar/Debug/foobar.pdb\" /Gd /TP /analyze- /errorReport:queue",
       at_file));
 
-  flags = CompilerFlags::MustNew(args, "D:\\foobar");
+  flags = CompilerFlagsParser::MustNew(args, "D:\\foobar");
   EXPECT_TRUE(flags->is_successful());
   EXPECT_TRUE(flags->fail_message().empty()) << flags->fail_message();
 
@@ -254,7 +255,7 @@ TEST_F(VCFlagsTest, AtFile) {
   EXPECT_EQ(PathResolver::PlatformConvert(at_file),
             flags->optional_input_filenames()[0]);
 
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
 
   VCFlags* vc_flags = static_cast<VCFlags*>(flags.get());
   EXPECT_FALSE(vc_flags->require_mspdbserv());
@@ -273,7 +274,7 @@ TEST_F(VCFlagsTest, AtFileQuote) {
                                           PathResolver::kPreserveCase));
 
   // The at_file doesn't exist.
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
   EXPECT_FALSE(flags->is_successful());
 
   ASSERT_TRUE(WriteStringToFile(
@@ -288,7 +289,7 @@ TEST_F(VCFlagsTest, AtFileQuote) {
       "gtest\\src\\gtest.cc \"gtest\\src\\gtest-test-part.cc\" /MP",
       at_file));
 
-  flags = CompilerFlags::MustNew(args, "C:\\goma work");
+  flags = CompilerFlagsParser::MustNew(args, "C:\\goma work");
   EXPECT_TRUE(flags->is_successful());
   EXPECT_TRUE(flags->fail_message().empty()) << flags->fail_message();
 
@@ -309,7 +310,7 @@ TEST_F(VCFlagsTest, AtFileQuote) {
   EXPECT_EQ(PathResolver::PlatformConvert(at_file),
             flags->optional_input_filenames()[0]);
 
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
 
   VCFlags* vc_flags = static_cast<VCFlags*>(flags.get());
   EXPECT_FALSE(vc_flags->require_mspdbserv());
@@ -355,7 +356,7 @@ TEST_F(VCFlagsTest, WCAtFile) {
                                           PathResolver::kPreserveCase));
 
   // The at_file doesn't exist.
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "."));
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
   EXPECT_FALSE(flags->is_successful());
 
   static const char kCmdLine[] =
@@ -363,7 +364,7 @@ TEST_F(VCFlagsTest, WCAtFile) {
   const string kWCCmdLine(kCmdLine, sizeof kCmdLine - 1);
   ASSERT_TRUE(WriteStringToFile(kWCCmdLine, at_file));
 
-  flags = CompilerFlags::MustNew(args, "D:\\foobar");
+  flags = CompilerFlagsParser::MustNew(args, "D:\\foobar");
   EXPECT_TRUE(flags->is_successful());
   EXPECT_TRUE(flags->fail_message().empty()) << flags->fail_message();
 
@@ -378,7 +379,7 @@ TEST_F(VCFlagsTest, WCAtFile) {
   ASSERT_EQ(1U, flags->optional_input_filenames().size());
   EXPECT_EQ(PathResolver::PlatformConvert(at_file),
             flags->optional_input_filenames()[0]);
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
 
   VCFlags* vc_flags = static_cast<VCFlags*>(flags.get());
   EXPECT_FALSE(vc_flags->require_mspdbserv());
@@ -419,7 +420,7 @@ TEST_F(VCFlagsTest, Optimize) {
   EXPECT_FALSE(flags.ignore_stdinc());
   EXPECT_FALSE(flags.require_mspdbserv());
 
-  EXPECT_EQ(CompilerType::Clexe, flags.type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags.type());
 }
 
 // For cl.exe, unknown flags are treated as input.
@@ -522,7 +523,8 @@ TEST_F(VCFlagsTest, VCFlags) {
   args.push_back("cl");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -532,7 +534,7 @@ TEST_F(VCFlagsTest, VCFlags) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   const size_t kNumEnvs = 9;
@@ -596,7 +598,8 @@ TEST_F(VCFlagsTest, IsImportantEnvVC) {
   std::vector<string> args {
     "cl", "/c", "hello.cc",
   };
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
 
   for (const auto& tc : kTestCases) {
     ASSERT_TRUE(!tc.server_important || tc.client_important);
@@ -760,7 +763,7 @@ TEST_F(VCFlagsTest, ChromeWindowsCompileFlag) {
   args.push_back("/we4389");
   args.push_back("app\\chrome_exe_main_win.cc");
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "d:\\src\\cr9\\src\\chrome"));
+      CompilerFlagsParser::MustNew(args, "d:\\src\\cr9\\src\\chrome"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
@@ -772,7 +775,7 @@ TEST_F(VCFlagsTest, ChromeWindowsCompileFlag) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\src\\cr9\\src\\chrome", flags->cwd());
 
   devtools_goma::VCFlags* vc_flags = static_cast<devtools_goma::VCFlags*>(
@@ -840,7 +843,7 @@ TEST_F(VCFlagsTest, SfntlyWindowsCompileFlag) {
   args.push_back("C:\\src\\sfntly\\cpp\\src\\sfntly\\font.cc");
 
   std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "C:\\src\\sfntly\\cpp\\build"));
+      CompilerFlagsParser::MustNew(args, "C:\\src\\sfntly\\cpp\\build"));
 
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
@@ -853,7 +856,7 @@ TEST_F(VCFlagsTest, SfntlyWindowsCompileFlag) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("C:\\src\\sfntly\\cpp\\build", flags->cwd());
 
   devtools_goma::VCFlags* vc_flags = static_cast<devtools_goma::VCFlags*>(
@@ -886,7 +889,7 @@ TEST_F(VCFlagsTest, VCImplicitMacros) {
   args.push_back("/c");
   args.push_back("C:\\src\\sfntly\\cpp\\src\\sfntly\\font.cc");
   std::unique_ptr<CompilerFlags> flags1(
-      CompilerFlags::MustNew(args, "C:\\src\\sfntly\\cpp\\build"));
+      CompilerFlagsParser::MustNew(args, "C:\\src\\sfntly\\cpp\\build"));
   EXPECT_EQ(args, flags1->args());
   EXPECT_EQ("#define __cplusplus\n", flags1->implicit_macros());
 
@@ -897,7 +900,7 @@ TEST_F(VCFlagsTest, VCImplicitMacros) {
   args.push_back("/c");
   args.push_back("C:\\src\\sfntly\\cpp\\src\\sfntly\\font.c");
   std::unique_ptr<CompilerFlags> flags2(
-      CompilerFlags::MustNew(args, "C:\\src\\sfntly\\cpp\\build"));
+      CompilerFlagsParser::MustNew(args, "C:\\src\\sfntly\\cpp\\build"));
   EXPECT_EQ(args, flags2->args());
   EXPECT_EQ(0UL, flags2->implicit_macros().length());
 
@@ -914,7 +917,7 @@ TEST_F(VCFlagsTest, VCImplicitMacros) {
   args.push_back("/c");
   args.push_back("C:\\src\\sfntly\\cpp\\src\\sfntly\\font.cc");
   std::unique_ptr<CompilerFlags> flags3(
-      CompilerFlags::MustNew(args, "C:\\src\\sfntly\\cpp\\build"));
+      CompilerFlagsParser::MustNew(args, "C:\\src\\sfntly\\cpp\\build"));
   EXPECT_EQ(args, flags3->args());
   string macro = flags3->implicit_macros();
   EXPECT_TRUE(macro.find("__cplusplus") != string::npos);
@@ -923,7 +926,7 @@ TEST_F(VCFlagsTest, VCImplicitMacros) {
   EXPECT_TRUE(macro.find("_NATIVE_WCHAR_T_DEFINED") != string::npos);
   EXPECT_TRUE(macro.find("_WCHAR_T_DEFINED") != string::npos);
 
-  EXPECT_EQ(CompilerType::Clexe, flags3->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags3->type());
   VCFlags* vc_flags = static_cast<VCFlags*>(flags3.get());
   EXPECT_TRUE(vc_flags->require_mspdbserv());
 }
@@ -933,7 +936,8 @@ TEST_F(VCFlagsTest, ClangCl) {
   args.push_back("clang-cl.exe");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -942,7 +946,7 @@ TEST_F(VCFlagsTest, ClangCl) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 }
 
@@ -952,7 +956,8 @@ TEST_F(VCFlagsTest, ClangClWithMflag) {
   args.push_back("-m64");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -961,7 +966,7 @@ TEST_F(VCFlagsTest, ClangClWithMflag) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   std::vector<string> expected_compiler_info_flags;
@@ -981,8 +986,9 @@ TEST_F(VCFlagsTest, ClangClKnownFlags) {
     "--analyze",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_TRUE(flags->unknown_flags().empty())
       << "unknown flags: " << flags->unknown_flags();
 }
@@ -993,7 +999,8 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeMflag) {
   args.push_back("-m64");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1002,7 +1009,7 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeMflag) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   std::vector<string> expected_compiler_info_flags;
@@ -1019,7 +1026,8 @@ TEST_F(VCFlagsTest, ClangClWithHyphenFlagsForCompilerInfo) {
     "hello.cc",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(std::vector<string> { "hello.obj" },
             flags->output_files());
@@ -1028,7 +1036,7 @@ TEST_F(VCFlagsTest, ClangClWithHyphenFlagsForCompilerInfo) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   EXPECT_EQ((std::vector<string> { "-fmsc-version=1800",
@@ -1046,7 +1054,7 @@ TEST_F(VCFlagsTest, ClangClWithZi) {
 
   {
     std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "d:\\tmp"));
+        CompilerFlagsParser::MustNew(args, "d:\\tmp"));
     EXPECT_EQ(args, flags->args());
     EXPECT_EQ(1U, flags->output_files().size());
     EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1055,7 +1063,7 @@ TEST_F(VCFlagsTest, ClangClWithZi) {
     EXPECT_TRUE(flags->is_successful());
     EXPECT_EQ("", flags->fail_message());
     EXPECT_EQ("clang-cl", flags->compiler_name());
-    EXPECT_EQ(CompilerType::Clexe, flags->type());
+    EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
     EXPECT_EQ("d:\\tmp", flags->cwd());
 
     const VCFlags& vc_flags = static_cast<const VCFlags&>(*flags);
@@ -1065,7 +1073,7 @@ TEST_F(VCFlagsTest, ClangClWithZi) {
   args[1] = "/ZI";
   {
     std::unique_ptr<CompilerFlags> flags(
-      CompilerFlags::MustNew(args, "d:\\tmp"));
+        CompilerFlagsParser::MustNew(args, "d:\\tmp"));
     EXPECT_EQ(args, flags->args());
     EXPECT_EQ(1U, flags->output_files().size());
     EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1074,7 +1082,7 @@ TEST_F(VCFlagsTest, ClangClWithZi) {
     EXPECT_TRUE(flags->is_successful());
     EXPECT_EQ("", flags->fail_message());
     EXPECT_EQ("clang-cl", flags->compiler_name());
-    EXPECT_EQ(CompilerType::Clexe, flags->type());
+    EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
     EXPECT_EQ("d:\\tmp", flags->cwd());
 
     const VCFlags& vc_flags = static_cast<const VCFlags&>(*flags);
@@ -1088,7 +1096,8 @@ TEST_F(VCFlagsTest, ClangClISystem) {
   args.push_back("-isystem=c:\\clang-cl\\include");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1097,7 +1106,7 @@ TEST_F(VCFlagsTest, ClangClISystem) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   ASSERT_EQ(1U, flags->compiler_info_flags().size());
@@ -1110,7 +1119,8 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeISystem) {
   args.push_back("-isystem=c:\\clang-cl\\include");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1119,7 +1129,7 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeISystem) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   ASSERT_EQ(0U, flags->compiler_info_flags().size());
@@ -1131,7 +1141,8 @@ TEST_F(VCFlagsTest, ClangClImsvc) {
   args.push_back("-imsvcc:\\clang-cl\\include");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1140,14 +1151,14 @@ TEST_F(VCFlagsTest, ClangClImsvc) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   ASSERT_EQ(1U, flags->compiler_info_flags().size());
   EXPECT_EQ("-imsvcc:\\clang-cl\\include", flags->compiler_info_flags()[0]);
 
   args[1] = "/imsvcc:\\clang-cl\\include";
-  flags = CompilerFlags::MustNew(args, "d:\\tmp");
+  flags = CompilerFlagsParser::MustNew(args, "d:\\tmp");
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1156,7 +1167,7 @@ TEST_F(VCFlagsTest, ClangClImsvc) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   ASSERT_EQ(1U, flags->compiler_info_flags().size());
@@ -1170,7 +1181,8 @@ TEST_F(VCFlagsTest, ClangClImsvcWithValueArg) {
   args.push_back("c:\\clang-cl\\include");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1179,7 +1191,7 @@ TEST_F(VCFlagsTest, ClangClImsvcWithValueArg) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   ASSERT_EQ(2U, flags->compiler_info_flags().size());
@@ -1187,7 +1199,7 @@ TEST_F(VCFlagsTest, ClangClImsvcWithValueArg) {
   EXPECT_EQ("c:\\clang-cl\\include", flags->compiler_info_flags()[1]);
 
   args[1] = "/imsvc";
-  flags = CompilerFlags::MustNew(args, "d:\\tmp");
+  flags = CompilerFlagsParser::MustNew(args, "d:\\tmp");
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1196,7 +1208,7 @@ TEST_F(VCFlagsTest, ClangClImsvcWithValueArg) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   ASSERT_EQ(2U, flags->compiler_info_flags().size());
@@ -1210,7 +1222,8 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeImsvc) {
   args.push_back("-imsvcc:\\clang-cl\\include");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1219,13 +1232,13 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeImsvc) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   ASSERT_EQ(0U, flags->compiler_info_flags().size());
 
   args[1] = "/imsvcc:\\clang-cl\\include";
-  flags = CompilerFlags::MustNew(args, "d:\\tmp");
+  flags = CompilerFlagsParser::MustNew(args, "d:\\tmp");
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1234,7 +1247,7 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeImsvc) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   ASSERT_EQ(0U, flags->compiler_info_flags().size());
@@ -1247,7 +1260,8 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeImsvcWithValueArg) {
   args.push_back("c:\\clang-cl\\include");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1256,13 +1270,13 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeImsvcWithValueArg) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   ASSERT_EQ(0U, flags->compiler_info_flags().size());
 
   args[1] = "/imsvc";
-  flags = CompilerFlags::MustNew(args, "d:\\tmp");
+  flags = CompilerFlagsParser::MustNew(args, "d:\\tmp");
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1271,7 +1285,7 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeImsvcWithValueArg) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   ASSERT_EQ(0U, flags->compiler_info_flags().size());
@@ -1287,7 +1301,8 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeClangClOnlyFlags) {
     "hello.cc",
   };
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(std::vector<string> { "hello.obj" },
             flags->output_files());
@@ -1296,10 +1311,61 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeClangClOnlyFlags) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   EXPECT_TRUE(flags->compiler_info_flags().empty());
+}
+
+TEST_F(VCFlagsTest, ClangClWithResourceDir) {
+  std::vector<string> args = {
+    "clang-cl.exe",
+    "-resource-dir",
+    "this\\is\\resource",
+    "/c",
+    "hello.cc",
+  };
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
+  EXPECT_EQ(args, flags->args());
+  EXPECT_EQ(1U, flags->output_files().size());
+  EXPECT_EQ("hello.obj", flags->output_files()[0]);
+  EXPECT_EQ(1U, flags->input_filenames().size());
+  EXPECT_EQ("hello.cc", flags->input_filenames()[0]);
+  EXPECT_TRUE(flags->is_successful());
+  EXPECT_EQ("", flags->fail_message());
+  EXPECT_EQ("clang-cl", flags->compiler_name());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
+  EXPECT_EQ("d:\\tmp", flags->cwd());
+
+  std::vector<string> expected_compiler_info_flags = {
+    "-resource-dir",
+    "this\\is\\resource",
+  };
+  EXPECT_EQ(expected_compiler_info_flags, flags->compiler_info_flags());
+
+  VCFlags* vc_flags = static_cast<VCFlags*>(flags.get());
+  EXPECT_EQ("this\\is\\resource", vc_flags->resource_dir());
+}
+
+TEST_F(VCFlagsTest, ClExeWithResourceDir) {
+  std::vector<string> args {
+    "cl.exe",
+    "-resource-dir",
+    "this\\is\\resource",
+    "/c",
+    "hello.cc",
+  };
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
+  EXPECT_EQ(args, flags->args());
+
+  std::vector<string> expected_compiler_info_flags = {
+  };
+  EXPECT_EQ(expected_compiler_info_flags, flags->compiler_info_flags());
+
+  VCFlags* vc_flags = static_cast<VCFlags*>(flags.get());
+  EXPECT_EQ("", vc_flags->resource_dir());
 }
 
 TEST_F(VCFlagsTest, ClangClWithFsanitize) {
@@ -1310,7 +1376,8 @@ TEST_F(VCFlagsTest, ClangClWithFsanitize) {
   args.push_back("-fsanitize=memory");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1319,7 +1386,7 @@ TEST_F(VCFlagsTest, ClangClWithFsanitize) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   std::vector<string> expected_compiler_info_flags;
@@ -1336,7 +1403,8 @@ TEST_F(VCFlagsTest, ClangClWithFsanitizeBlacklist) {
   args.push_back("-fsanitize-blacklist=blacklist2.txt");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1345,7 +1413,7 @@ TEST_F(VCFlagsTest, ClangClWithFsanitizeBlacklist) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   std::vector<string> expected_compiler_info_flags;
@@ -1364,7 +1432,8 @@ TEST_F(VCFlagsTest, ClangClWithFsanitizeAndBlacklist) {
   args.push_back("-fsanitize-blacklist=blacklist.txt");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1373,7 +1442,7 @@ TEST_F(VCFlagsTest, ClangClWithFsanitizeAndBlacklist) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   std::vector<string> expected_compiler_info_flags;
@@ -1392,7 +1461,8 @@ TEST_F(VCFlagsTest, ClangClWithFNoSanitizeBlacklist) {
   args.push_back("-fsanitize-blacklist=blacklist.txt");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1401,7 +1471,7 @@ TEST_F(VCFlagsTest, ClangClWithFNoSanitizeBlacklist) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   std::vector<string> expected_optional_input_filenames;
@@ -1416,7 +1486,8 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeAnyFsanitize) {
   args.push_back("-fsanitize-blacklist=blacklist.txt");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1425,7 +1496,7 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeAnyFsanitize) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   std::vector<string> expected_compiler_info_flags;
@@ -1442,7 +1513,8 @@ TEST_F(VCFlagsTest, ClangClWithMllvm) {
   args.push_back("-regalloc=pbqp");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1451,7 +1523,7 @@ TEST_F(VCFlagsTest, ClangClWithMllvm) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   std::vector<string> expected_compiler_info_flags;
@@ -1468,7 +1540,8 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeMllvm) {
   args.push_back("-regalloc=pbqp");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1477,7 +1550,7 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeMllvm) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   std::vector<string> expected_compiler_info_flags;
@@ -1497,14 +1570,14 @@ TEST_F(VCFlagsTest, ArchShouldBeRecognizedByClAndClangCl) {
   // check cl.exe.
   args[0] = "cl.exe";
   std::unique_ptr<CompilerFlags> flags_cl(
-      CompilerFlags::MustNew(args, "d:\\tmp"));
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags_cl->args());
   EXPECT_EQ(expected_compiler_info_flags, flags_cl->compiler_info_flags());
 
   // check clang-cl.
   args[0] = "clang-cl.exe";
   std::unique_ptr<CompilerFlags> flags_clang(
-      CompilerFlags::MustNew(args, "d:\\tmp"));
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags_clang->args());
   EXPECT_EQ(expected_compiler_info_flags,
             flags_clang->compiler_info_flags());
@@ -1519,7 +1592,8 @@ TEST_F(VCFlagsTest, ClangClWithXclang) {
   args.push_back("find-bad-constructs");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1528,7 +1602,7 @@ TEST_F(VCFlagsTest, ClangClWithXclang) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   std::vector<string> expected_compiler_info_flags;
@@ -1549,7 +1623,8 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeXclang) {
   args.push_back("find-bad-constructs");
   args.push_back("/c");
   args.push_back("hello.cc");
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("hello.obj", flags->output_files()[0]);
@@ -1558,7 +1633,7 @@ TEST_F(VCFlagsTest, ClShouldNotRecognizeXclang) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("cl.exe", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 
   std::vector<string> expected_compiler_info_flags;
@@ -1611,7 +1686,8 @@ TEST_F(VCFlagsTest, CrWinClangCompileFlag) {
   args.push_back("-Qunused-arguments");
   args.push_back("..\\..\\testing\\multiprocess_func_list.cc");
 
-  std::unique_ptr<CompilerFlags> flags(CompilerFlags::MustNew(args, "d:\\tmp"));
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "d:\\tmp"));
   EXPECT_EQ(args, flags->args());
   EXPECT_EQ(1U, flags->output_files().size());
   EXPECT_EQ("obj\\testing\\gtest.multiprocess_func_list.obj",
@@ -1622,7 +1698,7 @@ TEST_F(VCFlagsTest, CrWinClangCompileFlag) {
   EXPECT_TRUE(flags->is_successful());
   EXPECT_EQ("", flags->fail_message());
   EXPECT_EQ("clang-cl", flags->compiler_name());
-  EXPECT_EQ(CompilerType::Clexe, flags->type());
+  EXPECT_EQ(CompilerFlagType::Clexe, flags->type());
   EXPECT_EQ("d:\\tmp", flags->cwd());
 }
 

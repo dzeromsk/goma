@@ -44,7 +44,7 @@
 #include "glog/logging.h"
 #include "goma_ipc_addr.h"
 #include "goma_ipc_peer.h"
-#include "ioutil.h"
+#include "http_util.h"
 #ifdef _WIN32
 #include "named_pipe_server_win.h"
 #endif
@@ -165,11 +165,6 @@ void ThreadpoolHttpServer::StartIPC(
   LOG(INFO) << "max incoming: " << max_incoming
             << " FD_SETSIZE=" << FD_SETSIZE
             << " max_num_sockets=" << max_num_sockets_
-#ifdef USE_EPOLL
-            << " USE_EPOLL=1"
-#elif USE_KQUEUE
-            << " USE_KQUEUE=1"
-#endif
             << " threads=" << num_threads
             << "+" << num_http_threads_;
   CHECK_GT(max_incoming, 0);

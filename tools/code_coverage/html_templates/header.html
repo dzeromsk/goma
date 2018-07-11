@@ -1,0 +1,26 @@
+<!--
+Copyright 2018 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+
+Copied from chromium tools/code_coverage/html_templates and modified for
+goma client.
+-->
+<!doctype html>
+<html>
+  <head>
+    <meta name='viewport' content='width=device-width,initial-scale=1'>
+    <meta charset='UTF-8'>
+    <link rel='stylesheet' type='text/css' href='{{ css_path }}'>
+    <!-- Custom style overrides -->
+    <style>
+      {{ style_overrides }}
+    </style>
+  </head>
+  <body>
+    <h2>Coverage Report</h2>
+    <p>
+      View results by: <a href='{{ directory_view_href }}'>Directories</a>
+      | <a href='{{ file_view_href }}'>Files</a>
+    </p>
+    <div class='centered'>

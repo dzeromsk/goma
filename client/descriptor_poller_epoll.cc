@@ -3,8 +3,6 @@
 // found in the LICENSE file.
 
 
-#ifdef USE_EPOLL
-
 #include "descriptor_poller.h"
 
 #include <memory>
@@ -17,6 +15,7 @@
 #include <sys/epoll.h>
 #define EPOLL_SIZE_HINT FD_SETSIZE  // Any value but not 0 should be ok.
 
+#include "absl/base/call_once.h"
 #include "absl/memory/memory.h"
 #include "compiler_specific.h"
 #include "glog/logging.h"
@@ -33,6 +32,7 @@ class EpollDescriptorPoller : public DescriptorPollerBase {
         epoll_fd_(-1),
         nevents_(0),
         last_nevents_(0) {
+    absl::call_once(s_init_once_, LogDescriptorPollerType);
     epoll_fd_.reset(epoll_create(EPOLL_SIZE_HINT));
     CHECK(epoll_fd_.valid());
     CHECK(poll_breaker());
@@ -41,6 +41,10 @@ class EpollDescriptorPoller : public DescriptorPollerBase {
     ev.data.ptr = poll_breaker();
     PCHECK(epoll_ctl(epoll_fd_.fd(), EPOLL_CTL_ADD, poll_breaker()->fd(),
                      &ev) != -1);
+  }
+
+  static void LogDescriptorPollerType() {
+    LOG(INFO) << "descriptor_poller will use \"epoll\"";
   }
 
   void RegisterPollEvent(SocketDescriptor* d, EventType type) override {
@@ -161,6 +165,7 @@ class EpollDescriptorPoller : public DescriptorPollerBase {
 
  private:
   friend class EpollEventEnumerator;
+  static absl::once_flag s_init_once_;
   ScopedFd epoll_fd_;
   std::unique_ptr<struct epoll_event[]> events_;
   std::unordered_set<SocketDescriptor*> timeout_waiters_;
@@ -169,6 +174,8 @@ class EpollDescriptorPoller : public DescriptorPollerBase {
   int nfds_;
   DISALLOW_COPY_AND_ASSIGN(EpollDescriptorPoller);
 };
+
+absl::once_flag EpollDescriptorPoller::s_init_once_;
 
 // static
 std::unique_ptr<DescriptorPoller> DescriptorPoller::NewDescriptorPoller(
@@ -179,5 +186,3 @@ std::unique_ptr<DescriptorPoller> DescriptorPoller::NewDescriptorPoller(
 }
 
 }  // namespace devtools_goma
-
-#endif  // USE_EPOLL

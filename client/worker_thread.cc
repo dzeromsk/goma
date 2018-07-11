@@ -112,6 +112,7 @@ WorkerThreadManager::WorkerThread::WorkerThread(WorkerThreadManager* wm,
       name_(std::move(name)),
       auto_lock_stat_next_closure_(nullptr),
       auto_lock_stat_poll_events_(nullptr) {
+  VLOG(2) << "WorkerThread " << name_;
   int pipe_fd[2];
 #ifndef _WIN32
   PCHECK(pipe(pipe_fd) == 0);
@@ -145,6 +146,7 @@ WorkerThreadManager::WorkerThread::WorkerThread(WorkerThreadManager* wm,
 }
 
 WorkerThreadManager::WorkerThread::~WorkerThread() {
+  VLOG(2) << "~WorkerThread " << name_;
   CHECK_EQ(kNullThreadHandle, handle_);
   CHECK(!id_);
 }
@@ -176,14 +178,17 @@ double WorkerThreadManager::WorkerThread::Now() {
 }
 
 void WorkerThreadManager::WorkerThread::Shutdown() {
+  VLOG(2) << "Shutdown " << name_;
   AUTOLOCK(lock, &mu_);
   shutting_down_ = true;
 }
 
 void WorkerThreadManager::WorkerThread::Quit() {
+  VLOG(2) << "Quit " << name_;
   AUTOLOCK(lock, &mu_);
   shutting_down_ = true;
   quit_ = true;
+  poller_->Signal();
 }
 
 void WorkerThreadManager::WorkerThread::ThreadMain() {
@@ -201,11 +206,11 @@ void WorkerThreadManager::WorkerThread::ThreadMain() {
   {
     AUTOLOCK(lock, &mu_);
     id_ = GetThreadId(handle_);
-    VLOG(1) << "Start thread:" << id_;
+    VLOG(1) << "Start thread:" << id_ << " " << name_;
     cond_id_.Signal();
   }
   while (Dispatch()) { }
-  LOG(INFO) << id_ << " Dispatch loop finished";
+  LOG(INFO) << id_ << " Dispatch loop finished " << name_;
   {
     AUTOLOCK(lock, &mu_);
     for (int priority = PRIORITY_MIN; priority < NUM_PRIORITIES; ++priority) {
@@ -218,12 +223,15 @@ void WorkerThreadManager::WorkerThread::ThreadMain() {
 }
 
 bool WorkerThreadManager::WorkerThread::Dispatch() {
+  VLOG(2) << "Dispatch " << name_;
   now_ns_ = 0;
-  if (!NextClosure())
+  if (!NextClosure()) {
+    VLOG(2) << "Dispatch end " << name_;
     return false;
+  }
   if (current_.closure_ == nullptr)
     return true;
-  VLOG(2) << "Loop closure=" << current_.closure_;
+  VLOG(2) << "Loop closure=" << current_.closure_ << " " << name_;
   long long start_ns = timer_.GetInNanoSeconds();
   current_.closure_->Run();
   long long duration_ns = timer_.GetInNanoSeconds() - start_ns;
@@ -249,25 +257,23 @@ DWORD WorkerThreadManager::WorkerThread::key_worker_ = TLS_OUT_OF_INDEXES;
 SocketDescriptor*
 WorkerThreadManager::WorkerThread::RegisterSocketDescriptor(
     ScopedSocket&& fd, WorkerThreadManager::Priority priority) {
+  VLOG(2) << "RegisterSocketDescriptor " << name_;
   AUTOLOCK(lock, &mu_);
   DCHECK_LT(priority, WorkerThreadManager::PRIORITY_IMMEDIATE);
-  SocketDescriptor* d = new SocketDescriptor(std::move(fd), priority, this);
-  CHECK(descriptors_.insert(std::make_pair(d->fd(), d)).second);
-  return d;
+  auto d = absl::make_unique<SocketDescriptor>(std::move(fd), priority, this);
+  auto* d_ptr = d.get();
+  CHECK(descriptors_.emplace(d_ptr->fd(), std::move(d)).second);
+  return d_ptr;
 }
 
 ScopedSocket WorkerThreadManager::WorkerThread::DeleteSocketDescriptor(
     SocketDescriptor* d) {
+  VLOG(2) << "DeleteSocketDescriptor " << name_;
   AUTOLOCK(lock, &mu_);
   poller_->UnregisterDescriptor(d);
   ScopedSocket fd(d->ReleaseFd());
   if (fd.valid()) {
-    std::map<int, SocketDescriptor*>::iterator found =
-        descriptors_.find(fd.get());
-    if (found != descriptors_.end()) {
-      delete found->second;
-      descriptors_.erase(found);
-    }
+    descriptors_.erase(fd.get());
   }
   return fd;
 }
@@ -275,6 +281,7 @@ ScopedSocket WorkerThreadManager::WorkerThread::DeleteSocketDescriptor(
 void WorkerThreadManager::WorkerThread::RegisterPeriodicClosure(
     PeriodicClosureId id, const char* const location,
     int ms, std::unique_ptr<PermanentClosure> closure) {
+  VLOG(2) << "RegisterPeriodicClosure " << name_;
   AUTOLOCK(lock, &mu_);
   periodic_closures_.emplace_back(
      new PeriodicClosure(id, location, Now(), ms, std::move(closure)));
@@ -282,6 +289,7 @@ void WorkerThreadManager::WorkerThread::RegisterPeriodicClosure(
 
 void WorkerThreadManager::WorkerThread::UnregisterPeriodicClosure(
     PeriodicClosureId id, UnregisteredClosureData* data) {
+  VLOG(2) << "UnregisterPeriodicClosure " << name_;
   DCHECK(data);
   AUTOLOCK(lock, &mu_);
   CHECK_NE(id, kInvalidPeriodicClosureId);
@@ -323,6 +331,7 @@ void WorkerThreadManager::WorkerThread::UnregisterPeriodicClosure(
 void WorkerThreadManager::WorkerThread::RunClosure(
     const char* const location,
     Closure* closure, Priority priority) {
+  VLOG(2) << "RunClosure " << name_;
   DCHECK_GE(priority, PRIORITY_MIN);
   DCHECK_LT(priority, NUM_PRIORITIES);
   {
@@ -344,6 +353,7 @@ WorkerThreadManager::CancelableClosure*
 WorkerThreadManager::WorkerThread::RunDelayedClosure(
     const char* const location,
     int msec, Closure* closure) {
+  VLOG(2) << "RunDelayedClosure " << name_;
   AUTOLOCK(lock, &mu_);
   DelayedClosureImpl* delayed_closure =
       new DelayedClosureImpl(location, Now() + msec/1000.0, closure);
@@ -406,7 +416,7 @@ string WorkerThreadManager::WorkerThread::DebugString() const {
 
 bool WorkerThreadManager::WorkerThread::NextClosure() {
   AUTOLOCK_WITH_STAT(lock, &mu_, auto_lock_stat_next_closure_);
-  VLOG(5) << "NextClosure";
+  VLOG(5) << "NextClosure " << name_;
   DCHECK_EQ(0, now_ns_);  // Now() and NowInNs() will get new time
   ++tick_;
   current_ = ClosureData();
@@ -467,8 +477,7 @@ bool WorkerThreadManager::WorkerThread::NextClosure() {
     if (NowInNs() - poll_start_time_ns > 1 * kNanoSecondsPerSecond) {
       for (const auto& desc : descriptors_) {
         LOG(WARNING) << id_ << " list of sockets on slow poll:"
-                     << " fd=" << desc.first
-                     << " sd=" << desc.second
+                     << " fd=" << desc.first << " sd=" << desc.second.get()
                      << " sd.fd=" << desc.second->fd()
                      << " readable=" << desc.second->IsReadable()
                      << " closed=" << desc.second->IsClosed()
@@ -514,6 +523,11 @@ bool WorkerThreadManager::WorkerThread::NextClosure() {
       VLOG(2) << "pendings " << WorkerThreadManager::Priority_Name(priority);
       current_ = GetClosure(
           static_cast<WorkerThreadManager::Priority>(priority));
+
+      if (quit_) {
+        // If worker thread is quiting, wake up thread soon.
+        poller_->Signal();
+      }
       return true;
     }
   }
@@ -541,6 +555,7 @@ void WorkerThreadManager::WorkerThread::AddClosure(
     const char* const location,
     WorkerThreadManager::Priority priority,
     Closure* closure) {
+  VLOG(2) << "AddClosure " << name_;
   // mu_ held.
   ClosureData closure_data(location, closure,
                            pendings_[priority].size(),
@@ -586,29 +601,34 @@ void WorkerThreadManager::WorkerThread::InitializeWorkerKey() {
 
 void WorkerThreadManager::WorkerThread::RegisterPollEvent(
     SocketDescriptor* d, DescriptorPoller::EventType type) {
+  VLOG(2) << "RegisterPollEvent " << name_;
   AUTOLOCK(lock, &mu_);
   poller_->RegisterPollEvent(d, type);
 }
 
 void WorkerThreadManager::WorkerThread::UnregisterPollEvent(
     SocketDescriptor* d, DescriptorPoller::EventType type) {
+  VLOG(2) << "UnregisterPollEvent " << name_;
   AUTOLOCK(lock, &mu_);
   poller_->UnregisterPollEvent(d, type);
 }
 
 void WorkerThreadManager::WorkerThread::RegisterTimeoutEvent(
     SocketDescriptor* d) {
+  VLOG(2) << "RegisterTimeoutEvent " << name_;
   AUTOLOCK(lock, &mu_);
   poller_->RegisterTimeoutEvent(d);
 }
 
 void WorkerThreadManager::WorkerThread::UnregisterTimeoutEvent(
     SocketDescriptor* d) {
+  VLOG(2) << "UnregisterTimeoutEvent " << name_;
   AUTOLOCK(lock, &mu_);
   poller_->UnregisterTimeoutEvent(d);
 }
 
 void WorkerThreadManager::WorkerThread::Start() {
+  VLOG(2) << "Start " << name_;
   CHECK(PlatformThread::Create(this, &handle_));
   AUTOLOCK(lock, &mu_);
   CHECK_NE(handle_, kNullThreadHandle);
@@ -618,6 +638,7 @@ void WorkerThreadManager::WorkerThread::Start() {
 }
 
 void WorkerThreadManager::WorkerThread::Join() {
+  VLOG(2) << "Join " << name_;
   if (handle_ != kNullThreadHandle) {
     LOG(INFO) << "Join thread:" << DebugString();
     {

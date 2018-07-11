@@ -41,7 +41,7 @@
 #include <vector>
 
 #include "callback.h"
-#include "execreq_normalizer.h"
+#include "compiler_flag_type_specific.h"
 #include "file.h"
 #include "file_dir.h"
 #include "file_helper.h"
@@ -673,10 +673,10 @@ string LocalOutputCache::MakeCacheKey(const ExecReq& req) {
   };
 
   // TODO: Set debug_prefix_map, too?
-  NormalizeExecReqForCacheKey(0, true, false,
-                              flags,
-                              std::map<string, string>(),
-                              &normalized);
+  CompilerFlagTypeSpecific::FromArg(req.command_spec().name())
+      .NewExecReqNormalizer()
+      ->NormalizeForCacheKey(0, true, false, flags, std::map<string, string>(),
+                             &normalized);
 
   string serialized;
   if (!normalized.SerializeToString(&serialized)) {

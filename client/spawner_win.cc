@@ -16,6 +16,7 @@
 
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
+#include "client_util.h"
 #include "cmdline_parser.h"
 #include "compiler_specific.h"
 #include "file.h"
@@ -24,7 +25,6 @@
 #include "glog/logging.h"
 #include "mypath.h"
 #include "path.h"
-#include "util.h"
 
 namespace {
 
@@ -104,6 +104,9 @@ string PrepareCommandLine(const char* cwd, const char* prog,
   if (!devtools_goma::GetRealExecutablePath(
       nullptr, prog, cwd, path_spec, pathext_spec, &command_line,
       nullptr, nullptr)) {
+    LOG(ERROR) << "Failed GetRealExecutablePath prog=" << prog << " cwd=" << cwd
+               << " path_spec=" << path_spec
+               << " pathext_spec=" << pathext_spec;
     return string();
   }
 
@@ -286,6 +289,8 @@ int SpawnerWin::Run(const string& cmd, const std::vector<string>& args,
                            environs.cbegin(), environs.cend(),
                            args.begin(), args.end());
     if (command_line.empty()) {
+      LOG(ERROR) << "command line is empty."
+                 << " cwd=" << cwd << " cmd=" << cmd;
       return Spawner::kInvalidPid;
     }
     std::vector<char> env;
@@ -376,7 +381,7 @@ void SpawnerWin::UpdateProcessStatus(DWORD timeout) {
   }
 }
 
-bool SpawnerWin::KillAndWait(DWORD timeout) {
+Spawner::ProcessStatus SpawnerWin::KillAndWait(DWORD timeout) {
   if (!is_signaled_) {
     if (input_thread_.valid()) {
       stop_input_thread_ = true;
@@ -403,8 +408,10 @@ bool SpawnerWin::KillAndWait(DWORD timeout) {
       handles.size(), &(handles[0]), TRUE, timeout);
   if (ret == WAIT_TIMEOUT) {
     VLOG(1) << "wait timeout=" << timeout;
-    return true;
-  } else if (ret < WAIT_OBJECT_0 || ret > WAIT_OBJECT_0 + handles.size() - 1) {
+    return ProcessStatus::RUNNING;
+  }
+
+  if (ret < WAIT_OBJECT_0 || ret > WAIT_OBJECT_0 + handles.size() - 1) {
     // Some handlers are abandoned or WAIT_FAILED.
     // See: http://msdn.microsoft.com/en-us/library/windows/desktop/ms687025(v=vs.85).aspx
     // TODO: come up with good way to handle this.
@@ -416,13 +423,14 @@ bool SpawnerWin::KillAndWait(DWORD timeout) {
                << " nCount=" << handles.size()
                << " timeout=" << timeout
                << " job_name=" << job_name_;
-    return false;
+    return ProcessStatus::EXITED;
   }
   UpdateProcessStatus(timeout);
-  return process_status_ == STILL_ACTIVE;
+  return process_status_ == STILL_ACTIVE ? ProcessStatus::RUNNING
+                                         : ProcessStatus::EXITED;
 }
 
-bool SpawnerWin::FinalizeProcess(DWORD timeout) {
+void SpawnerWin::FinalizeProcess(DWORD timeout) {
   VLOG(1) << "Wait: child_process finished " << process_status_;
   if (!WaitThread(&input_thread_, timeout)) {
     LOG(WARNING) << "input thread timed out=" << timeout
@@ -449,14 +457,13 @@ bool SpawnerWin::FinalizeProcess(DWORD timeout) {
       << "stdout_file is still valid. job_name=" << job_name_;
   LOG_IF(ERROR, stderr_file_.valid())
       << "stderr_file is still valid. job_name=" << job_name_;
-  return true;
 }
 
-bool SpawnerWin::Kill() {
+Spawner::ProcessStatus SpawnerWin::Kill() {
   return KillAndWait(kWaitTimeout);
 }
 
-bool SpawnerWin::Wait(Spawner::WaitPolicy wait_policy) {
+Spawner::ProcessStatus SpawnerWin::Wait(Spawner::WaitPolicy wait_policy) {
   const DWORD timeout =
       (wait_policy==Spawner::WAIT_INFINITE) ? INFINITE : kWaitTimeout;
   const bool need_kill = (wait_policy==Spawner::NEED_KILL);
@@ -469,24 +476,25 @@ bool SpawnerWin::Wait(Spawner::WaitPolicy wait_policy) {
         << "stdout_file is still valid. job_name=" << job_name_;
     LOG_IF(ERROR, stderr_file_.valid())
         << "stderr_file is still valid. job_name=" << job_name_;
-    return false;
+    return ProcessStatus::EXITED;
   }
   UpdateProcessStatus(timeout);
   if (process_status_ != STILL_ACTIVE) {
-    // Process is not active.
-    return !FinalizeProcess(timeout);
+    FinalizeProcess(timeout);
+    return ProcessStatus::EXITED;
   }
   // Process is still active.
   if (!need_kill) {
-    return true;
+    return ProcessStatus::RUNNING;
   }
 
   VLOG(1) << "Wait: need kill";
-  bool running = KillAndWait(timeout);
-  if (running) {
-    return true;
+  ProcessStatus running = KillAndWait(timeout);
+  if (running == ProcessStatus::RUNNING) {
+    return ProcessStatus::RUNNING;
   }
-  return !FinalizeProcess(timeout);
+  FinalizeProcess(timeout);
+  return ProcessStatus::EXITED;
 }
 
 // TODO: make stderr stored to the specified file.
@@ -611,7 +619,12 @@ int SpawnerWin::RunRedirected(const string& command_line,
 
   // If environment is empty, use parent process's environment.
   LPVOID env_ptr = (*env)[0] ? &((*env)[0]) : nullptr;
-  string cmd = command_line;
+
+  // compiler_proxy's cwd and build's expected cwd are different. If the
+  // compiler path (in command_line) is relative, a compiler will be searched
+  // from compiler_proxy relative path, however, it should be build's expected
+  // cwd relative. So, we inject "cmd /c" to set cwd to build's expected one.
+  string cmd = "cmd /c " + command_line;
   // TODO: Code around here looks like Run().
   // Can we share some code?
   const DWORD process_create_flag =

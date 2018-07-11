@@ -53,6 +53,7 @@ static_library("goma_unittest") {
     "goma_unittest.cc",
   ]
   deps = [
+    ":base",
     "//third_party:gtest",
   ]
 }
@@ -61,6 +62,20 @@ executable("lockhelper_unittest") {
   testonly = true
   sources = [
     "lockhelper_unittest.cc",
+  ]
+  deps = [
+    ":base",
+    ":goma_unittest",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:glog",
+    "//third_party:gtest",
+  ]
+}
+
+executable("filesystem_unittest") {
+  testonly = true
+  sources = [
+    "filesystem_unittest.cc",
   ]
   deps = [
     ":base",

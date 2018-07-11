@@ -30,8 +30,8 @@ class SpawnerWin : public Spawner {
                   const std::vector<string>& argv,
                   const std::vector<string>& env,
                   const string& cwd) override;
-  bool Kill() override;
-  bool Wait(WaitPolicy wait_policy) override;
+  ProcessStatus Kill() override;
+  ProcessStatus Wait(WaitPolicy wait_policy) override;
   bool IsChildRunning() const override {
     return process_status_ == STILL_ACTIVE;
   }
@@ -60,10 +60,10 @@ class SpawnerWin : public Spawner {
                     const string& out_file,
                     const string& in_file);
   void UpdateProcessStatus(DWORD timeout);
-  // Returns true if the process is still active.
-  bool KillAndWait(DWORD timeout);
-  // Returns true when it has been finished.
-  bool FinalizeProcess(DWORD timeout);
+
+  ProcessStatus KillAndWait(DWORD timeout);
+
+  void FinalizeProcess(DWORD timeout);
 
   // Returns true if it finish writing |input_file_| to |child_stdin_|.
   bool WriteToPipe();

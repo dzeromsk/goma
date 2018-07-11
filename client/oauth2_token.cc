@@ -128,7 +128,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
       string err;
       Json::Reader reader;
       Json::Value root;
-      if (reader.parse(string(resp.Body()), root, false)) {
+      if (reader.parse(resp.Body(), root, false)) {
         if (!GetNonEmptyStringFromJson(root, "email", &email, &err)) {
           LOG(WARNING) << "parse tokeninfo: " << err;
         }
@@ -315,7 +315,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
       return;
     }
     int expires_in = 0;
-    if (!config_->ParseResponseBody(string(resp_.Body()),
+    if (!config_->ParseResponseBody(resp_.Body(),
                                     &token_type_,
                                     &access_token_,
                                     &expires_in)) {

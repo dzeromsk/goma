@@ -33,7 +33,9 @@
 #include "absl/memory/memory.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
+#include "client_util.h"
 #include "compiler_flags.h"
+#include "compiler_flags_parser.h"
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
 #include "env_flags.h"
@@ -45,19 +47,21 @@
 #include "gomacc_argv.h"
 #include "ioutil.h"
 #include "mypath.h"
-#ifdef _WIN32
-#include "named_pipe_client_win.h"
-#endif
-#include "path.h"  // file::JoinPath
+#include "path.h"
 #include "platform_thread.h"
-MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
-#include "prototmp/goma_data.pb.h"
-MSVC_POP_WARNING()
 #include "scoped_fd.h"
 #include "simple_timer.h"
 #include "socket_factory.h"
 #include "subprocess.h"
 #include "util.h"
+
+#ifdef _WIN32
+#include "named_pipe_client_win.h"
+#endif
+
+MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
+#include "prototmp/goma_data.pb.h"
+MSVC_POP_WARNING()
 
 #define GOMA_DECLARE_FLAGS_ONLY
 #include "goma_flags.cc"
@@ -367,7 +371,7 @@ GomaClient::GomaClient(int id,
   flags_->GetClientImportantEnvs(envp, &envs_);
 
 #ifdef _WIN32
-  if (flags_->type() == CompilerType::Clexe) {
+  if (flags_->type() == CompilerFlagType::Clexe) {
     for (const auto& file : flags_->optional_input_filenames()) {
       // Open the file while gomacc running to prevent from removal.
       optional_files_.push_back(new ScopedFd(ScopedFd::OpenForRead(file)));
@@ -378,7 +382,7 @@ GomaClient::GomaClient(int id,
   string buf;
   std::vector<string> info;
   info.push_back(flags_->compiler_name());
-  if (flags_->type() == CompilerType::Gcc) {
+  if (flags_->type() == CompilerFlagType::Gcc) {
     const GCCFlags& gcc_flags = static_cast<const GCCFlags&>(*flags_);
     switch (gcc_flags.mode()) {
       case GCCFlags::PREPROCESS:
@@ -486,6 +490,8 @@ GomaClient::Result GomaClient::CallIPCAsync() {
 
       return IPC_REJECTED;
     }
+    LOG(WARNING) << "failed to connect to compiler_proxy: "
+                 << status_.DebugString();
     // If the failure reason was failure to connect, try starting
     // compiler proxy and retry the request.
     if (StartCompilerProxy()) {
@@ -634,7 +640,7 @@ bool GomaClient::PrepareMultiExecRequest(MultiExecReq* req) {
     args_of_input.push_back(flags_->args()[0]);
     args_of_input.push_back("@" + rsp_filename);
     std::unique_ptr<CompilerFlags> flags_of_input(
-        CompilerFlags::MustNew(args_of_input, "."));
+        CompilerFlagsParser::MustNew(args_of_input, "."));
     if (!PrepareExecRequest(*flags_of_input, req->add_req())) {
       LOG(ERROR) << "GOMA: failed to create ExecReq for " << input_filename;
       return false;
@@ -665,7 +671,7 @@ bool GomaClient::PrepareExecRequest(const CompilerFlags& flags, ExecReq* req) {
   }
 #endif
 
-  if (flags.type() == CompilerType::Gcc) {
+  if (flags.type() == CompilerFlagType::Gcc) {
     const GCCFlags& gcc_flags = static_cast<const GCCFlags&>(flags);
     if (gcc_flags.is_stdin_input()) {
       CHECK(!isatty(STDIN_FILENO)) << "goma doesn't support tty input."

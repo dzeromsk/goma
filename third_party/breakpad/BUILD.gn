@@ -83,6 +83,7 @@ if (os != "win") {
       sources = [
         "breakpad/src/common/path_helper.cc",
         "breakpad/src/common/path_helper.h",
+        "breakpad/src/common/scoped_ptr.h",
         "breakpad/src/processor/basic_code_module.h",
         "breakpad/src/processor/basic_code_modules.cc",
         "breakpad/src/processor/basic_code_modules.h",
@@ -183,6 +184,7 @@ if (os != "win") {
 
     executable("minidump_stackwalk") {
       sources = [
+        "breakpad/src/common/scoped_ptr.h",
         "breakpad/src/processor/exploitability.cc",
         "breakpad/src/processor/minidump.cc",
         "breakpad/src/processor/minidump_processor.cc",
@@ -215,6 +217,7 @@ if (os != "win") {
     executable("minidump_dump") {
       set_sources_assignment_filter([])
       sources = [
+        "breakpad/src/common/scoped_ptr.h",
         "breakpad/src/processor/basic_code_module.h",
         "breakpad/src/processor/basic_code_modules.cc",
         "breakpad/src/processor/basic_code_modules.h",
@@ -280,6 +283,7 @@ if (os == "mac") {
         "breakpad/src/common/module.cc",
         "breakpad/src/common/path_helper.cc",
         "breakpad/src/common/path_helper.h",
+        "breakpad/src/common/scoped_ptr.h",
         "breakpad/src/common/stabs_reader.cc",
         "breakpad/src/common/stabs_to_module.cc",
         "breakpad/src/tools/mac/dump_syms/dump_syms_tool.cc",
@@ -356,6 +360,7 @@ if (os == "mac") {
       "breakpad/src/common/convert_UTF.c",
       "breakpad/src/common/mac/MachIPC.mm",
       "breakpad/src/common/mac/arch_utilities.cc",
+      "breakpad/src/common/mac/arch_utilities.h",
       "breakpad/src/common/mac/bootstrap_compat.cc",
       "breakpad/src/common/mac/file_id.cc",
       "breakpad/src/common/mac/launch_reporter.cc",
@@ -364,6 +369,7 @@ if (os == "mac") {
       "breakpad/src/common/mac/macho_walker.cc",
       "breakpad/src/common/mac/string_utilities.cc",
       "breakpad/src/common/md5.cc",
+      "breakpad/src/common/scoped_ptr.h",
       "breakpad/src/common/simple_string_dictionary.cc",
       "breakpad/src/common/string_conversion.cc",
     ]
@@ -494,10 +500,12 @@ if (os == "linux") {
         "breakpad/src/common/linux/linux_libc_support.h",
         "breakpad/src/common/linux/memory_mapped_file.cc",
         "breakpad/src/common/linux/memory_mapped_file.h",
+        "breakpad/src/common/memory_allocator.h",
         "breakpad/src/common/module.cc",
         "breakpad/src/common/module.h",
         "breakpad/src/common/path_helper.cc",
         "breakpad/src/common/path_helper.h",
+        "breakpad/src/common/scoped_ptr.h",
         "breakpad/src/common/stabs_reader.cc",
         "breakpad/src/common/stabs_reader.h",
         "breakpad/src/common/stabs_to_module.cc",
@@ -593,6 +601,7 @@ if (os == "linux") {
       "breakpad/src/common/linux/safe_readlink.cc",
       "breakpad/src/common/linux/safe_readlink.h",
       "breakpad/src/common/memory_allocator.h",
+      "breakpad/src/common/scoped_ptr.h",
       "breakpad/src/common/simple_string_dictionary.cc",
       "breakpad/src/common/simple_string_dictionary.h",
       "breakpad/src/common/string_conversion.cc",
@@ -630,6 +639,7 @@ if (os == "linux") {
     set_sources_assignment_filter([])
     sources = [
       "breakpad/src/common/scoped_ptr.h",
+      "breakpad/src/processor/basic_code_module.h",
       "breakpad/src/processor/basic_code_modules.cc",
       "breakpad/src/processor/basic_code_modules.h",
       "breakpad/src/processor/dump_context.cc",
@@ -676,6 +686,7 @@ if (os == "linux") {
     sources = [
       "breakpad/src/common/path_helper.cc",
       "breakpad/src/common/path_helper.h",
+      "breakpad/src/common/scoped_ptr.h",
       "breakpad/src/tools/linux/md2core/minidump-2-core.cc",
     ]
 
@@ -797,6 +808,7 @@ if (os == "win") {
       "breakpad/src/client/windows/sender/crash_report_sender.h",
       "breakpad/src/common/windows/http_upload.cc",
       "breakpad/src/common/windows/http_upload.h",
+      "breakpad/src/common/windows/string_utils-inl.h",
     ]
     configs += [ ":sender_config" ]
     public_configs = [ ":sender_config" ]

@@ -54,7 +54,7 @@ TmpdirUtil::TmpdirUtil(const string& id) : cwd_("/cwd") {
 }
 
 TmpdirUtil::~TmpdirUtil() {
-  DeleteRecursivelyOrDie(tmpdir_);
+  EXPECT_TRUE(file::RecursivelyDelete(tmpdir_, file::Defaults()).ok());
 }
 
 string TmpdirUtil::realcwd() const {
@@ -135,6 +135,20 @@ string GetTestFilePath(const string& test_name) {
   CHECK_EQ(access(fullpath.c_str(), R_OK), 0)
     << "Cannot read test file:"
     << " filename=" << fullpath;
+  return fullpath;
+}
+
+string GetClangPath() {
+#ifdef _WIN32
+  const string clang_path = "clang-cl.exe";
+#else
+  const string clang_path = "clang";
+#endif
+  const string fullpath =
+      file::JoinPath(GetMyDirectory(), "..", "..", "third_party", "llvm-build",
+                     "Release+Asserts", "bin", clang_path);
+  CHECK_EQ(access(fullpath.c_str(), R_OK), 0) << "Cannot read test file:"
+                                              << " filename=" << fullpath;
   return fullpath;
 }
 

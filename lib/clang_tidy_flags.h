@@ -27,7 +27,7 @@ class ClangTidyFlags : public CompilerFlags {
   ClangTidyFlags(const std::vector<string>& args, const string& cwd);
 
   string compiler_name() const override;
-  CompilerType type() const override { return CompilerType::ClangTidy; }
+  CompilerFlagType type() const override { return CompilerFlagType::ClangTidy; }
 
   const string& cwd_for_include_processor() const override;
 

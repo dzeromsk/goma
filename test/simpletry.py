@@ -14,7 +14,6 @@ import imp
 import optparse
 import os
 import re
-import requests
 import shutil
 import string
 import subprocess
@@ -313,12 +312,13 @@ class SimpleTryTest(unittest.TestCase):
     url = 'http://localhost:%s/e' % (
         os.environ['GOMA_COMPILER_PROXY_PORT'])
     with open(os.path.join('test', 'badreq.bin'), 'rb') as f:
-      req = f.read()
-    r = requests.post(url, verify=False,
-                      headers={'Content-Type': 'binary/x-protocol-buffer'},
-                      data=req)
-    self.assertEqual(r.status_code, 401,
-                     msg=('response code=%d; want=401' % r.status_code))
+      req_data = f.read()
+    req = urllib2.Request(url, req_data)
+    req.add_header('Content-Type', 'binary/x-protocol-buffer')
+    with self.assertRaises(urllib2.HTTPError) as cm:
+      urllib2.urlopen(req)
+    ec = cm.exception.getcode()
+    self.assertEqual(ec, 401, msg=('response code=%d; want=401' % ec))
     self.AssertNoGomaccInfo()
 
   def testGomaccShouldLog(self):

@@ -19,13 +19,14 @@
 #include <sstream>
 #include <string>
 
+#include "absl/strings/str_cat.h"
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
 #include "env_flags.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "google/protobuf/message.h"
 MSVC_POP_WARNING()
-#include "ioutil.h"
+#include "http_util.h"
 #include "glog/logging.h"
 #include "goma_ipc_peer.h"
 #include "scoped_fd.h"
@@ -355,6 +356,19 @@ string GomaIPC::DebugString() const {
   std::ostringstream ss;
   ss << "Socket path: " << chan_factory_->DestName() << std::endl;
   return ss.str();
+}
+
+string GomaIPC::Status::DebugString() const {
+  return absl::StrCat(
+      "GomaIPC::Status",
+      " connect_success=", connect_success,
+      " err=", err,
+      " error_message=", error_message,
+      " http_return_code=", http_return_code,
+      " req_size=", req_size,
+      " resp_size=", resp_size,
+      " req_send_time=", req_send_time,
+      " resp_recv_time=", resp_recv_time);
 }
 
 }  // namespace devtools_goma

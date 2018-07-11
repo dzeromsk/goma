@@ -97,6 +97,10 @@ message SubProcessSetOption {
 
 message SubProcessStarted {
   optional int32 id = 1;
+
+  // pid is
+  // * monitor process id in SpawnerPosix.
+  // * spawned process id in SpawnerWin.
   optional int32 pid = 2 [default = -1];  // kInvalidPid
   optional int32 pending_ms = 10;
 };

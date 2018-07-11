@@ -6,6 +6,7 @@
 #include "execreq_normalizer.h"
 
 #include "absl/strings/match.h"
+#include "compiler_flag_type_specific.h"
 #include "execreq_verifier.h"
 #include "google/protobuf/text_format.h"
 #include "google/protobuf/util/message_differencer.h"
@@ -53,6 +54,20 @@ const char kExecReqToNormalizeJavac[] =
     "559d507401ae81e9\"\n"
     "}\n";
 
+void NormalizeExecReqForCacheKey(
+    int id,
+    bool normalize_include_path,
+    bool is_linking,
+    const std::vector<string>& normalize_weak_relative_for_arg,
+    const std::map<string, string>& debug_prefix_map,
+    ExecReq* req) {
+  CompilerFlagTypeSpecific::FromArg(req->command_spec().name())
+      .NewExecReqNormalizer()
+      ->NormalizeForCacheKey(id, normalize_include_path, is_linking,
+                             normalize_weak_relative_for_arg, debug_prefix_map,
+                             req);
+}
+
 }  // namespace
 
 // javac
@@ -75,7 +90,7 @@ TEST(JavacExecReqNormalizerTest, Normalize) {
 
   EXPECT_EQ("", req.cwd());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 

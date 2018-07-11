@@ -1,0 +1,172 @@
+# Copyright 2018 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+static_library("cxx_compiler_info_lib") {
+  sources = [
+    "cxx_compiler_info.cc",
+    "cxx_compiler_info.h",
+  ]
+
+  deps = [
+    "//client/cxx/include_processor:cpp_directive_lib",
+  ]
+
+  public_deps = [
+    "//client:compiler_info_lib",
+  ]
+}
+
+static_library("clang_compiler_info_builder_helper_lib") {
+  sources = [
+    "clang_compiler_info_builder_helper.cc",
+    "clang_compiler_info_builder_helper.h",
+  ]
+
+  public_deps = [
+    "//base",
+    "//client:compiler_info_data_proto",
+  ]
+
+  deps = [
+    ":cxx_compiler_info_builder_lib",
+    ":cxx_compiler_info_lib",
+    "//client:common",
+    "//client:compiler_info_lib",
+    "//client:ioutil_lib",
+    "//client:scoped_tmp_file_lib",
+    "//client/cxx/include_processor:cpp_directive_lib",
+    "//lib",
+    "//lib:compiler_flag_type_specific",
+    "//lib:goma_hash",
+  ]
+}
+
+static_library("cxx_compiler_info_builder_lib") {
+  sources = [
+    "cxx_compiler_info_builder.cc",
+    "cxx_compiler_info_builder.h",
+  ]
+
+  public_deps = [
+    ":cxx_compiler_info_lib",
+    "//client:compiler_info_lib",
+  ]
+
+  deps = [
+    "//client:common",
+    "//client:ioutil_lib",
+    "//client:scoped_tmp_file_lib",
+    "//lib:goma_hash",
+  ]
+}
+
+static_library("gcc_compiler_info_builder_lib") {
+  sources = [
+    "gcc_compiler_info_builder.cc",
+    "gcc_compiler_info_builder.h",
+  ]
+  public_deps = [
+    "//base",
+    "//client:compiler_info_lib",
+  ]
+  deps = [
+    ":clang_compiler_info_builder_helper_lib",
+    ":cxx_compiler_info_builder_lib",
+    "//client:common",
+    "//client:ioutil_lib",
+    "//lib",
+    "//lib:gcc_specific",
+    "//third_party:glog",
+    "//third_party/abseil",
+  ]
+
+  public_configs = [ "//client:client_config" ]
+}
+
+static_library("vc_compiler_info_builder_lib") {
+  sources = [
+    "vc_compiler_info_builder.cc",
+    "vc_compiler_info_builder.h",
+  ]
+  public_deps = [
+    "//base",
+    "//client:compiler_info_lib",
+  ]
+  deps = [
+    ":clang_compiler_info_builder_helper_lib",
+    ":cxx_compiler_info_builder_lib",
+    ":cxx_compiler_info_lib",
+    "//client:common",
+    "//client:ioutil_lib",
+    "//lib",
+    "//lib:vc_specific",
+    "//third_party:glog",
+    "//third_party/abseil",
+  ]
+
+  public_configs = [ "//client:client_config" ]
+}
+
+executable("cxx_compiler_info_builder_unittest") {
+  testonly = true
+  sources = [
+    "cxx_compiler_info_builder_unittest.cc",
+  ]
+  deps = [
+    ":cxx_compiler_info_builder_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:common",
+    "//client:compiler_info_lib",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("gcc_compiler_info_builder_unittest") {
+  testonly = true
+  sources = [
+    "gcc_compiler_info_builder_unittest.cc",
+  ]
+
+  deps = [
+    ":gcc_compiler_info_builder_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:common",
+    "//client:goma_test_lib",
+    "//lib",
+  ]
+}
+
+executable("vc_compiler_info_builder_unittest") {
+  testonly = true
+  sources = [
+    "vc_compiler_info_builder_unittest.cc",
+  ]
+
+  # TODO: vc_compiler_info_builder_unittest should not depend on
+  # compiler_proxy_lib and cpp_parser_lib. However, since CompilerInfo is
+  # created, they're currently required.
+  deps = [
+    ":cxx_compiler_info_lib",
+    ":vc_compiler_info_builder_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_proxy_lib",
+    "//client:goma_test_lib",
+    "//client/cxx/include_processor:cpp_parser_lib",
+  ]
+}
+
+executable("clang_compiler_info_builder_helper_unittest") {
+  testonly = true
+  sources = [
+    "clang_compiler_info_builder_helper_unittest.cc",
+  ]
+
+  deps = [
+    ":clang_compiler_info_builder_helper_lib",
+    ":cxx_compiler_info_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:compiler_info_lib",
+    "//client:goma_test_lib",
+  ]
+}

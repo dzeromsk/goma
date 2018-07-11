@@ -140,7 +140,6 @@ bool ParseOAuth2Config(const string& str, OAuth2Config* config) {
   return true;
 }
 
-
 string FormatOAuth2Config(const OAuth2Config& config) {
   Json::Value root;
   root[kAuthURI] = config.auth_uri;

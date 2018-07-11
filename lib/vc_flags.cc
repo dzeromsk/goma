@@ -173,6 +173,7 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
   FlagParser::Flag* flag_fmsc_version = parser.AddPrefixFlag("fmsc-version=");
   FlagParser::Flag* flag_fms_compatibility_version =
       parser.AddPrefixFlag("fms-compatibility-version=");
+  FlagParser::Flag* flag_resource_dir = nullptr;
   FlagParser::Flag* flag_fsanitize = parser.AddFlag("fsanitize");
   FlagParser::Flag* flag_fno_sanitize_blacklist = nullptr;
   FlagParser::Flag* flag_fsanitize_blacklist = nullptr;
@@ -182,6 +183,8 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
   // http://clang.llvm.org/docs/UsersManual.html#id8
   FlagParser::Flag* flag_imsvc = parser.AddFlag("imsvc");
   FlagParser::Flag* flag_std = parser.AddFlag("std");  // e.g. -std=c11
+  FlagParser::Flag* flag_no_canonical_prefixes =
+      parser.AddBoolFlag("no-canonical-prefixes");
   std::vector<string> incremental_linker_flags;
   parser.AddBoolFlag("Brepro")->SetOutput(&incremental_linker_flags);
   parser.AddBoolFlag("Brepro-")->SetOutput(&incremental_linker_flags);
@@ -189,6 +192,8 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
     flag_m->SetOutput(&compiler_info_flags_);
     flag_fmsc_version->SetOutput(&compiler_info_flags_);
     flag_fms_compatibility_version->SetOutput(&compiler_info_flags_);
+    flag_resource_dir = parser.AddFlag("resource-dir");
+    flag_resource_dir->SetOutput(&compiler_info_flags_);
     flag_fsanitize->SetOutput(&compiler_info_flags_);
     // TODO: do we need to support more sanitize options?
     flag_fno_sanitize_blacklist = parser.AddBoolFlag("fno-sanitize-blacklist");
@@ -197,6 +202,7 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
     flag_isystem->SetOutput(&compiler_info_flags_);
     flag_imsvc->SetOutput(&compiler_info_flags_);
     flag_std->SetOutput(&compiler_info_flags_);
+    flag_no_canonical_prefixes->SetOutput(&compiler_info_flags_);
 
     parser.AddBoolFlag("w")->SetOutput(&compiler_info_flags_);
 
@@ -258,6 +264,10 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
   // and http://clang.llvm.org/docs/UsersManual.html
   if (compiler_name() != "clang-cl" && (flag_Zi->seen() || flag_ZI->seen())) {
     require_mspdbserv_ = true;
+  }
+
+  if (flag_resource_dir && flag_resource_dir->seen()) {
+    resource_dir_ = flag_resource_dir->GetLastValue();
   }
 
   if (flag_fsanitize_blacklist && flag_fsanitize_blacklist->seen() &&

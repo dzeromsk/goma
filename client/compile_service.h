@@ -20,24 +20,29 @@
 #include "atomic_stats_counter.h"
 #include "basictypes.h"
 #include "compiler_info.h"
+#include "compiler_info_builder.h"
+#include "compiler_info_builder_facade.h"
 #include "compiler_info_cache.h"
+#include "compiler_info_state.h"
 #include "lockhelper.h"
 #include "subprocess_option_setter.h"
 #include "threadpool_http_server.h"
-#include "worker_thread_manager.h"
 #include "watchdog.h"
+#include "worker_thread_manager.h"
 
 using std::string;
 
 namespace devtools_goma {
 
 class AutoUpdater;
+class BlobClient;
 class CompileTask;
 class CompilerFlags;
 class CompilerProxyHistogram;
 class ExecReq;
 class ExecResp;
 class ExecServiceClient;
+class FileServiceBlobClient;
 class FileServiceHttpClient;
 class FileHashCache;
 class GomaStats;
@@ -108,8 +113,7 @@ class CompileService {
     MultiRpcController* multi_rpc_;
 #endif
 
-    size_t gcc_req_size_;
-    size_t* gcc_resp_size_;
+    size_t gomacc_req_size_;
 
     DISALLOW_COPY_AND_ASSIGN(RpcController);
   };
@@ -156,7 +160,7 @@ class CompileService {
     std::vector<std::pair<WorkerThreadManager::ThreadId, OneshotClosure*>>
         closed_callbacks_;
 
-    size_t gcc_req_size_;
+    size_t gomacc_req_size_;
 
     DISALLOW_COPY_AND_ASSIGN(MultiRpcController);
   };
@@ -230,7 +234,8 @@ class CompileService {
   // Takes ownership of file_service.
   void SetFileServiceHttpClient(
       std::unique_ptr<FileServiceHttpClient> file_service);
-  FileServiceHttpClient* file_service() const { return file_service_.get(); }
+  FileServiceHttpClient* file_service() const;
+  BlobClient* blob_client() const;
 
   FileHashCache* file_hash_cache() const { return file_hash_cache_.get(); }
   CompilerProxyHistogram* histogram() const { return histogram_.get(); }
@@ -347,7 +352,7 @@ class CompileService {
   }
 
   void SetHashRewriteRule(const std::map<std::string, std::string>& mapping) {
-    compiler_info_builder_->SetHashRewriteRule(mapping);
+    compiler_info_builder_facade_->SetHashRewriteRule(mapping);
   }
 
   void SetMaxActiveFailFallbackTasks(int num) {
@@ -531,9 +536,9 @@ class CompileService {
 
   std::unique_ptr<ExecServiceClient> exec_service_client_;
   std::unique_ptr<MultiFileStore> multi_file_store_;
-  std::unique_ptr<FileServiceHttpClient> file_service_;
+  std::unique_ptr<FileServiceBlobClient> blob_client_;
 
-  std::unique_ptr<CompilerInfoBuilder> compiler_info_builder_;
+  std::unique_ptr<CompilerInfoBuilderFacade> compiler_info_builder_facade_;
 
   int compiler_info_pool_;
 

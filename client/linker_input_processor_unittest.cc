@@ -17,6 +17,7 @@
 
 #include "absl/memory/memory.h"
 #include "compiler_info.h"
+#include "glog/logging.h"
 #include "gtest/gtest.h"
 #include "ioutil.h"
 #include "library_path_resolver.h"

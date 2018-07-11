@@ -30,6 +30,7 @@
 #include "arfile.h"
 #include "cmdline_parser.h"
 #include "compiler_flags.h"
+#include "compiler_flags_parser.h"
 #include "compiler_info.h"
 #include "compiler_specific.h"
 #include "content.h"
@@ -83,13 +84,11 @@ const int kMaxRecursion = 10;
 
 namespace devtools_goma {
 
-LinkerInputProcessor::LinkerInputProcessor(
-    const std::vector<string>& args,
-    const string& current_directory)
-    : flags_(CompilerFlags::New(args, current_directory)),
+LinkerInputProcessor::LinkerInputProcessor(const std::vector<string>& args,
+                                           const string& current_directory)
+    : flags_(CompilerFlagsParser::New(args, current_directory)),
       library_path_resolver_(new LibraryPathResolver(current_directory)),
-      framework_path_resolver_(new FrameworkPathResolver(current_directory)) {
-}
+      framework_path_resolver_(new FrameworkPathResolver(current_directory)) {}
 
 LinkerInputProcessor::LinkerInputProcessor(
     const string& current_directory)
@@ -215,7 +214,7 @@ bool LinkerInputProcessor::ParseDumpOutput(
     }
     if (line[0] == ' ') {
       driver_args->clear();
-      if (!ParsePosixCommandLineToArgv(string(line), driver_args))
+      if (!ParsePosixCommandLineToArgv(line, driver_args))
         return false;
     }
   } while (pos != absl::string_view::npos);

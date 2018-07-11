@@ -35,12 +35,15 @@
 #include "compilation_database_reader.h"
 #include "compile_service.h"
 #include "compile_stats.h"
+#include "compiler_flag_type_specific.h"
 #include "compiler_flags.h"
+#include "compiler_flags_parser.h"
 #include "compiler_flags_util.h"
 #include "compiler_info.h"
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
-#include "cpp_include_processor.h"
+#include "cxx/include_processor/cpp_include_processor.h"
+#include "cxx/include_processor/include_file_utils.h"
 #include "file.h"
 #include "file_dir.h"
 #include "file_hash_cache.h"
@@ -50,12 +53,12 @@
 #include "gcc_flags.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
+#include "goma_blob.h"
 #include "goma_data_util.h"
 #include "goma_file.h"
 #include "goma_file_dump.h"
 #include "goma_file_http.h"
 #include "http_rpc.h"
-#include "include_file_utils.h"
 #include "ioutil.h"
 #include "java/jar_parser.h"
 #include "java_flags.h"
@@ -258,7 +261,7 @@ class CompileTask::InputFileTask {
   // InputFileTask.
   static InputFileTask* NewInputFileTask(
       WorkerThreadManager* wm,
-      std::unique_ptr<FileServiceHttpClient> file_service_client,
+      std::unique_ptr<BlobClient::Uploader> blob_uploader,
       FileHashCache* file_hash_cache,
       const FileStat& file_stat,
       const string& filename,
@@ -280,7 +283,7 @@ class CompileTask::InputFileTask {
           task_by_filename_->insert(std::make_pair(filename, input_file_task));
       if (p.second) {
         p.first->second = new InputFileTask(
-            wm, std::move(file_service_client), file_hash_cache, file_stat,
+            wm, std::move(blob_uploader), file_hash_cache, file_stat,
             filename, missed_content, linking, is_new_file, old_hash_key);
       }
       input_file_task = p.first->second;
@@ -315,7 +318,6 @@ class CompileTask::InputFileTask {
       }
     }
 
-    blob_ = absl::make_unique<FileBlob>();
     if (missed_content_) {
       LOG(INFO) << task->trace_id() << " (" << num_tasks() << " tasks)"
                 << " input " << filename_ << " [missed content]";
@@ -323,83 +325,99 @@ class CompileTask::InputFileTask {
       VLOG(1) << task->trace_id() << " (" << num_tasks() << " tasks)"
               << " input " << filename_;
     }
-    success_ = file_service_->CreateFileBlob(
-        filename_, missed_content_, blob_.get());
-
-    if (success_) {
-      hash_key_ = FileServiceClient::ComputeHashKey(*blob_);
-      file_size_ = blob_->file_size();
-
-      // For small size of file blob, don't request to store file blob
-      // separately even if the compile task requested hash key only.
-      if (blob_->blob_type() == FileBlob::FILE_META || file_size_ < 512)
-        need_hash_only_ = false;
-
-      if (!missed_content_ && blob_->blob_type() == FileBlob::FILE_META &&
-          need_to_upload_content()) {
-        // We didn't upload FILE_CHUNKs, but seems to need to upload them.
-        LOG(WARNING) << task->trace_id()
-                     << " (" << num_tasks() << " tasks)"
-                     << " reload:" << filename_
-                     << " file changed";
-        blob_ = absl::make_unique<FileBlob>();
-        success_ = file_service_->CreateFileBlob(
-            filename_, true, blob_.get());
-        if (success_) {
-          const string new_hash_key = FileServiceClient::ComputeHashKey(*blob_);
-          const ssize_t new_file_size = blob_->file_size();
-          if (hash_key_ != new_hash_key || file_size_ != new_file_size) {
-            hash_key_ = new_hash_key;
-            file_size_ = new_file_size;
-          }
-        }
-      }
-      if (need_hash_only_ && need_to_upload_content()) {
-        LOG(INFO) << task->trace_id() << " (" << num_tasks() << " tasks)"
-                  << " upload:" << filename_ << " size:" << file_size_
-                  << " reason:" << upload_reason();
-        success_ = file_service_->StoreFileBlob(*blob_);
-        blob_.reset();
+    bool uploaded_in_side_channel = false;
+    // TODO: use string_view in file_hash_cache methods.
+    string hash_key = old_hash_key_;
+    if (need_to_compute_key()) {
+      VLOG(1) << task->trace_id()
+              << " (" << num_tasks() << " tasks)"
+              << " compute hash key:" << filename_
+              << " size:" << file_stat_.size;
+      success_ = blob_uploader_->ComputeKey();
+      if (success_) {
+        hash_key = blob_uploader_->hash_key();
+        new_cache_key_ = !file_hash_cache_->IsKnownCacheKey(hash_key);
       }
     }
 
+    if (need_to_upload_content(hash_key)) {
+      if (need_hash_only_ || file_stat_.size > 2*1024*1024) {
+        // upload in side channel.
+        LOG(INFO) << task->trace_id()
+                  << "(" << num_tasks() << " tasks)"
+                  << " upload:" << filename_
+                  << " size:" << file_stat_.size
+                  << " reason:" << upload_reason(hash_key);
+        success_ = blob_uploader_->Upload();
+        if (success_) {
+          uploaded_in_side_channel = true;
+        }
+      } else {
+        // upload embedded.
+        LOG(INFO) << task->trace_id()
+                  << " (" << num_tasks() << " tasks)"
+                  << " embed:" << filename_
+                  << " size:" << file_stat_.size
+                  << " reason:" << upload_reason(hash_key);
+        success_ = blob_uploader_->Embed();
+      }
+    } else if (file_stat_.size < 512) {
+      // For small size of file blob, embed it even if the copmile task
+      // requested hash key only.
+      LOG(INFO) << task->trace_id()
+                << " (" << num_tasks() << " tasks)"
+                << " embed:" << filename_
+                << " size:" << file_stat_.size
+                << " reason:small";
+      need_hash_only_ = false;
+      success_ = blob_uploader_->Embed();
+    } else {
+      VLOG(1) << task->trace_id()
+              << " (" << num_tasks() << " tasks)"
+              << " hash only:" << filename_
+              << " size:" << file_stat_.size
+              << " missed_content:" << missed_content_
+              << " is_new_file:" << is_new_file_
+              << " new_cache_key:" << new_cache_key_
+              << " success:" << success_;
+    }
+
     if (!success_) {
-      LOG(WARNING) << task->trace_id() << " (" << num_tasks() << " tasks)"
+      LOG(WARNING) << task->trace_id()
+                   << " (" << num_tasks() << " tasks)"
                    << " input file failed:" << filename_;
     } else {
-      // Stores file cache key only if we have already uploaded the blob,
-      // or we assume the blob has already been uploaded since it's old enough.
+      hash_key = blob_uploader_->hash_key();
+      CHECK(!hash_key.empty())
+          << task->trace_id()
+          << " (" << num_tasks() << " tasks)"
+          << " no hash key?" << filename_;
+      // Stores file cache key only if we have already uploaded the blob
+      // in side channel, or we assume the blob has already been uploaded
+      // since it's old enough.
       // When we decide to upload the blob by embedding it to the request,
       // we have to store file cache key after the compile request without no
       // missing inputs error. If missing inputs error happens, it's safer to
-      // resend the blob since we might send the second request to the different
-      // cluster. That cluster might not have the cache.
+      // resend the blob since we might send the second request to
+      // the different cluster. That cluster might not have the cache.
       // If blob is old enough, we assume that the file has already been
-      // uploaded. In that case, we register file hash id to |file_hash_cache_|.
+      // uploaded. In that case, we register file hash id to
+      // |file_hash_cache_|.
       // See b/11261931
       //     b/12087209
-      if (blob_.get() == nullptr || !is_new_file_) {
+      if (uploaded_in_side_channel || !is_new_file_) {
         // Set upload_timestamp_ms only if we have uploaded the content.
         const millitime_t upload_timestamp_ms =
-            blob_.get() == nullptr ? GetCurrentTimestampMs() : 0LL;
-
-        if (file_stat_.IsValid()) {
-          mtime_ = file_stat_.mtime;
-        }
+            uploaded_in_side_channel ? GetCurrentTimestampMs() : 0LL;
         new_cache_key_ = file_hash_cache_->StoreFileCacheKey(
-            filename_, hash_key_, upload_timestamp_ms, file_stat_);
+            filename_, hash_key, upload_timestamp_ms, file_stat_);
         VLOG(1) << task->trace_id() << " (" << num_tasks() << " tasks)"
                 << " input file ok: " << filename_
-                << (blob_.get() == nullptr ? " upload" : " hash only");
+                << (uploaded_in_side_channel ? " upload" : " hash only");
       } else {
-        // Though the blob is new, we didn't upload the blob. It's because
-        // either the blob has been uploaded (new_cache_key_ == false)
-        // or we will upload it by embedding the blob to the compile request
-        // (new_cache_key_ == true).
-        new_cache_key_ = !file_hash_cache_->IsKnownCacheKey(hash_key_);
         VLOG(1) << task->trace_id() << " (" << num_tasks() << " tasks)"
                 << " input file ok: " << filename_
-                << (new_cache_key_ ? " hash only (embedded upload)"
+                << (new_cache_key_ ? " embedded upload"
                     : " already uploaded");
       }
     }
@@ -449,12 +467,11 @@ class CompileTask::InputFileTask {
   const string& filename() const { return filename_; }
   bool missed_content() const { return missed_content_; }
   bool need_hash_only() const { return need_hash_only_; }
-  const FileBlob* blob() const { return blob_.get(); }
-  time_t mtime() const { return mtime_; }
+  time_t mtime() const { return file_stat_.mtime; }
   int GetInMs() const { return timer_.GetInMs(); }
-  ssize_t file_size() const { return file_size_; }
+  ssize_t file_size() const { return file_stat_.size; }
   const string& old_hash_key() const { return old_hash_key_; }
-  const string& hash_key() const { return hash_key_; }
+  const string& hash_key() const { return blob_uploader_->hash_key(); }
   bool success() const { return success_; }
   bool new_cache_key() const { return new_cache_key_; }
 
@@ -462,6 +479,13 @@ class CompileTask::InputFileTask {
     AUTOLOCK(lock, &mu_);
     return tasks_.size();
   }
+
+  bool UpdateInputInTask(CompileTask* task) const {
+    ExecReq_Input* input = GetInputForTask(task);
+    CHECK(input != nullptr) << task->trace_id() << " filename:" << filename_;
+    return blob_uploader_->GetInput(input);
+  }
+
   ExecReq_Input* GetInputForTask(CompileTask* task) const {
     AUTOLOCK(lock, &mu_);
     std::map<CompileTask*, ExecReq_Input*>::const_iterator found =
@@ -472,43 +496,57 @@ class CompileTask::InputFileTask {
     return nullptr;
   }
 
-  bool need_to_upload_content() const {
-    if (missed_content_)
-      return true;
+  bool need_to_compute_key() const {
+    if (need_to_upload_content(old_hash_key_)) {
+      // we'll calculate hash key during uploading.
+      return false;
+    }
+    return file_stat_.size >= 512;
+  }
 
+  bool need_to_upload_content(absl::string_view hash_key) const {
+    if (missed_content_) {
+      return true;
+    }
     if (absl::EndsWith(filename_, ".rsp")) {
       return true;
     }
     if (is_new_file_) {
-      if (new_cache_key_)
+      if (new_cache_key_) {
         return true;
+      }
     }
     if (old_hash_key_.empty()) {
       // old file and first check. we assume the file was already uploaded.
       return false;
     }
-    return old_hash_key_ != hash_key_;
+    return old_hash_key_ != hash_key;
   }
-  const char* upload_reason() const {
-    if (missed_content_)
+
+  const char* upload_reason(absl::string_view hash_key) const {
+    if (missed_content_) {
       return "missed content";
+    }
     if (absl::EndsWith(filename_, ".rsp")) {
       return "rsp file";
     }
     if (is_new_file_) {
-      if (new_cache_key_)
+      if (new_cache_key_) {
         return "new file cache_key";
+      }
     }
-    if (old_hash_key_.empty())
+    if (old_hash_key_.empty()) {
       return "no need to upload - maybe already in cache.";
-    if (old_hash_key_ != hash_key_)
+    }
+    if (old_hash_key_ != hash_key) {
       return "update cache_key";
-
+    }
     return "no need to upload - cache_key matches";
   }
 
-  const HttpRPC::Status& http_rpc_status() const {
-    return file_service_->http_rpc_status();
+  const HttpClient::Status& http_status() const {
+    // TODO: blob_uploader should support this API?
+    return blob_uploader_->http_status();
   }
 
  private:
@@ -519,7 +557,7 @@ class CompileTask::InputFileTask {
   };
 
   InputFileTask(WorkerThreadManager* wm,
-                std::unique_ptr<FileServiceHttpClient> file_service,
+                std::unique_ptr<BlobClient::Uploader> blob_uploader,
                 FileHashCache* file_hash_cache,
                 const FileStat& file_stat,
                 string filename,
@@ -528,7 +566,7 @@ class CompileTask::InputFileTask {
                 bool is_new_file,
                 string old_hash_key)
       : wm_(wm),
-        file_service_(std::move(file_service)),
+        blob_uploader_(std::move(blob_uploader)),
         file_hash_cache_(file_hash_cache),
         file_stat_(file_stat),
         filename_(std::move(filename)),
@@ -536,9 +574,7 @@ class CompileTask::InputFileTask {
         missed_content_(missed_content),
         need_hash_only_(linking),  // we need hash key only in linking.
         is_new_file_(is_new_file),
-        mtime_(0),
         old_hash_key_(std::move(old_hash_key)),
-        file_size_(0),
         success_(false),
         new_cache_key_(false) {
     timer_.Start();
@@ -558,7 +594,7 @@ class CompileTask::InputFileTask {
   }
 
   WorkerThreadManager* wm_;
-  std::unique_ptr<FileServiceHttpClient> file_service_;
+  std::unique_ptr<BlobClient::Uploader> blob_uploader_;
   FileHashCache* file_hash_cache_;
   const FileStat file_stat_;
 
@@ -583,15 +619,10 @@ class CompileTask::InputFileTask {
   // uploaded the content in goma cache.
   const bool is_new_file_;
 
-  time_t mtime_;      // file's mtime.
   // hash key stored in file_hash_cache.
   const string old_hash_key_;
-  // hash key calcurated from blob_.
-  string hash_key_;
 
-  std::unique_ptr<FileBlob> blob_;
   SimpleTimer timer_;
-  ssize_t file_size_;
 
   // true if goma file ops is succeeded.
   bool success_;
@@ -607,7 +638,6 @@ class CompileTask::InputFileTask {
 
   DISALLOW_COPY_AND_ASSIGN(InputFileTask);
 };
-
 
 absl::once_flag CompileTask::InputFileTask::init_once_;
 Lock CompileTask::InputFileTask::global_mu_;
@@ -860,14 +890,14 @@ CompileTask::CompileTask(CompileService* service, int id)
 }
 
 void CompileTask::Ref() {
-  AUTOLOCK(lock, &mu_);
+  AUTOLOCK(lock, &refcnt_mu_);
   refcnt_++;
 }
 
 void CompileTask::Deref() {
   int refcnt;
   {
-    AUTOLOCK(lock, &mu_);
+    AUTOLOCK(lock, &refcnt_mu_);
     refcnt_--;
     refcnt = refcnt_;
   }
@@ -1311,8 +1341,8 @@ void CompileTask::ProcessFileRequest() {
 
     InputFileTask* input_file_task = InputFileTask::NewInputFileTask(
         service_->wm(),
-        service_->file_service()->WithRequesterInfoAndTraceId(requester_info_,
-                                                              trace_id_),
+        service_->blob_client()->NewUploader(
+            abs_filename, requester_info_, trace_id_),
         service_->file_hash_cache(), input_file_stat_cache_->Get(abs_filename),
         abs_filename, missed_content, linking_, is_new_file, hash_key, this,
         input);
@@ -2478,7 +2508,7 @@ void CompileTask::CommitOutput(bool use_remote) {
     // measureable performance penalty.
     // see b/24388745
     if (use_remote && stats_->cache_hit() &&
-        flags_->type() == CompilerType::Clexe) {
+        flags_->type() == CompilerFlagType::Clexe) {
       // We should not rewrite coff if /Brepro or something similar is set.
       // See b/72768585
       const VCFlags& vc_flag = static_cast<const VCFlags&>(*flags_);
@@ -2506,11 +2536,11 @@ void CompileTask::CommitOutput(bool use_remote) {
     absl::string_view output_base = file::Basename(info.filename);
     output_bases.push_back(string(output_base));
     absl::string_view ext = file::Extension(output_base);
-    if (flags_->type() == CompilerType::Gcc && ext == "o") {
+    if (flags_->type() == CompilerFlagType::Gcc && ext == "o") {
       has_obj = true;
-    } else if (flags_->type() == CompilerType::Clexe && ext == "obj") {
+    } else if (flags_->type() == CompilerFlagType::Clexe && ext == "obj") {
       has_obj = true;
-    } else if (flags_->type() == CompilerType::Javac && ext == "class") {
+    } else if (flags_->type() == CompilerFlagType::Javac && ext == "class") {
       has_obj = true;
     }
 
@@ -2574,6 +2604,9 @@ void CompileTask::ReplyResponse(const string& msg) {
   }
   UpdateStats();
   *rpc_resp_ = *resp_;
+  // Here, rpc_resp_ has created, so we can set gomacc_resp_size. b/109783082
+  stats_->gomacc_resp_size = rpc_resp_->ByteSize();
+
   OneshotClosure* done = done_;
   done_ = nullptr;
   rpc_resp_ = nullptr;
@@ -2879,10 +2912,11 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
     }
     if (stats_->file_response_time())
       (*root)["file_response_time"] = stats_->file_response_time();
-    if (stats_->gcc_req_size)
-      (*root)["gcc_req_size"] = Json::Value::Int64(stats_->gcc_req_size);
-    if (stats_->gcc_resp_size)
-      (*root)["gcc_resp_size"] = Json::Value::Int64(stats_->gcc_resp_size);
+    if (stats_->gomacc_req_size)
+      (*root)["gomacc_req_size"] = Json::Value::Int64(stats_->gomacc_req_size);
+    if (stats_->gomacc_resp_size)
+      (*root)["gomacc_resp_size"] =
+          Json::Value::Int64(stats_->gomacc_resp_size);
     {
       AUTOLOCK(lock, &mu_);
       if (http_rpc_status_.get()) {
@@ -3093,7 +3127,7 @@ bool CompileTask::IsLocalCompilerPathValid(
   }
   // If local_compiler_path exists, it must be the same compiler_name with
   // flag_'s.
-  const string name = CompilerFlags::GetCompilerName(
+  const string name = CompilerFlagTypeSpecific::GetCompilerNameFromArg(
       req.command_spec().local_compiler_path());
   if (req.command_spec().has_name() &&
       req.command_spec().name() != name) {
@@ -3145,18 +3179,18 @@ void CompileTask::InitCompilerFlags() {
   CHECK_EQ(INIT, state_);
   std::vector<string> args(req_->arg().begin(), req_->arg().end());
   VLOG(1) << trace_id_ << " " << args;
-  flags_ = CompilerFlags::New(args, req_->cwd());
+  flags_ = CompilerFlagsParser::New(args, req_->cwd());
   if (flags_.get() == nullptr) {
     return;
   }
   flag_dump_ = flags_->DebugString();
-  if (flags_->type() == CompilerType::Gcc) {
+  if (flags_->type() == CompilerFlagType::Gcc) {
     const GCCFlags& gcc_flag = static_cast<const GCCFlags&>(*flags_);
     linking_ = (gcc_flag.mode() == GCCFlags::LINK);
     precompiling_ = gcc_flag.is_precompiling_header();
-  } else if (flags_->type() == CompilerType::Clexe) {
+  } else if (flags_->type() == CompilerFlagType::Clexe) {
     // TODO: check linking_ etc.
-  } else if (flags_->type() == CompilerType::ClangTidy) {
+  } else if (flags_->type() == CompilerFlagType::ClangTidy) {
     // Sets the actual gcc_flags for clang_tidy_flags here.
     ClangTidyFlags& clang_tidy_flags = static_cast<ClangTidyFlags&>(*flags_);
     if (clang_tidy_flags.input_filenames().size() != 1) {
@@ -3275,7 +3309,7 @@ bool CompileTask::ShouldFallback() const {
               << " force fallback. no input files give.";
     return true;
   }
-  if (flags_->type() == CompilerType::Gcc) {
+  if (flags_->type() == CompilerFlagType::Gcc) {
     const GCCFlags& gcc_flag = static_cast<const GCCFlags&>(*flags_);
     if (gcc_flag.is_stdin_input()) {
       service_->RecordForcedFallbackInSetup(
@@ -3321,7 +3355,7 @@ bool CompileTask::ShouldFallback() const {
                 << " force fallback. assembler should be light-weight.";
       return true;
     }
-  } else if (flags_->type() == CompilerType::Clexe) {
+  } else if (flags_->type() == CompilerFlagType::Clexe) {
     const VCFlags& vc_flag = static_cast<const VCFlags&>(*flags_);
     // GOMA doesn't work with PCH so we generate it only for local builds.
     if (!vc_flag.creating_pch().empty()) {
@@ -3338,7 +3372,7 @@ bool CompileTask::ShouldFallback() const {
                 << " force fallback. cannot run mspdbserv in goma backend.";
       return true;
     }
-  } else if (flags_->type() == CompilerType::Javac) {
+  } else if (flags_->type() == CompilerFlagType::Javac) {
     const JavacFlags& javac_flag = static_cast<const JavacFlags&>(*flags_);
     // TODO: remove following code when goma backend get ready.
     // Force fallback a compile request with -processor (b/38215808)
@@ -3350,7 +3384,7 @@ bool CompileTask::ShouldFallback() const {
                 << " goma backend (b/38215808)";
       return true;
     }
-  } else if (flags_->type() == CompilerType::Java) {
+  } else if (flags_->type() == CompilerFlagType::Java) {
     LOG(INFO) << trace_id_
               << " force fallback to avoid running java program in"
               << " goma backend";
@@ -3459,7 +3493,7 @@ void CompileTask::FillCompilerInfo() {
 #ifdef _WIN32
   if (!pathext_.empty())
     run_envs.push_back("PATHEXT=" + pathext_);
-  if (flags_->type() == CompilerType::Clexe) {
+  if (flags_->type() == CompilerFlagType::Clexe) {
     run_envs.push_back("TMP=" + service_->tmp_dir());
     run_envs.push_back("TEMP=" + service_->tmp_dir());
   }
@@ -3571,7 +3605,7 @@ void CompileTask::UpdateRequiredFiles() {
   CHECK_EQ(SETUP, state_);
   include_timer_.Start();
   include_wait_timer_.Start();
-  if (flags_->type() == CompilerType::Gcc) {
+  if (flags_->type() == CompilerFlagType::Gcc) {
     const GCCFlags& gcc_flag = static_cast<const GCCFlags&>(*flags_);
     if (gcc_flag.lang() == "ir") {
       if (gcc_flag.thinlto_index().empty()) {
@@ -3602,18 +3636,18 @@ void CompileTask::UpdateRequiredFiles() {
     return;
   }
 
-  if (flags_->type() == CompilerType::Clexe) {
+  if (flags_->type() == CompilerFlagType::Clexe) {
     // TODO: fix for linking_ mode.
     GetIncludeFiles();
     return;
   }
 
-  if (flags_->type() == CompilerType::Javac) {
+  if (flags_->type() == CompilerFlagType::Javac) {
     GetJavaRequiredFiles();
     return;
   }
 
-  if (flags_->type() == CompilerType::ClangTidy) {
+  if (flags_->type() == CompilerFlagType::ClangTidy) {
     GetIncludeFiles();
     return;
   }
@@ -3702,6 +3736,12 @@ void CompileTask::SetupRequestDone(bool ok) {
 bool CompileTask::MakeWeakRelativeInArgv() {
   CHECK_EQ(SETUP, state_);
   DCHECK(compiler_info_state_.get() != nullptr);
+
+  // Support only C/C++.
+  if (compiler_info_state_.get()->info().type() != CompilerInfoType::Cxx) {
+    return false;
+  }
+
   orig_flag_dump_ = flag_dump_;
   // If cwd is in tmp directory, we can't know output path is
   // whether ./path/to/output or $TMP/path/to/output.
@@ -3715,9 +3755,9 @@ bool CompileTask::MakeWeakRelativeInArgv() {
   }
   bool changed = false;
   std::ostringstream ss;
-  const std::vector<string>& parsed_args =
-      CompilerFlagsUtil::MakeWeakRelative(
-          flags_->args(), req_->cwd(), compiler_info_state_.get()->info());
+  const std::vector<string>& parsed_args = CompilerFlagsUtil::MakeWeakRelative(
+      flags_->args(), req_->cwd(),
+      ToCxxCompilerInfo(compiler_info_state_.get()->info()));
   for (size_t i = 0; i < parsed_args.size(); ++i) {
     if (req_->arg(i) != parsed_args[i]) {
       VLOG(1) << "Arg[" << i << "]: " << req_->arg(i) << " => "
@@ -3768,23 +3808,26 @@ static void FixCommandSpec(const CompilerInfo& compiler_info,
   // C++ program should only send C++ include paths, otherwise, include order
   // might be wrong. For C program, cxx_system_include_paths would be empty.
   // c.f. b/25675250
-  bool is_cplusplus = false;
-  if (flags.type() == CompilerType::Gcc) {
-    is_cplusplus = static_cast<const GCCFlags&>(flags).is_cplusplus();
-  } else if (flags.type() == CompilerType::Clexe) {
-    is_cplusplus = static_cast<const VCFlags&>(flags).is_cplusplus();
-  } else if (flags.type() == CompilerType::ClangTidy) {
-    is_cplusplus = static_cast<const ClangTidyFlags&>(flags).is_cplusplus();
-  }
+  if (compiler_info.type() == CompilerInfoType::Cxx) {
+    bool is_cplusplus = false;
+    if (flags.type() == CompilerFlagType::Gcc) {
+      is_cplusplus = static_cast<const GCCFlags&>(flags).is_cplusplus();
+    } else if (flags.type() == CompilerFlagType::Clexe) {
+      is_cplusplus = static_cast<const VCFlags&>(flags).is_cplusplus();
+    } else if (flags.type() == CompilerFlagType::ClangTidy) {
+      is_cplusplus = static_cast<const ClangTidyFlags&>(flags).is_cplusplus();
+    }
 
-  if (!is_cplusplus) {
-    for (const auto& path : compiler_info.system_include_paths())
-      command_spec->add_system_include_path(path);
+    const CxxCompilerInfo& cxxci = ToCxxCompilerInfo(compiler_info);
+    if (!is_cplusplus) {
+      for (const auto& path : cxxci.system_include_paths())
+        command_spec->add_system_include_path(path);
+    }
+    for (const auto& path : cxxci.cxx_system_include_paths())
+      command_spec->add_cxx_system_include_path(path);
+    for (const auto& path : cxxci.system_framework_paths())
+      command_spec->add_system_framework_path(path);
   }
-  for (const auto& path : compiler_info.cxx_system_include_paths())
-    command_spec->add_cxx_system_include_path(path);
-  for (const auto& path : compiler_info.system_framework_paths())
-    command_spec->add_system_framework_path(path);
 }
 
 static void FixSystemLibraryPath(const std::vector<string>& library_paths,
@@ -3803,129 +3846,37 @@ void CompileTask::UpdateExpandedArgs() {
 void CompileTask::ModifyRequestArgs() {
   DCHECK(compiler_info_state_.get() != nullptr);
   const CompilerInfo& compiler_info = compiler_info_state_.get()->info();
-  if (compiler_info.HasAdditionalFlags()) {
-    bool use_expanded_args = (req_->expanded_arg_size() > 0);
-    for (const auto& flag : compiler_info.additional_flags()) {
-      req_->add_arg(flag);
-      if (use_expanded_args) {
-        req_->add_expanded_arg(flag);
-      }
-    }
+  for (const auto& r : compiler_info.resource()) {
+    const string& path = r.name;
+    req_->add_input()->set_filename(path);
+    LOG(INFO) << trace_id_ << " input automatically added: " << path;
   }
 
-  if (flags_->type() == CompilerType::Gcc) {
-    if (GCCFlags::IsClangCommand(flags_->compiler_name())) {
-      // clang has default blacklist files. (gcc seems not)
-      // c.f. http://llvm.org/viewvc/llvm-project/cfe/trunk/lib/Driver/SanitizerArgs.cpp?revision=242286&view=markup#l82
-      // It's in clang resource directory.
-      //
-      // clang's sanitizer list is here.
-      // http://llvm.org/viewvc/llvm-project/cfe/trunk/include/clang/Basic/Sanitizers.def
-      //
-      // Note that -fsanitize=cfi-* implies -fsanitize=cfi basically, but
-      // as of 9 Sep, 2015, -fsanitize=cfi-cast-strict doesn't imply
-      // -fsanitize=cfi.
-
-      // clang has started putting blacklist files in {resource_dir}/share
-      // from Jan 2018. See
-      // http://llvm.org/viewvc/llvm-project/cfe/trunk/lib/Driver/SanitizerArgs.cpp?r1=322260&r2=322452
-      // To support both versions (with or without share/),
-      // we have to check both paths.
-
-      static const struct {
-        const char* sanitize_value;
-        const char* blacklist_filename;
-      } kSanitizerCheckers[] = {
-        { "address", "asan_blacklist.txt" },
-        { "memory", "msan_blacklist.txt" },
-        { "thread", "tsan_blacklist.txt" },
-        { "cfi", "cfi_blacklist.txt" },
-        { "cfi-derived-cast", "cfi_blacklist.txt" },
-        { "cfi-unrelated-cast", "cfi_blacklist.txt" },
-        { "cfi-nvcall", "cfi_blacklist.txt" },
-        { "cfi-vcall", "cfi_blacklist.txt" },
-        { "dataflow", "dfsan_abilist.txt" },
-      };
-
-      GCCFlags* gcc_flags = static_cast<GCCFlags*>(flags_.get());
-      std::set<string> added_blacklist;
-      bool needs_resource_dir = false;
-      for (const auto& checker : kSanitizerCheckers) {
-        if (gcc_flags->fsanitize().count(checker.sanitize_value) == 0)
-          continue;
-
-        if (!added_blacklist.insert(checker.blacklist_filename).second)
-          continue;
-
-        // When -no-canoical-prefixes is used, resource_dir could be relative
-        // path from the current directory. So, we need to join cwd.
-        // Without -no-canonical-prefixes, resource-dir will be absolute.
-        string blacklist = file::JoinPathRespectAbsolute(
-            flags_->cwd(),
-            compiler_info.data().resource_dir(),
-            "share",
-            checker.blacklist_filename);
-        if (!input_file_stat_cache_->Get(blacklist).IsValid()) {
-          // Not found. Try without "share".
-          blacklist = file::JoinPathRespectAbsolute(
-              flags_->cwd(),
-              compiler_info.data().resource_dir(),
-              checker.blacklist_filename);
-          if (!input_file_stat_cache_->Get(blacklist).IsValid()) {
-            // -fsanitize is specified, but no default blacklist is found.
-            // As of 7 May 2018, there is no default dfsan_abilist.txt.
-            // So this can happen.
-            continue;
-          }
-        }
-
-        req_->add_input()->set_filename(blacklist);
-        LOG(INFO) << trace_id_ << "input automatically added: " << blacklist;
-        needs_resource_dir = true;
-      }
-
-      if (gcc_flags->has_resource_dir()) {
-        // Here, -resource-dir is specified by user.
-        if (gcc_flags->resource_dir() != compiler_info.data().resource_dir()) {
-          // This should not happen because we set -resource-dir specified by
-          // user to compiler_info_flags.
-          LOG(WARNING) << trace_id_
-                       << "user specified non default -resource-dir:"
-                       << " default=" << compiler_info.data().resource_dir()
-                       << " user=" << gcc_flags->resource_dir();
-        }
-        needs_resource_dir = false;
-      }
-
-      // When we need to upload the default blacklist.txt and -resource-dir is
-      // not specified, we'd like to specify it.
-      if (needs_resource_dir) {
-        string resource_dir_arg =
-            "-resource-dir=" + compiler_info.data().resource_dir();
-        req_->add_arg(resource_dir_arg);
-        LOG(INFO) << trace_id_ << " automatically added: " << resource_dir_arg;
-        bool use_expanded_args = (req_->expanded_arg_size() > 0);
-        if (use_expanded_args) {
-          req_->add_expanded_arg(resource_dir_arg);
-        }
-      }
+  bool modified_args = false;
+  bool use_expanded_args = (req_->expanded_arg_size() > 0);
+  for (const auto& flag : compiler_info.additional_flags()) {
+    req_->add_arg(flag);
+    if (use_expanded_args) {
+      req_->add_expanded_arg(flag);
     }
-  } else if (flags_->type() == CompilerType::Clexe) {
+    modified_args = true;
+  }
+  if (flags_->type() == CompilerFlagType::Clexe) {
     // If /Yu is specified, we add /Y- to tell the backend compiler not
     // to try using PCH. We add this here because we don't want to show
     // this flag in compiler_proxy's console.
     const string& using_pch = static_cast<const VCFlags&>(*flags_).using_pch();
-    if (using_pch.empty()) {
-      // No modification is needed.
-      return;
+    if (!using_pch.empty()) {
+      req_->add_arg("/Y-");
+      if (use_expanded_args) {
+        req_->add_expanded_arg("/Y-");
+      }
+      modified_args = true;
     }
-
-    req_->add_arg("/Y-");
-    req_->add_expanded_arg("/Y-");
   }
 
-  LOG(INFO) << trace_id_ << " modified args: "
-            << absl::StrJoin(req_->arg(), " ");
+  LOG_IF(INFO, modified_args) << trace_id_ << " modified args: "
+                              << absl::StrJoin(req_->arg(), " ");
 }
 
 void CompileTask::ModifyRequestEnvs() {
@@ -4012,9 +3963,9 @@ struct CompileTask::RunCppIncludeProcessorParam {
 
 void CompileTask::GetIncludeFiles() {
   CHECK_EQ(SETUP, state_);
-  DCHECK(flags_->type() == CompilerType::Gcc ||
-         flags_->type() == CompilerType::Clexe ||
-         flags_->type() == CompilerType::ClangTidy);
+  DCHECK(flags_->type() == CompilerFlagType::Gcc ||
+         flags_->type() == CompilerFlagType::Clexe ||
+         flags_->type() == CompilerFlagType::ClangTidy);
   DCHECK(compiler_info_state_.get() != nullptr);
 
   // We don't support multiple input files.
@@ -4076,8 +4027,8 @@ void CompileTask::RunCppIncludeProcessor(
   CppIncludeProcessor include_processor;
   param->result_status = include_processor.GetIncludeFiles(
       param->input_filename, flags_->cwd_for_include_processor(), *flags_,
-      compiler_info_state_.get()->info(), &param->required_files,
-      param->file_stat_cache.get());
+      ToCxxCompilerInfo(compiler_info_state_.get()->info()),
+      &param->required_files, param->file_stat_cache.get());
   stats_->set_include_processor_run_time(include_timer.GetInMs());
 
   if (!param->result_status) {
@@ -4209,7 +4160,7 @@ void CompileTask::GetJavaRequiredFiles() {
 
 void CompileTask::RunJarParser(std::unique_ptr<RunJarParserParam> param) {
   JarParser jar_parser;
-  DCHECK_EQ(CompilerType::Javac, flags_->type());
+  DCHECK_EQ(CompilerFlagType::Javac, flags_->type());
   jar_parser.GetJarFiles(static_cast<JavacFlags*>(flags_.get())->jar_files(),
                          stats_->cwd(),
                          &param->required_files);
@@ -4254,7 +4205,7 @@ void CompileTask::GetThinLTOImports() {
 
 void CompileTask::ReadThinLTOImports(
     std::unique_ptr<ReadThinLTOImportsParam> param) {
-  DCHECK_EQ(CompilerType::Gcc, flags_->type());
+  DCHECK_EQ(CompilerFlagType::Gcc, flags_->type());
   const GCCFlags& gcc_flags = static_cast<const GCCFlags&>(*flags_);
 
   ThinLTOImportProcessor processor;
@@ -4324,32 +4275,15 @@ void CompileTask::InputFileTaskFinished(InputFileTask* input_file_task) {
   DCHECK(!hash_key.empty()) << filename;
   stats_->add_input_file_time(input_file_task->GetInMs());
   stats_->add_input_file_size(file_size);
-  ExecReq_Input* input = input_file_task->GetInputForTask(this);
-  CHECK(input != nullptr) << trace_id_ << " filename:" << filename;
-  input->set_hash_key(hash_key);
-
-  if (!input_file_task->need_hash_only()) {
-    const FileBlob* blob = input_file_task->blob();
-    CHECK(blob != nullptr) << trace_id_ << " " << filename;
-    if (input_file_task->need_to_upload_content()) {
-      LOG(INFO) << trace_id_ << " embedded upload:" << filename
-                << " size=" << file_size
-                << " reason:" << input_file_task->upload_reason()
-                << " retry:" << stats_->exec_request_retry();
-      // We can't swap blob since input_file_task is shared with
-      // several compile tasks.
-      *input->mutable_content() = *blob;
-      if (!FileServiceClient::IsValidFileBlob(input->content())) {
-        LOG(ERROR) << trace_id_ << " bad embedded content "
-                   << filename;
-        input_file_success_ = false;
-      }
-    }
+  if (!input_file_task->UpdateInputInTask(this)) {
+    LOG(ERROR) << trace_id_ << " bad input data "
+               << filename;
+    input_file_success_ = false;
   }
-  const HttpRPC::Status& http_rpc_status =
-      input_file_task->http_rpc_status();
-  stats_->input_file_rpc_size += http_rpc_status.req_size;
-  stats_->input_file_rpc_raw_size += http_rpc_status.raw_req_size;
+  const HttpClient::Status& http_status =
+      input_file_task->http_status();
+  stats_->input_file_rpc_size += http_status.req_size;
+  stats_->input_file_rpc_raw_size += http_status.raw_req_size;
   input_file_task->Done(this);
 }
 
@@ -5087,13 +5021,13 @@ void CompileTask::SetupSubProcess() {
   if (requester_env_.has_umask()) {
     req->set_umask(requester_env_.umask());
   }
-  if (flags_->type() == CompilerType::Gcc) {
+  if (flags_->type() == CompilerFlagType::Gcc) {
     const GCCFlags& gcc_flag = static_cast<const GCCFlags&>(*flags_);
     if (gcc_flag.is_stdin_input()) {
       CHECK_GE(req_->input_size(), 1) << req_->DebugString();
       req->set_stdin_filename(req_->input(0).filename());
     }
-  } else if (flags_->type() == CompilerType::Clexe) {
+  } else if (flags_->type() == CompilerFlagType::Clexe) {
     // TODO: handle input is stdin case for VC++?
   }
   {
@@ -5419,7 +5353,7 @@ void CompileTask::DumpRequest() const {
     const CompilerInfo& compiler_info = compiler_info_state_.get()->info();
     std::vector<string> args(stats_->arg().begin(), stats_->arg().end());
     std::unique_ptr<CompilerFlags> flags(
-        CompilerFlags::New(args, stats_->cwd()));
+        CompilerFlagsParser::New(args, stats_->cwd()));
     FixCommandSpec(compiler_info, *flags, command_spec);
     FixSystemLibraryPath(system_library_paths_, command_spec);
     MayFixSubprogramSpec(req.mutable_subprogram());

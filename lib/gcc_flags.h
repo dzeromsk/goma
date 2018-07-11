@@ -67,7 +67,7 @@ class GCCFlags : public CompilerFlags {
   bool is_precompiling_header() const { return is_precompiling_header_; }
   bool is_stdin_input() const { return is_stdin_input_; }
 
-  CompilerType type() const override { return CompilerType::Gcc; }
+  CompilerFlagType type() const override { return CompilerFlagType::Gcc; }
 
   bool IsClientImportantEnv(const char* env) const override;
   bool IsServerImportantEnv(const char* env) const override;

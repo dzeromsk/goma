@@ -6,6 +6,7 @@
 #include "execreq_normalizer.h"
 
 #include "absl/strings/match.h"
+#include "compiler_flag_type_specific.h"
 #include "compiler_flags.h"
 #include "execreq_verifier.h"
 #include "gcc_flags.h"
@@ -395,6 +396,80 @@ subprogram {
 }
 subprogram {
   path: "/home/goma/chromium/src/out/rel_ng/../../third_party/binutils/Linux_x64/Release/bin/objcopy"
+  binary_hash: "9ccd249906d57ef2ccd24cf19c67c8d645d309c49c284af9d42813caf87fba7e"
+}
+requester_info {
+  username: "goma"
+  compiler_proxy_id: "goma@goma.example.com:8088/1494385386/0"
+  api_version: 2
+  pid: 94105
+  retry: 0
+}
+hermetic_mode: true
+experimental_is_external_user: false
+)";
+
+const char kExecReqFDebugCompilationDir[] = R"(command_spec {
+  name: "clang"
+  version: "4.2.1[clang version 5.0.0 (trunk 300839)]"
+  target: "x86_64-unknown-linux-gnu"
+  binary_hash: "5f650cc98121b383aaa25e53a135d8b4c5e0748f25082b4f2d428a5934d22fda"
+  local_compiler_path: "../../third_party/llvm-build/Release+Asserts/bin/clang++"
+  cxx_system_include_path: "../../build/linux/debian_jessie_amd64-sysroot/usr/lib/gcc/x86_64-linux-gnu/4.8/../../../../include/c++/4.8"
+  cxx_system_include_path: "../../build/linux/debian_jessie_amd64-sysroot/usr/lib/gcc/x86_64-linux-gnu/4.8/../../../../include/x86_64-linux-gnu/c++/4.8"
+  cxx_system_include_path: "../../build/linux/debian_jessie_amd64-sysroot/usr/lib/gcc/x86_64-linux-gnu/4.8/../../../../include/c++/4.8/backward"
+  cxx_system_include_path: "../../build/linux/debian_jessie_amd64-sysroot/usr/include/x86_64-linux-gnu"
+  cxx_system_include_path: "../../build/linux/debian_jessie_amd64-sysroot/usr/include"
+}
+arg: "../../third_party/llvm-build/Release+Asserts/bin/clang++"
+arg: "-MMD"
+arg: "-MF"
+arg: "obj/base/allocator/tcmalloc/malloc_hook.o.d"
+arg: "-g"
+arg: "-DNO_HEAP_CHECK"
+arg: "-I../../base/allocator"
+arg: "-I../../third_party/tcmalloc/chromium/src/base"
+arg: "-I../../third_party/tcmalloc/chromium/src"
+arg: "-I../.."
+arg: "-Igen"
+arg: "-B../../third_party/binutils/Linux_x64/Release/bin"
+arg: "-Xclang"
+arg: "-fdebug-compilation-dir"
+arg: "-Xclang"
+arg: "/chromium"
+arg: "-m64"
+arg: "--sysroot=../../build/linux/debian_jessie_amd64-sysroot"
+arg: "-fvisibility=hidden"
+arg: "-Xclang"
+arg: "-load"
+arg: "-Xclang"
+arg: "../../third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs.so"
+arg: "-Xclang"
+arg: "-add-plugin"
+arg: "-Xclang"
+arg: "find-bad-constructs"
+arg: "-Xclang"
+arg: "-plugin-arg-find-bad-constructs"
+arg: "-Xclang"
+arg: "check-auto-raw-pointer"
+arg: "-Xclang"
+arg: "-plugin-arg-find-bad-constructs"
+arg: "-Xclang"
+arg: "check-ipc"
+arg: "-c"
+arg: "../../third_party/tcmalloc/chromium/src/malloc_hook.cc"
+arg: "-o"
+arg: "obj/base/allocator/tcmalloc/malloc_hook.o"
+arg: "-fuse-init-array"
+env: "PWD=/home/goma/chromium/src/out/rel_ng"
+env: "SYSROOT="
+cwd: "/home/goma/chromium/src/out/rel_ng"
+subprogram {
+  path: "../../third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs.so"
+  binary_hash: "119407f17eb4777402734571183eb5518806900d9c7c7ce5ad71d242aad249f0"
+}
+subprogram {
+  path: "../../third_party/binutils/Linux_x64/Release/bin/objcopy"
   binary_hash: "9ccd249906d57ef2ccd24cf19c67c8d645d309c49c284af9d42813caf87fba7e"
 }
 requester_info {
@@ -817,6 +892,20 @@ const char kExecReqToNormalizeDebugPrefixMapBobPSCNoPWD[] =
     "559d507401ae81e9\"\n"
     "}\n";
 
+void NormalizeExecReqForCacheKey(
+    int id,
+    bool normalize_include_path,
+    bool is_linking,
+    const std::vector<string>& normalize_weak_relative_for_arg,
+    const std::map<string, string>& debug_prefix_map,
+    ExecReq* req) {
+  CompilerFlagTypeSpecific::FromArg(req->command_spec().name())
+      .NewExecReqNormalizer()
+      ->NormalizeForCacheKey(id, normalize_include_path, is_linking,
+                             normalize_weak_relative_for_arg, debug_prefix_map,
+                             req);
+}
+
 }  // namespace
 
 TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKey) {
@@ -845,7 +934,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKey) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -875,7 +964,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyRelativeSystemPath) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -905,7 +994,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyRelativeSysroot) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -962,7 +1051,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithFlagG0) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1020,7 +1109,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithDebugPrefixMap) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1051,7 +1140,7 @@ TEST(GCCExecReqNormalizerTest,
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1082,7 +1171,7 @@ TEST(GCCExecReqNormalizerTest,
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1110,7 +1199,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMD) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1140,7 +1229,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMF) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1168,7 +1257,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithM) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1198,7 +1287,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMD) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1228,7 +1317,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMMF) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1256,7 +1345,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMM) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1285,7 +1374,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMF) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1316,7 +1405,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMDMMD) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1345,7 +1434,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMDMD) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1374,7 +1463,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMDMDGCC) {
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_TRUE(req.env().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1839,7 +1928,7 @@ TEST(GCCExecReqNormalizerTest,
             req.command_spec().cxx_system_include_path(2));
   EXPECT_TRUE(req.cwd().empty());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1863,7 +1952,7 @@ TEST(GCCExecReqNormalizerTest,
             req.command_spec().cxx_system_include_path(2));
   EXPECT_EQ("/dummy/out/Default", req.cwd());
   EXPECT_EQ(1, req.input_size());
-  EXPECT_FALSE(req.input(0).has_filename());
+  EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
 }
 
@@ -1954,6 +2043,138 @@ TEST(GCCExecReqNormalizerTest, ClangCoverageMapping) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_EQ("/tmp/src/hello.c", req.input(0).filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+}
+
+TEST(GCCExecReqNormalizerTest, PathShouldNotBeDropped) {
+  /*
+    Assum A.h/B.h contains same source.
+    `const int c = 1;`
+
+    c.c is like below.
+    ```
+    #if __has_include("A.h")
+    #include "A.h"
+    #endif
+
+    int f() {
+    return c;
+    }
+
+    #if __has_include("B.h")
+    #include "B.h"
+    #endif
+    ```
+
+    If we have A.h, c.c can be compiled, but if we have B.h, c.c cannot be
+    compiled. So, pathname should not be omitted from input.
+  */
+
+  static const char kExecReq[] = R"(command_spec {
+name: "gcc"
+version: "7[(Debian 7.3.0-5) 7.3.0]"
+target: "x86_64-linux-gnu"
+binary_hash: "2ffee45aadb27f30f1b93197b37c0e1c16cc7b7ee296b9145bd4dcf2bb0d3783"
+local_compiler_path: "/usr/bin/gcc"
+system_include_path: "/usr/lib/gcc/x86_64-linux-gnu/7/include"
+system_include_path: "/usr/local/include"
+system_include_path: "/usr/lib/gcc/x86_64-linux-gnu/7/include-fixed"
+system_include_path: "/usr/include/x86_64-linux-gnu"
+system_include_path: "/usr/include"
+}
+arg: "gcc"
+arg: "-g0"
+arg: "-c"
+arg: "c.c"
+env: "PWD=/test"
+cwd: "/test"
+Input {
+filename: "./A.h"
+hash_key: "3d0f5d02e111f5c81bfeb5569051a09d1e1802a397a1a4573be4033c94f19929"
+}
+Input {
+filename: "/usr/include/stdc-predef.h"
+hash_key: "de7847b43d61360f4ce232a1fea697595fdd51b4e9a22dc4315b4ae12088f821"
+}
+Input {
+filename: "c.c"
+hash_key: "3724914edef730722a1a9abbdf1388609aa7355900a906e76d81fe2fc5d0afd4"
+}
+requester_info {
+username: "root"
+compiler_proxy_id: "id"
+api_version: 2
+pid: 0
+goma_revision: "a771a05d03d46431d0fcf65b2bddd49a9c469b7d@1522119548"
+})";
+
+  devtools_goma::ExecReq req_a, req_b;
+  const std::vector<string> kTestOptions{
+      "Xclang", "B", "I", "gcc-toolchain", "-sysroot", "resource-dir"};
+
+  ASSERT_TRUE(TextFormat::ParseFromString(kExecReq, &req_a));
+  req_b = req_a;
+  *(req_b.mutable_input(0)->mutable_filename()) = "./B.h";
+
+  EXPECT_EQ(req_a.input(0).filename(), "./A.h");
+  EXPECT_FALSE(MessageDifferencer::Equals(req_a, req_b));
+
+  ASSERT_TRUE(devtools_goma::VerifyExecReq(req_a));
+  ASSERT_TRUE(devtools_goma::VerifyExecReq(req_b));
+  devtools_goma::NormalizeExecReqForCacheKey(
+      0, false, false, std::vector<string>(), std::map<string, string>(),
+      &req_a);
+  devtools_goma::NormalizeExecReqForCacheKey(
+      0, false, false, std::vector<string>(), std::map<string, string>(),
+      &req_b);
+
+  EXPECT_EQ(req_a.input(0).filename(), "./A.h");
+  EXPECT_EQ(req_b.input(0).filename(), "./B.h");
+  EXPECT_FALSE(MessageDifferencer::Equals(req_a, req_b));
+}
+
+TEST(GCCExecReqNormalizerTest, FDebugCompilationDir) {
+  devtools_goma::ExecReq req;
+
+  ASSERT_TRUE(TextFormat::ParseFromString(kExecReqFDebugCompilationDir, &req));
+  req.set_cwd("/home/chromium/chromium/src");
+
+  ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  devtools_goma::NormalizeExecReqForCacheKey(
+      0, false, false, std::vector<string>(), std::map<string, string>(), &req);
+
+  EXPECT_EQ(req.cwd(), "/chromium");
+}
+
+TEST(GCCExecReqNormalizerTest, FDebugCompilationDirFDebugPrefixMap) {
+  devtools_goma::ExecReq req;
+
+  ASSERT_TRUE(TextFormat::ParseFromString(kExecReqFDebugCompilationDir, &req));
+  req.set_cwd("/home/chromium/chromium/src/");
+
+  req.add_arg("-fdebug-prefix-map=/chromium=/home/chrome");
+  const std::map<string, string> debug_prefix_map{
+      {"/chromium", "/home/chrome"}};
+  ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  devtools_goma::NormalizeExecReqForCacheKey(
+      0, false, false, std::vector<string>(), debug_prefix_map, &req);
+
+  EXPECT_EQ(req.cwd(), "/home/chrome");
+}
+
+TEST(GCCExecReqNormalizerTest, FDebugCompilationDirCoverageMapping) {
+  devtools_goma::ExecReq req;
+
+  ASSERT_TRUE(TextFormat::ParseFromString(kExecReqFDebugCompilationDir, &req));
+  req.set_cwd("/home/chromium/chromium/src");
+
+  req.add_arg("-fprofile-instr-generate");
+  req.add_arg("-fcoverage-mapping");
+
+  ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  devtools_goma::NormalizeExecReqForCacheKey(
+      0, false, false, std::vector<string>(), std::map<string, string>(), &req);
+
+  EXPECT_EQ(req.cwd(), "/home/chromium/chromium/src");
 }
 
 }  // namespace devtools_goma

@@ -56,6 +56,9 @@ string GetCrashDumpDirectory();
 // Get a directory name to store a cache.
 string GetCacheDirectory();
 
+// Get current directory
+string GetCurrentDirNameOrDie();
+
 }  // namespace devtools_goma
 
 #endif  // DEVTOOLS_GOMA_CLIENT_MYPATH_H_

@@ -37,6 +37,7 @@ class SubProcessImpl {
   // Kills the subprocess.
   // Returns true if the subprocess is still running.
   // Returns false if the subprocess has been terminated.
+  // TODO: Return process status by enum.
   bool Kill();
 
   void Signaled(int status);
@@ -45,7 +46,7 @@ class SubProcessImpl {
   // If |need_kill| is true, it will kill the subprocess.
   // Returns SubProcessTerminated object if the subprocess has been terminated.
   // Returns NULL if the subprocess is still running.
-  SubProcessTerminated* Wait(bool need_kill);
+  std::unique_ptr<SubProcessTerminated> Wait(bool need_kill);
 
  private:
   SubProcessState::State state_;

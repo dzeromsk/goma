@@ -5,6 +5,9 @@
 
 #include "execreq_normalizer.h"
 
+#include "absl/strings/ascii.h"
+#include "absl/strings/match.h"
+#include "compiler_flag_type_specific.h"
 #include "compiler_flags.h"
 #include "execreq_verifier.h"
 #include "google/protobuf/text_format.h"
@@ -204,6 +207,47 @@ const char kExecReqToNormalizeWinClang[] =
     "559d507401ae81e9\"\n"
     "}\n";
 
+const char kExecReqToNormalizeWinClangFCPath[] =
+    "command_spec {\n"
+    "  name: \"clang-cl\"\n"
+    "  version: \"clang version 7.0.0 (trunk 330570)\"\n"
+    "  target: \"i686-windows-msvc\"\n"
+    "  local_compiler_path: "
+    "\"..\\\\..\\\\third_party\\\\LLVM\\\\clang-cl.exe\"\n"
+    "  system_include_path: "
+    "\"..\\\\..\\\\third_party\\\\system_include_path\"\n"
+    "  cxx_system_include_path: "
+    "\"..\\\\..\\third_party\\\\cxx_system_include_path\"\n"
+    "}\n"
+    "arg: \"clang-cl\"\n"
+    "arg: \"/Fo..\\\\..\\\\build\\\\Debug\\\\vc\\\\stdafx.obj\"\n"
+    "arg: \"stdafx.cpp\"\n"
+    "cwd: \"C:\\\\src\\\\alice\\\\chromium\"\n"
+    "Input {\n"
+    "  filename: \"stdafx.cpp\"\n"
+    "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
+    "559d507401ae81e9\"\n"
+    "}\n"
+    "Input {\n"
+    "  filename: \"C:\\\\src\\\\alice\\\\chromium\\\\a.cc\"\n"
+    "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
+    "559d507401ae81e9\"\n"
+    "}\n";
+
+void NormalizeExecReqForCacheKey(
+    int id,
+    bool normalize_include_path,
+    bool is_linking,
+    const std::vector<string>& normalize_weak_relative_for_arg,
+    const std::map<string, string>& debug_prefix_map,
+    ExecReq* req) {
+  CompilerFlagTypeSpecific::FromArg(req->command_spec().name())
+      .NewExecReqNormalizer()
+      ->NormalizeForCacheKey(id, normalize_include_path, is_linking,
+                             normalize_weak_relative_for_arg, debug_prefix_map,
+                             req);
+}
+
 }  // namespace
 
 TEST(VCExecReqNormalizerTest, NormalizeExecReqForCacheKeyForClExe) {
@@ -322,14 +366,16 @@ Input {
 }
 )###";
 
+  // system_include_path[1] becomes a relative path.
   static const char kExecReqExpected[] = R"###(
 command_spec {
   name: "clang-cl"
   version: "clang version 7.0.0 (trunk 330570)"
   target: "i686-windows-msvc"
   system_include_path: "C:\\Program Files (x86)\\Microsoft Visual Studio 9.0\\VC\\INCLUDE"
-  system_include_path: "C:\\src\\goma\\client\\test\\vc\\include"
+  system_include_path: "include"
   cxx_system_include_path: "C:\\Program Files (x86)\\Microsoft Visual Studio 9.0\\VC\\INCLUDE"
+  comment: " include_path:cwd"
 }
 arg: "clang-cl"
 arg: "/TP"
@@ -360,6 +406,178 @@ Input {
   string difference_reason;
   differencer.ReportDifferencesToString(&difference_reason);
   EXPECT_TRUE(differencer.Compare(req_expected, req)) << difference_reason;
+}
+
+TEST(VCExecReqNormalizerTest, FlagAbsPath) {
+  devtools_goma::ExecReq req;
+
+  ASSERT_FALSE(absl::StrContains(
+      absl::AsciiStrToLower(kExecReqToNormalizeWinClangFCPath),
+      "showincludes"));
+  ASSERT_FALSE(absl::StrContains(
+      absl::AsciiStrToLower(kExecReqToNormalizeWinClangFCPath), "FC"));
+  ASSERT_FALSE(absl::StrContains(
+      absl::AsciiStrToLower(kExecReqToNormalizeWinClangFCPath),
+      "fdiagnostics-absolute-paths"));
+
+  ASSERT_TRUE(
+      TextFormat::ParseFromString(kExecReqToNormalizeWinClangFCPath, &req));
+
+  ASSERT_EQ(req.input_size(), 2);
+
+  MessageDifferencer differencer;
+  const std::vector<string> kTestOptions{
+      "Xclang", "B", "I", "gcc-toolchain", "-sysroot", "resource-dir"};
+
+  {
+    devtools_goma::ExecReq copy_req(req);
+    // No debug flag, showincludes, FC, fdiagnostics-absolute-paths flags.
+    // Relativize input path and omit cwd.
+    ASSERT_TRUE(devtools_goma::VerifyExecReq(copy_req));
+    devtools_goma::NormalizeExecReqForCacheKey(
+        0, true, false, kTestOptions, std::map<string, string>(), &copy_req);
+    EXPECT_EQ(copy_req.cwd(), "");
+    EXPECT_EQ(copy_req.input(0).filename(), "a.cc");
+    EXPECT_EQ(copy_req.input(1).filename(), "stdafx.cpp");
+  }
+
+  {
+    devtools_goma::ExecReq copy_req(req);
+    // showincludes contains inputpath.
+    // Keep input path.
+    copy_req.add_arg("/showIncludes");
+
+    ASSERT_TRUE(devtools_goma::VerifyExecReq(copy_req));
+    devtools_goma::NormalizeExecReqForCacheKey(
+        0, true, false, kTestOptions, std::map<string, string>(), &copy_req);
+    EXPECT_EQ(copy_req.cwd(), "");
+    EXPECT_EQ(copy_req.input(0).filename(), "C:\\src\\alice\\chromium\\a.cc");
+    EXPECT_EQ(copy_req.input(1).filename(), "stdafx.cpp");
+  }
+
+  {
+    devtools_goma::ExecReq copy_req(req);
+    // compile warning/error, showincludes may contains fullpath.
+    // Keep cwd.
+    copy_req.add_arg("/FC");
+
+    ASSERT_TRUE(devtools_goma::VerifyExecReq(copy_req));
+    devtools_goma::NormalizeExecReqForCacheKey(
+        0, true, false, kTestOptions, std::map<string, string>(), &copy_req);
+    EXPECT_EQ(copy_req.cwd(), "C:\\src\\alice\\chromium");
+    EXPECT_EQ(copy_req.input(0).filename(), "a.cc");
+    EXPECT_EQ(copy_req.input(1).filename(), "stdafx.cpp");
+  }
+
+  {
+    devtools_goma::ExecReq copy_req(req);
+    // compile warning/error, showincludes may contains fullpath.
+    // Keep cwd.
+    copy_req.add_arg("-fdiagnostics-absolute-paths");
+
+    ASSERT_TRUE(devtools_goma::VerifyExecReq(copy_req));
+    devtools_goma::NormalizeExecReqForCacheKey(
+        0, true, false, kTestOptions, std::map<string, string>(), &copy_req);
+    EXPECT_EQ(copy_req.cwd(), "C:\\src\\alice\\chromium");
+    EXPECT_EQ(copy_req.input(0).filename(), "a.cc");
+    EXPECT_EQ(copy_req.input(1).filename(), "stdafx.cpp");
+  }
+
+  {
+    devtools_goma::ExecReq copy_req(req);
+    // fdebug-compilation-dir replaces cwd.
+    copy_req.add_arg("-Xclang");
+    copy_req.add_arg("-fdebug-compilation-dir");
+    copy_req.add_arg("-Xclang");
+    copy_req.add_arg(".");
+
+    ASSERT_TRUE(devtools_goma::VerifyExecReq(copy_req));
+    devtools_goma::NormalizeExecReqForCacheKey(
+        0, true, false, kTestOptions, std::map<string, string>(), &copy_req);
+    EXPECT_EQ(copy_req.cwd(), ".");
+    EXPECT_EQ(copy_req.input(0).filename(), "a.cc");
+    EXPECT_EQ(copy_req.input(1).filename(), "stdafx.cpp");
+  }
+
+  {
+    devtools_goma::ExecReq copy_req(req);
+    // Debug info may contains path, but it is normalized by
+    // fdebug-compilation-dir.
+    copy_req.add_arg("/Z7");
+
+    copy_req.add_arg("-Xclang");
+    copy_req.add_arg("-fdebug-compilation-dir");
+    copy_req.add_arg("-Xclang");
+    copy_req.add_arg(".");
+
+    ASSERT_TRUE(devtools_goma::VerifyExecReq(copy_req));
+    devtools_goma::NormalizeExecReqForCacheKey(
+        0, true, false, kTestOptions, std::map<string, string>(), &copy_req);
+    EXPECT_EQ(copy_req.cwd(), ".");
+    EXPECT_EQ(copy_req.input(0).filename(), "C:\\src\\alice\\chromium\\a.cc");
+    EXPECT_EQ(copy_req.input(1).filename(), "stdafx.cpp");
+  }
+
+  {
+    devtools_goma::ExecReq copy_req(req);
+    // showIncludes may contain full path even if we specify
+    // fdebug-compilation-dir.
+    copy_req.add_arg("/showIncludes");
+
+    copy_req.add_arg("-Xclang");
+    copy_req.add_arg("-fdebug-compilation-dir");
+    copy_req.add_arg("-Xclang");
+    copy_req.add_arg(".");
+
+    ASSERT_TRUE(devtools_goma::VerifyExecReq(copy_req));
+    devtools_goma::NormalizeExecReqForCacheKey(
+        0, true, false, kTestOptions, std::map<string, string>(), &copy_req);
+    EXPECT_EQ(copy_req.cwd(), ".");
+    EXPECT_EQ(copy_req.input(0).filename(), "C:\\src\\alice\\chromium\\a.cc");
+    EXPECT_EQ(copy_req.input(1).filename(), "stdafx.cpp");
+  }
+
+  {
+    devtools_goma::ExecReq copy_req(req);
+    // FC may contain full path even if we specify
+    // fdebug-compilation-dir.
+    copy_req.add_arg("/FC");
+
+    copy_req.add_arg("-Xclang");
+    copy_req.add_arg("-fdebug-compilation-dir");
+    copy_req.add_arg("-Xclang");
+    copy_req.add_arg(".");
+
+    ASSERT_TRUE(devtools_goma::VerifyExecReq(copy_req));
+    devtools_goma::NormalizeExecReqForCacheKey(
+        0, true, false, kTestOptions, std::map<string, string>(), &copy_req);
+
+    // TODO: Replace cwd if it is better to do.
+    EXPECT_EQ(copy_req.cwd(), "C:\\src\\alice\\chromium");
+    EXPECT_EQ(copy_req.input(0).filename(), "a.cc");
+    EXPECT_EQ(copy_req.input(1).filename(), "stdafx.cpp");
+  }
+
+  {
+    devtools_goma::ExecReq copy_req(req);
+    // fdiagnostics-absolute-paths may contain full path even if we specify
+    // fdebug-compilation-dir.
+    copy_req.add_arg("-fdiagnostics-absolute-paths");
+
+    copy_req.add_arg("-Xclang");
+    copy_req.add_arg("-fdebug-compilation-dir");
+    copy_req.add_arg("-Xclang");
+    copy_req.add_arg(".");
+
+    ASSERT_TRUE(devtools_goma::VerifyExecReq(copy_req));
+    devtools_goma::NormalizeExecReqForCacheKey(
+        0, true, false, kTestOptions, std::map<string, string>(), &copy_req);
+
+    // TODO: Replace cwd if it is better to do.
+    EXPECT_EQ(copy_req.cwd(), "C:\\src\\alice\\chromium");
+    EXPECT_EQ(copy_req.input(0).filename(), "a.cc");
+    EXPECT_EQ(copy_req.input(1).filename(), "stdafx.cpp");
+  }
 }
 
 }  // namespace devtools_goma

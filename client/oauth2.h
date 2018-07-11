@@ -77,7 +77,6 @@ void DefaultOAuth2Config(OAuth2Config* config);
 // Returns true on success and all OAuth2Config fields are ready to use.
 bool ParseOAuth2Config(const std::string& str, OAuth2Config* config);
 
-
 // Format OAuth2 config for OAuth2 config file.
 std::string FormatOAuth2Config(const OAuth2Config& config);
 

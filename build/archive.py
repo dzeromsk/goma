@@ -48,7 +48,7 @@ def CreatePlatformGomacc(distname, platform):
     distname: distribution directory
     platform: platform name
   """
-  if platform in ('goobuntu', 'chromeos', 'mac'):
+  if platform in ('linux', 'mac', 'goobuntu', 'chromeos'):
     gomacc = list(GOMACC_CMDS)
   else:
     raise NotImplementedError(platform)
@@ -80,7 +80,7 @@ def InstallPlatformFiles(distname, platform):
   Returns:
     a list of files.
   """
-  if platform == 'goobuntu' or platform == 'mac':
+  if platform in ('linux', 'mac', 'goobuntu'):
     return
   if platform != 'chromeos':
     raise NotImplementedError(platform)
@@ -98,7 +98,7 @@ def CreateAndroidDir(distname, platform):
   Returns:
     a list of files to be released.
   """
-  if platform in ('goobuntu', 'mac'):
+  if platform in ('linux', 'mac', 'goobuntu'):
     distname = os.path.join(distname, 'android')
     shutil.rmtree(distname, ignore_errors=True)
     os.mkdir(distname)
@@ -182,10 +182,12 @@ def MkZip(src, dst_zip_file):
 def main():
   option_parser = optparse.OptionParser()
   option_parser.add_option('--platform',
-                           default={'darwin': 'mac',
-                                    'win32': 'win64',
-                                    'cygwin': 'win64'}.get(sys.platform, None),
-                           choices=('chromeos', 'goobuntu', 'mac', 'win64'),
+                           default={'linux2': 'linux',
+                                    'darwin': 'mac',
+                                    'win32': 'win',
+                                    'cygwin': 'win'}.get(sys.platform, None),
+                           choices=('linux', 'mac', 'win',
+                                    'goobuntu', 'chromeos', 'win64'),
                            help='platform name')
   option_parser.add_option('--build_dir', default='out',
                            help='directory of build output')
@@ -230,7 +232,7 @@ def main():
   print 'Preparing files in %s in %s...' % (distname, os.getcwd())
   print 'mkdir %s' % distname
   os.mkdir(distname, 0755)
-  if options.platform in ('win64'):
+  if options.platform in ('win', 'win64'):
     for cmd in ('gomacc.exe', 'compiler_proxy.exe', 'vcflags.exe',
                 'goma_fetch.exe'):
       shutil.copy(cmd, distname)
@@ -252,7 +254,7 @@ def main():
     CreateAndroidDir(distname, options.platform)
 
   # Create an archive file.
-  if options.platform in ('win64'):
+  if options.platform in ('win', 'win64'):
     target_file = os.path.join(dist_absdir, '%s.zip' % distname)
     print 'Archiving in %s.zip' % distname
     MkZip(os.path.realpath(distname), target_file)

@@ -10,145 +10,43 @@ Use -h to see its usage.
 
 
 
-import getopt
+import argparse
+import find_depot_tools
 import os
 import subprocess
 import sys
 
-script_dir = os.path.dirname(__file__)
-script_absdir = os.path.abspath(script_dir)
-client_absdir = os.path.abspath(os.path.join(script_dir, '..'))
-is_windows = (sys.platform == 'cygwin' or sys.platform.startswith('win'))
-is_mac = sys.platform == 'darwin'
+SCRIPT_DIR = os.path.dirname(__file__)
+CLIENT_ABS_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
+OUT_ABS_DIR = os.path.abspath(os.path.join(CLIENT_ABS_DIR, 'out'))
 
-TEST_CASES = [
-  ("lib", [
-    "clang_tidy_execreq_normalizer_unittest",
-    "clang_tidy_flags_unittest",
-    "cmdline_parser_unittest",
-    "compiler_flags_test",
-    "compiler_type_specific_unittest",
-    "compress_util_unittest",
-    "execreq_normalizer_unittest",
-    "execreq_verifier_unittest",
-    "file_reader_unittest",
-    "flag_parser_unittest",
-    "gcc_execreq_normalizer_unittest",
-    "gcc_flags_unittest",
-    "goma_file_unittest",
-    "goma_hash_unittest",
-    "java_execreq_normalizer_unittest",
-    "java_flags_unittest",
-    "lockhelper_unittest",
-    "path_resolver_unittest",
-    "path_unittest",
-    "path_util_unittest",
-    "vc_execreq_normalizer_unittest",
-    "vc_flags_unittest",
-    ]
-  ),
-  ("client", [
-    "arfile_reader_unittest",
-    "atomic_stats_counter_unittest",
-    "base64_unittest",
-    "callback_unittest",
-    "compilation_database_reader_unittest",
-    "compile_task_unittest",
-    "compiler_info_cache_unittest",
-    "compiler_info_unittest",
-    "content_cursor_unittest",
-    "cpp_directive_parser_unittest",
-    "cpp_include_processor_unittest",
-    "cpp_macro_expander_cbv_unittest",
-    "cpp_macro_expander_naive_unittest",
-    "cpp_macro_expander_unittest",
-    "cpp_macro_set_unittest",
-    "cpp_macro_unittest",
-    "cpp_parser_unittest",
-    "cpp_tokenizer_unittest",
-    "cpu_unittest",
-    "deps_cache_unittest",
-    "directive_filter_unittest",
-    "env_flags_unittest",
-    "filename_id_table_unittest",
-    "flat_map_unittest",
-    "flat_set_unittest",
-    "goma_ipc_unittest",
-    "gomacc_argv_unittest",
-    "hash_rewrite_parser_unittest",
-    "histogram_unittest",
-    "http_rpc_unittest",
-    "http_unittest",
-    "include_cache_unittest",
-    "include_file_utils_unittest",
-    "include_guard_detector_unittest",
-    "ioutil_unittest",
-    "jar_parser_unittest",
-    "jarfile_reader_unittest",
-    "jwt_unittest",
-    "linked_unordered_map_unittest",
-    "linker_script_parser_unittest",
-    "list_dir_cache_unittest",
-    "local_output_cache_unittest",
-    "log_cleaner_unittest",
-    "luci_context_unittest",
-    "machine_info_unittest",
-    "mypath_unittest",
-    "oauth2_unittest",
-    "openssl_engine_unittest",
-    "rand_util_unittest",
-    "sha256_hash_cache_unittest",
-    "simple_timer_unittest",
-    "static_darray_unittest",
-    "subprocess_task_unittest",
-    "threadpool_http_server_unittest",
-    "trustedipsmanager_unittest",
-    "util_unittest",
-    "worker_thread_manager_unittest",
-    "worker_thread_unittest",
-    ]
-  ),
-]
+TEST_DIRS = ('base', 'lib', 'client')
 
-if is_mac:
-  TEST_CASES[1][1].append('mac_version_unittest')
 
-if is_windows:
-  TEST_CASES[0][1].append('socket_helper_win_unittest')
-  TEST_CASES[1][1].append('named_pipe_client_win_unittest')
-  TEST_CASES[1][1].append('named_pipe_server_win_unittest')
-  TEST_CASES[1][1].append('posix_helper_win_unittest')
-  TEST_CASES[1][1].append('spawner_win_unittest')
-else:
-  TEST_CASES[1][1].append('arfile_unittest')
-  TEST_CASES[1][1].append('compiler_flags_util_unittest')
-  TEST_CASES[1][1].append('linker_input_processor_unittest')
-  TEST_CASES[1][1].append('spawner_posix_unittest')
-  if sys.platform.startswith('linux'):
-    TEST_CASES[1][1].append('elf_parser_unittest')
-    TEST_CASES[1][1].append('library_path_resolver_unittest')
-    TEST_CASES[1][1].append('goma-make_unittest')
+def TestNames(case_key):
+  """TestNames returns test names for the case key (in TEST_DIRS).
+
+  Args:
+    case_key: test case key. one of TEST_DIRS.
+  Returns
+    test case names.
+  """
+  gn_py_path = os.path.join(find_depot_tools.DEPOT_TOOLS_PATH, 'gn.py')
+  output = subprocess.check_output([sys.executable,
+                                    gn_py_path,
+                                    'ls', '.', '//%s/*' % case_key,
+                                    '--testonly=true',
+                                    '--type=executable',
+                                    '--as=output'])
+  return [test for test in output.split() if test != 'vstestrun.exe']
 
 
 class TestError(Exception):
   pass
 
 
-def Usage():
-  sys.stdout.write("Usage: python run_unittest.py [options]\n")
-  sys.stdout.write("--build-dir=<path>  output folder\n")
-  sys.stdout.write("--target=<Release (Default)|(or any)>  "
-                   "build config in output folder to test\n")
-  sys.stdout.write("--test-cases=<all (default)|lib|client>  "
-                   "test cases to run\n")
-  sys.stdout.write("-n, --non-stop  "
-                   "do not stop when errors occur in test cases\n")
-  sys.stdout.write("-h, --help  display Usage\n")
-  sys.exit(2)
-
-
 def SetupClang():
-  clang_path = os.path.join(client_absdir, 'third_party', 'llvm-build',
+  clang_path = os.path.join(CLIENT_ABS_DIR, 'third_party', 'llvm-build',
                             'Release+Asserts', 'bin', 'clang')
   if subprocess.call([clang_path, "-v"]) == 0:
     os.environ['GOMATEST_CLANG_PATH'] = clang_path
@@ -169,7 +67,8 @@ def RunTest(build_dir, target, case_opt, non_stop):
     sys.stdout.write("\nERROR: folder not found: " + target)
     return (tests_passed, expected_passes, failed_tests)
 
-  for case_key, case_names in TEST_CASES:
+  for case_key in TEST_DIRS:
+    case_names = TestNames(case_key)
     if case_opt != "all" and case_opt != case_key:
       continue
     expected_passes += len(case_names)
@@ -191,40 +90,25 @@ def RunTest(build_dir, target, case_opt, non_stop):
 
 
 def main():
-  # parse command line options
-  try:
-    opts, _ = getopt.getopt(sys.argv[1:], "nh", [
-        "build-dir=", "target=", "test-cases=", "non-stop", "help"
-    ])
-  except getopt.GetoptError, err:
-    # print help information and exit
-    sys.stdout.write(str(err) + "\n")
-    Usage()
+  parser = argparse.ArgumentParser(description='Unittest driver')
+  parser.add_argument('--build-dir', help='output folder',
+                      default=OUT_ABS_DIR,
+                      metavar='path')
+  parser.add_argument('--target', default='Release',
+                      help='build config in output folder to test')
+  parser.add_argument('--test-cases',
+                      choices=['all'] + list(TEST_DIRS),
+                      default='all', help='test cases to run')
+  parser.add_argument('-n', '--non-stop', dest='non_stop', action='store_true',
+                      help='do not stop when errors occur in test cases')
+  args = parser.parse_args()
 
-  build_dir = script_absdir
-  case_value = "all"
-  target_value = "Release"
-  non_stop = False
-  for key, value in opts:
-    if key == "--build-dir":
-      build_dir = value
-    elif key == "--target":
-      target_value = value
-    elif key == "--test-cases":
-      case_value = value
-    elif key == "--non-stop" or key == "-n":
-      non_stop = True
-    elif key == "--help" or key == "-h":
-      Usage()
-    else:
-      sys.stderr.write('Unknown option:' + key)
-      Usage()
-
+  is_windows = (sys.platform == 'cygwin' or sys.platform.startswith('win'))
   if not is_windows:
     SetupClang()
 
   passed, expected, failed_tests = RunTest(
-      build_dir, target_value, case_value, non_stop)
+      args.build_dir, args.target, args.test_cases, args.non_stop)
   sys.stdout.write("\nINFO: Total tests passed: " + str(passed) +
                    " expected: " + str(expected) + "\n")
   if passed != expected:

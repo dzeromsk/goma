@@ -38,8 +38,8 @@ class CompilerProxyHistogram {
     CompilerProxyHandlerTime,
 
     // Stats from protocol buffer reponse
-    GccReqSize,
-    GccRespSize,
+    GomaccReqSize,
+    GomaccRespSize,
 
     ExecReqSize,
     ExecReqRawSize,

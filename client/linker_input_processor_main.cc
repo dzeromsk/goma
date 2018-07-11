@@ -7,10 +7,12 @@
 #include <iostream>
 
 #include "compiler_flags.h"
-#include "compiler_info.h"
+#include "compiler_flags_parser.h"
+#include "compiler_info_builder_facade.h"
+#include "cxx/cxx_compiler_info.h"
 #include "gcc_flags.h"
 #include "glog/logging.h"
-#include "ioutil.h"
+#include "mypath.h"
 #include "prototmp/goma_data.pb.h"
 
 int main(int argc, char* argv[], const char** envp) {
@@ -28,8 +30,8 @@ int main(int argc, char* argv[], const char** envp) {
     args.push_back(argv[i]);
 
   std::unique_ptr<devtools_goma::CompilerFlags> flags(
-      devtools_goma::CompilerFlags::MustNew(args, cwd));
-  if (flags->type() != devtools_goma::CompilerType::Gcc) {
+      devtools_goma::CompilerFlagsParser::MustNew(args, cwd));
+  if (flags->type() != devtools_goma::CompilerFlagType::Gcc) {
     std::cerr << "only gcc/g++ is supported" << std::endl;
     exit(1);
   }
@@ -37,11 +39,11 @@ int main(int argc, char* argv[], const char** envp) {
       static_cast<const devtools_goma::GCCFlags&>(*flags);
   std::vector<string> compiler_info_envs;
   flags->GetClientImportantEnvs(envp, &compiler_info_envs);
-  devtools_goma::CompilerInfoBuilder cib;
+  devtools_goma::CompilerInfoBuilderFacade cib;
   std::unique_ptr<devtools_goma::CompilerInfoData> compiler_info_data(
       cib.FillFromCompilerOutputs(
           gcc_flags, local_compiler_path, compiler_info_envs));
-  devtools_goma::CompilerInfo compiler_info(std::move(compiler_info_data));
+  devtools_goma::CxxCompilerInfo compiler_info(std::move(compiler_info_data));
   if (compiler_info.HasError()) {
     std::cerr << compiler_info.error_message() << std::endl;
     exit(1);
