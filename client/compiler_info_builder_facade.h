@@ -47,9 +47,6 @@ class CompilerInfoBuilderFacade {
       const string& local_compiler_path,
       const std::vector<string>& compiler_info_envs);
 
-  void SetHashRewriteRule(const std::map<string, string>& rule);
-  void Dump(std::ostringstream* ss);
-
  private:
   GCCCompilerInfoBuilder gcc_builder_;
   VCCompilerInfoBuilder vc_builder_;

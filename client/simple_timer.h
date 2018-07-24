@@ -16,6 +16,8 @@
 # error "unknown platform"
 #endif
 
+#include "absl/time/time.h"
+
 namespace devtools_goma {
 
 class SimpleTimer {
@@ -44,6 +46,10 @@ class SimpleTimer {
 
   // Return elapsed time in nanoseconds.
   long long GetInNanoseconds() const;
+
+  // Returns elapsed time as absl::Duration.
+  // TODO: Remove the other Get* functions.
+  absl::Duration GetDuration() const;
 
  private:
 #ifdef _WIN32

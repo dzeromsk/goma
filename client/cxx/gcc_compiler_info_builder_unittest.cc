@@ -35,53 +35,6 @@ class GCCCompilerInfoBuilderTest : public testing::Test {
   }
 };
 
-TEST_F(GCCCompilerInfoBuilderTest, RewriteHashUnlockedEmptyRule) {
-  std::map<string, string> rule;
-  CompilerInfoData data;
-  auto* sub = data.add_subprograms();
-  sub->set_hash("dummy_hash");
-  EXPECT_FALSE(GCCCompilerInfoBuilder::RewriteHashUnlocked(rule, &data));
-  EXPECT_EQ(1, data.subprograms_size());
-  EXPECT_EQ("dummy_hash", data.subprograms(0).hash());
-}
-
-TEST_F(GCCCompilerInfoBuilderTest, RewriteHashUnlockedNoMatchingRule) {
-  std::map<string, string> rule;
-  ASSERT_TRUE(rule.insert(std::make_pair("no_match", "no_match")).second);
-  CompilerInfoData data;
-  auto* sub = data.add_subprograms();
-  sub->set_hash("dummy_hash");
-  EXPECT_FALSE(GCCCompilerInfoBuilder::RewriteHashUnlocked(rule, &data));
-  EXPECT_EQ(1, data.subprograms_size());
-  EXPECT_EQ("dummy_hash", data.subprograms(0).hash());
-}
-
-TEST_F(GCCCompilerInfoBuilderTest, RewriteHashUnlockedMatchingRule) {
-  std::map<string, string> rule;
-  ASSERT_TRUE(rule.insert(std::make_pair("old_hash", "new_hash")).second);
-  CompilerInfoData data;
-  auto* sub = data.add_subprograms();
-  sub->set_hash("old_hash");
-  EXPECT_TRUE(GCCCompilerInfoBuilder::RewriteHashUnlocked(rule, &data));
-  EXPECT_EQ(1, data.subprograms_size());
-  EXPECT_EQ("new_hash", data.subprograms(0).hash());
-}
-
-TEST_F(GCCCompilerInfoBuilderTest,
-       RewriteHashUnlockedBothMatchingAndNotMatching) {
-  std::map<string, string> rule;
-  ASSERT_TRUE(rule.insert(std::make_pair("old_hash", "new_hash")).second);
-  CompilerInfoData data;
-  auto* sub = data.add_subprograms();
-  sub->set_hash("old_hash");
-  auto* sub2 = data.add_subprograms();
-  sub2->set_hash("yet_another_hash");
-  EXPECT_TRUE(GCCCompilerInfoBuilder::RewriteHashUnlocked(rule, &data));
-  EXPECT_EQ(2, data.subprograms_size());
-  EXPECT_EQ("new_hash", data.subprograms(0).hash());
-  EXPECT_EQ("yet_another_hash", data.subprograms(1).hash());
-}
-
 TEST_F(GCCCompilerInfoBuilderTest, GetExtraSubprogramsClangPlugin) {
   const string cwd("/");
 

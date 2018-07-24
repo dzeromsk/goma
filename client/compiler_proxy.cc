@@ -212,21 +212,6 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
         FLAGS_MAX_FINISHED_TASKS,
         FLAGS_MAX_FAILED_TASKS,
         FLAGS_MAX_LONG_TASKS);
-    if (!FLAGS_HASH_REWRITE_RULE_FILE.empty()) {
-      string rewrite_rule;
-      CHECK(ReadFileToString(FLAGS_HASH_REWRITE_RULE_FILE.c_str(),
-                             &rewrite_rule))
-          << "You need rewrite rule in "
-          << FLAGS_HASH_REWRITE_RULE_FILE
-          << " or unset GOMA_HASH_REWRITE_RULE_FILE";
-      std::map<string, string> mapping;
-      if (!ParseRewriteRule(rewrite_rule, &mapping)) {
-        LOG(ERROR) << "failed to parse rewrite rule in a file "
-                   << FLAGS_HASH_REWRITE_RULE_FILE;
-      } else {
-        service_.SetHashRewriteRule(mapping);
-      }
-    }
     int network_error_margin = 0;
     if (FLAGS_FAIL_FAST) {
       LOG(INFO) << "fail fast mode";

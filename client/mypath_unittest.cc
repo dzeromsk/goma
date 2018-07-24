@@ -4,18 +4,52 @@
 
 #include "mypath.h"
 
-#include <glog/logging.h>
-#include <gtest/gtest.h>
+#include <stdlib.h>
 
+#include "absl/strings/str_cat.h"
+#include "env_flags.h"
 #include "file_dir.h"
 #include "filesystem.h"
+#include "glog/logging.h"
+#include "gtest/gtest.h"
 #include "ioutil.h"
 #include "path.h"
 #include "path_resolver.h"
-#include "util.h"
+#ifdef _WIN32
+# include "posix_helper_win.h"
+#endif
 #include "unittest_util.h"
+#include "util.h"
 
-TEST(Util, GetUsername) {
+GOMA_DECLARE_string(TMP_DIR);
+
+class MyPathTest : public testing::Test {
+  void SetUp() override {
+    orig_goma_tmp_dir_ = FLAGS_TMP_DIR;
+    // Since we will test GetGomaTmpDir(), we cannot use a function that
+    // use GetGomaTmpDir().  That is why we do not use TmpDirUtil here.
+    string tmpdir;
+#ifdef _WIN32
+    char tmp_dir[PATH_MAX], first_dir[PATH_MAX];
+    ASSERT_NE(0, GetTempPathA(PATH_MAX, tmp_dir));
+    tmpdir = file::JoinPath(tmp_dir, "mypath_test.XXXXXX");
+    ASSERT_NE(devtools_goma::mkdtemp(&tmpdir[0]), nullptr);
+#else
+    tmpdir = "/tmp/mypath_test.XXXXXX";
+    ASSERT_NE(mkdtemp(&tmpdir[0]), nullptr);
+#endif
+
+    FLAGS_TMP_DIR = tmpdir;
+  }
+  void TearDown() override {
+    file::RecursivelyDelete(FLAGS_TMP_DIR, file::Defaults());
+    FLAGS_TMP_DIR = orig_goma_tmp_dir_;
+  }
+ private:
+  string orig_goma_tmp_dir_;
+};
+
+TEST(MyPath, GetUsername) {
   const string& user = devtools_goma::GetUsername();
   // smoke test.
   EXPECT_FALSE(user.empty());
@@ -23,7 +57,7 @@ TEST(Util, GetUsername) {
   EXPECT_NE(user, "unknown");
 }
 
-TEST(Util, GetUsernameWithoutEnv) {
+TEST(MyPath, GetUsernameWithoutEnv) {
   devtools_goma::SetEnv("SUDO_USER", "");
   devtools_goma::SetEnv("USERNAME", "");
   devtools_goma::SetEnv("USER", "");
@@ -40,14 +74,14 @@ TEST(Util, GetUsernameWithoutEnv) {
   EXPECT_EQ(username, devtools_goma::GetUsernameEnv());
 }
 
-TEST(Util, GetMyPathname) {
+TEST(MyPath, GetMyPathname) {
   // Make sure that GetMyPathname is resolved.
   EXPECT_EQ(
       devtools_goma::PathResolver::ResolvePath(devtools_goma::GetMyPathname()),
       devtools_goma::GetMyPathname());
 }
 
-TEST(Util, GetMyDirectory) {
+TEST(MyPath, GetMyDirectory) {
   // Make sure that GetMyDirectory is resolved.
   EXPECT_EQ(
       devtools_goma::PathResolver::ResolvePath(devtools_goma::GetMyDirectory()),
@@ -56,10 +90,10 @@ TEST(Util, GetMyDirectory) {
 
 #if GTEST_HAS_DEATH_TEST
 
-TEST(Util, CheckTempDiretoryNotDirectory) {
+TEST_F(MyPathTest, CheckTempDiretoryNotDirectory) {
   const string& tmpdir = devtools_goma::GetGomaTmpDir();
   file::RecursivelyDelete(tmpdir, file::Defaults());
-  CHECK(file::CreateDir(tmpdir.c_str(), file::CreationMode(0700)).ok())
+  ASSERT_TRUE(file::CreateDir(tmpdir.c_str(), file::CreationMode(0700)).ok())
       << tmpdir;
   const string& tmpdir_file =
       file::JoinPath(tmpdir, "tmpdir_is_not_dir");
@@ -79,11 +113,11 @@ TEST(Util, CheckTempDiretoryNotDirectory) {
 
 #ifndef _WIN32
 
-TEST(Util, CheckTempDiretoryBadPermission) {
+TEST_F(MyPathTest, CheckTempDiretoryBadPermission) {
   const string& tmpdir = devtools_goma::GetGomaTmpDir();
   file::RecursivelyDelete(tmpdir, file::Defaults());
   mode_t omask = umask(022);
-  PCHECK(mkdir(tmpdir.c_str(), 0744) == 0) << tmpdir;
+  ASSERT_EQ(mkdir(tmpdir.c_str(), 0744), 0) << tmpdir;
   umask(omask);
   EXPECT_DEATH(devtools_goma::CheckTempDirectory(tmpdir),
                "private goma tmp dir is not owned only by you.");
@@ -93,7 +127,7 @@ TEST(Util, CheckTempDiretoryBadPermission) {
 #endif  // GTEST_HAS_DEATH_TEST
 
 #ifndef _WIN32
-TEST(Util, GetCurrentDirNameOrDie) {
+TEST(MyPath, GetCurrentDirNameOrDie) {
   using devtools_goma::GetCurrentDirNameOrDie;
   // NOTE: '1' in setenv mean overwrite.
 

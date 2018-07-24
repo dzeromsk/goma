@@ -13,6 +13,7 @@
 #include "config_win.h"
 #endif
 
+#include <ostream>
 #include <string>
 
 using std::string;
@@ -49,6 +50,9 @@ struct FileStat {
   void InitFromStat(const struct stat& stat_buf);
 #endif
 };
+
+// For output during testing.
+std::ostream& operator<<(std::ostream& os, const FileStat& stat);
 
 }  // namespace devtools_goma
 

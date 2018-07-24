@@ -188,6 +188,62 @@ ABSL_CONST_INIT const absl::string_view kHost = "Host";
 ABSL_CONST_INIT const absl::string_view kUserAgent = "User-Agent";
 ABSL_CONST_INIT const absl::string_view kTransferEncoding = "Transfer-Encoding";
 
+absl::string_view ExtractHeaderField(
+    absl::string_view header, absl::string_view field_name) {
+  DCHECK_EQ(absl::StripAsciiWhitespace(field_name), field_name);
+
+  while (!header.empty()) {
+    absl::string_view::size_type crlf = header.find("\r\n");
+    if (crlf == absl::string_view::npos) {
+      // no end-of-header?
+      LOG(ERROR) << "no end-of-header CRLFCRLF? "
+                 << absl::CEscape(header);
+      break;
+    }
+    // field name is case insensitive.
+    if (!absl::StartsWithIgnoreCase(header, field_name)) {
+      VLOG(4) << "not match with " << field_name
+              << ": skip " << absl::CEscape(header.substr(0, crlf));
+      header.remove_prefix(crlf + 2);
+      continue;
+    }
+    absl::string_view field = header;
+    field.remove_prefix(field_name.size());
+    // implied *LWS
+    field = absl::StripLeadingAsciiWhitespace(field);
+    if (!absl::ConsumePrefix(&field, ":")) {
+      VLOG(4) << "no colon after " << field_name
+              << ": skip " << absl::CEscape(header.substr(0, crlf));
+      header.remove_prefix(crlf + 2);
+      continue;
+    }
+    VLOG(4) << "found " << field_name << ": "
+            << absl::CEscape(field.substr(0, crlf));
+    // multiple lines by preceding each extra line with at least one SP or HT.
+    crlf = field.find("\r\n");
+    absl::string_view rest = field.substr(crlf + 2);
+    VLOG(5) << "following lines:" << absl::CEscape(rest);
+    absl::string_view::size_type eof = crlf + 2;
+    while (absl::StartsWith(rest, " ") || absl::StartsWith(rest, "\t")) {
+      crlf = rest.find("\r\n");
+      if (crlf == absl::string_view::npos) {
+        // no end-of-header?
+        LOG(ERROR) << "no end-of-header CRLFCRLF? "
+                   << absl::CEscape(header);
+        return absl::string_view();
+      }
+      eof += crlf + 2;
+      rest = rest.substr(crlf + 2);
+      VLOG(5) << "following lines:" << absl::CEscape(rest);
+    }
+    field = field.substr(0, eof);
+    VLOG(4) << "field value:" << absl::CEscape(field);
+    // field value doesn't contains any leading or trailing LWS.
+    return absl::StripAsciiWhitespace(field);
+  }
+  return absl::string_view();
+}
+
 // Parse HTTP request and response headers and return offset into body
 // and content-length. Content-Length may be missing, and in that case
 // content_length will be set to string::npos.

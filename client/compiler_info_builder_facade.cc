@@ -49,17 +49,4 @@ CompilerInfoBuilderFacade::FillFromCompilerOutputs(
   }
 }
 
-void CompilerInfoBuilderFacade::SetHashRewriteRule(
-    const std::map<string, string>& rule) {
-  // Since hash-rewrite rule is only effective for CompilerFlagType::Gcc.
-  // So, we set this only to gcc_builder_.
-  gcc_builder_.SetHashRewriteRule(rule);
-}
-
-void CompilerInfoBuilderFacade::Dump(std::ostringstream* ss) {
-  // This is to dump hash-rewrite rule.
-  // So we dump only gcc_builder_
-  gcc_builder_.Dump(ss);
-}
-
 }  // namespace devtools_goma

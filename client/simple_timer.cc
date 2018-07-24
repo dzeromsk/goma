@@ -23,4 +23,8 @@ long long SimpleTimer::GetInMilliseconds() const {
   return GetInNanoseconds() / 1000000;
 }
 
+absl::Duration SimpleTimer::GetDuration() const {
+  return absl::Nanoseconds(GetInNanoseconds());
+}
+
 }  // namespace devtools_goma

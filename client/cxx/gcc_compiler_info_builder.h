@@ -38,10 +38,6 @@ class GCCCompilerInfoBuilder : public CxxCompilerInfoBuilder {
 
   string GetCompilerName(const CompilerInfoData& data) const override;
 
-  void SetHashRewriteRule(const std::map<string, string>& rule);
-
-  void Dump(std::ostringstream* ss);
-
   // Returns false if GetExtraSubprograms failed to get subprogram
   // info while a subprogram exists.
   static bool GetExtraSubprograms(const string& normal_gcc_path,
@@ -56,10 +52,6 @@ class GCCCompilerInfoBuilder : public CxxCompilerInfoBuilder {
                                    std::vector<string>* B_options,
                                    bool* no_integrated_as);
 
-  static bool RewriteHashUnlocked(
-      const std::map<std::string, std::string>& rule,
-      CompilerInfoData* data);
-
   // Returns true if |subprogram_paths| contain a path for as (assembler).
   static bool HasAsPath(const std::vector<string>& subprogram_paths);
 
@@ -68,10 +60,6 @@ class GCCCompilerInfoBuilder : public CxxCompilerInfoBuilder {
   static string GetRealCompilerPath(const string& normal_gcc_path,
                                     const string& cwd,
                                     const std::vector<string>& envs);
-
- private:
-  mutable ReadWriteLock rwlock_;
-  std::map<string, string> hash_rewrite_rule_ GUARDED_BY(rwlock_);
 };
 
 };  // namespace devtools_goma

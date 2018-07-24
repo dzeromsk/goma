@@ -1264,6 +1264,19 @@ executable("env_flags_unittest") {
   ]
 }
 
+executable("file_stat_unittest") {
+  testonly = true
+  sources = [
+    "file_stat_unittest.cc",
+  ]
+  deps = [
+    ":common",
+    ":goma_test_lib",
+    ":scoped_tmp_file_lib",
+    "//build/config:exe_and_shlib_deps",
+  ]
+}
+
 executable("goma_ipc_unittest") {
   testonly = true
   sources = [

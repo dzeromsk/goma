@@ -185,34 +185,6 @@ string GetRealClangPath(const string& normal_gcc_path,
 
 }  // anonymous namespace
 
-void GCCCompilerInfoBuilder::SetHashRewriteRule(
-    const std::map<std::string, std::string>& rule) {
-  LOG(INFO) << "new hash rewrite rule will be set:" << rule;
-  AUTO_EXCLUSIVE_LOCK(lock, &rwlock_);
-  hash_rewrite_rule_ = rule;
-}
-
-// static
-bool GCCCompilerInfoBuilder::RewriteHashUnlocked(
-    const std::map<std::string, std::string>& rule,
-    CompilerInfoData* data) {
-  if (rule.empty()) {
-    return false;
-  }
-
-  bool did_rewrite = false;
-  for (auto& info : *data->mutable_subprograms()) {
-    const auto& found = rule.find(info.hash());
-    if (found != rule.end()) {
-      VLOG(3) << "rewrite hash of subprograms:"
-              << " from=" << info.hash() << " to=" << found->second;
-      info.set_hash(found->second);
-      did_rewrite = true;
-    }
-  }
-  return did_rewrite;
-}
-
 void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     const CompilerFlags& flags,
     const string& local_compiler_path,
@@ -282,13 +254,6 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     AddErrorMessage(ss.str(), data);
     LOG(ERROR) << data->error_message();
     return;
-  }
-  {
-    // Since we only support subprograms for gcc/clang,
-    // we do not need to rewrite subprogram's hashes on windows clang
-    // (clang-cl), MSVS cl.exe and Javac.
-    AUTO_SHARED_LOCK(lock, &rwlock_);
-    RewriteHashUnlocked(hash_rewrite_rule_, data);
   }
 
   // Hack for GCC 5's has_include and has_include_next support.
@@ -380,18 +345,6 @@ string GCCCompilerInfoBuilder::GetCompilerName(
                << " local=" << data.local_compiler_path()
                << " real=" << data.real_compiler_path();
   return string();
-}
-
-void GCCCompilerInfoBuilder::Dump(std::ostringstream* ss) {
-  AUTO_SHARED_LOCK(lock, &rwlock_);
-  if (hash_rewrite_rule_.empty())
-    return;
-  *ss << "compiler_info_builder:" << std::endl
-      << "  hash_rewrite_rule:" << std::endl;
-  for (const auto& entry : hash_rewrite_rule_) {
-    *ss << "    " << entry.first << ":" << entry.second << std::endl;
-  }
-  *ss << std::endl;
 }
 
 /* static */

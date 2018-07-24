@@ -94,4 +94,8 @@ std::string FileStat::DebugString() const {
   return ss.str();
 }
 
+std::ostream& operator<<(std::ostream& os, const FileStat& stat) {
+  return os << stat.DebugString();
+}
+
 }  // namespace devtools_goma

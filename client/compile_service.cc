@@ -1175,8 +1175,6 @@ void CompileService::DumpCompilerInfo(std::ostringstream* ss) {
   }
   (*ss) << "\n";
 
-  compiler_info_builder_facade_->Dump(ss);
-
   CompilerInfoCache::instance()->Dump(ss);
 
   {

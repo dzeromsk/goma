@@ -480,9 +480,7 @@ GOMA_DEFINE_bool(ENABLE_COUNTERZ, false,
                  "Flag for profiling using counterz.");
 #endif
 GOMA_DEFINE_string(HASH_REWRITE_RULE_FILE, "",
-                   "Filename to represent rewrite rule for sha256 hashes "
-                   "of subprograms. Each line of a file should be "
-                   "<from sha256>:<to sha256>");
+                   "(DEPRECATED)");
 GOMA_DEFINE_string(LOCAL_OUTPUT_CACHE_DIR, "",
                    "Directory that LocalOutputCache uses");
 GOMA_DEFINE_int32(LOCAL_OUTPUT_CACHE_MAX_CACHE_AMOUNT_IN_MB, 1024*30,

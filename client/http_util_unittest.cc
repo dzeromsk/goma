@@ -13,6 +13,24 @@ using std::string;
 
 namespace devtools_goma {
 
+TEST(HttpUtilTest, ExtractHeaderField) {
+  constexpr absl::string_view kHeader =
+      "HTTP/1.1 200 OK\r\n"
+      "content-type: text/plain;\r\n"
+      " charset=utf-8 \r\n"
+      "X-Content-Length: 10\r\n"
+      "X-other-field:\r\n"
+      " Content-Type: bad-content-type\r\n"
+      " Accept-Encoding: bad-encoding\r\n"
+      "Content-length: 5\r\n"
+      "Accept-Encoding : deflate \r\n";
+
+  EXPECT_EQ("text/plain;\r\n charset=utf-8",
+            ExtractHeaderField(kHeader, kContentType));
+  EXPECT_EQ("5", ExtractHeaderField(kHeader, kContentLength));
+  EXPECT_EQ("deflate", ExtractHeaderField(kHeader, kAcceptEncoding));
+}
+
 TEST(HttpUtilTest, FindContentLengthAndBodyOffset) {
   string data = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nH";
   size_t body_offset = string::npos;

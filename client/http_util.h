@@ -29,6 +29,13 @@ extern const absl::string_view kHost;
 extern const absl::string_view kUserAgent;
 extern const absl::string_view kTransferEncoding;
 
+// Extracts HTTP header field value.
+// field_name should not have leading and trailing space.
+// header should be HTTP message header, i.e. ends with CRLFCRLF.
+// TODO: use this instead of header.find("field:")
+absl::string_view ExtractHeaderField(
+    absl::string_view header, absl::string_view field_name);
+
 // Parse the HTTP response header.
 // Return true if it got all header, or error response.
 // Return false if it needs more data.

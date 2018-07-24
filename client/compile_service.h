@@ -351,10 +351,6 @@ class CompileService {
     return allowed_network_error_duration_in_sec_;
   }
 
-  void SetHashRewriteRule(const std::map<std::string, std::string>& mapping) {
-    compiler_info_builder_facade_->SetHashRewriteRule(mapping);
-  }
-
   void SetMaxActiveFailFallbackTasks(int num) {
     max_active_fail_fallback_tasks_ = num;
   }
