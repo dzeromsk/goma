@@ -15,7 +15,6 @@
 #include "compiler_flags.h"
 #include "compiler_info_state.h"
 #include "compiler_proxy_info.h"
-#include "file.h"
 #include "glog/logging.h"
 #include "goma_hash.h"
 #include "path.h"

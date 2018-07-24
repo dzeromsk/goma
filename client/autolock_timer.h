@@ -147,14 +147,14 @@ class AutoLockTimerBase {
     LockAcquireStrategy::Acquire(lock_);
     if (statp) {
       stat_ = statp;
-      stat_->UpdateWaitTime(timer_.GetInNanoSeconds());
+      stat_->UpdateWaitTime(timer_.GetInNanoseconds());
       timer_.Start();
     }
   }
 
   ~AutoLockTimerBase() {
     if (stat_) {
-      stat_->UpdateHoldTime(timer_.GetInNanoSeconds());
+      stat_->UpdateHoldTime(timer_.GetInNanoseconds());
     }
     LockAcquireStrategy::Release(lock_);
   }

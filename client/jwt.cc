@@ -17,24 +17,32 @@
 #include <vector>
 
 #include "absl/strings/str_join.h"
+#include "absl/time/clock.h"
 #include "base64.h"
 #include "glog/logging.h"
 #include "ioutil.h"
 
 namespace devtools_goma {
 
+namespace {
+
 // A descriptor of the intended target of the assertion.
 // When making an access token request this value is always
 // https://www.googleapis.com/oauth2/v4/token.
 // https://developers.google.com/identity/protocols/OAuth2ServiceAccount#authorizingrequests
-static const char* kAssertionTarget =
+constexpr char kAssertionTarget[] =
     "https://www.googleapis.com/oauth2/v4/token";
 
-static std::string OpenSSLErrorString(uint32_t err) {
+// Time until access token will expire.
+constexpr absl::Duration kExpiresIn = absl::Hours(1);
+
+std::string OpenSSLErrorString(uint32_t err) {
   char buf[1024];
   ERR_error_string_n(err, buf, sizeof(buf));
   return buf;
 }
+
+}  // namespace
 
 /* static */
 std::unique_ptr<JsonWebToken::Key> JsonWebToken::Key::Load(
@@ -83,9 +91,14 @@ JsonWebToken::JsonWebToken(ClaimSet claim_set)
 JsonWebToken::~JsonWebToken() {
 }
 
-std::string JsonWebToken::Token(const Key& key, time_t now) const {
+std::string JsonWebToken::Token(const Key& key) const {
+  return TokenWithTimestamp(key, absl::Now());
+}
+
+std::string JsonWebToken::TokenWithTimestamp(const Key& key,
+                                             absl::Time timestamp) const {
   std::string header = CreateHeaderJson();
-  std::string claim_set = CreateClaimSetJson(claim_set_, now);
+  std::string claim_set = CreateClaimSetJson(claim_set_, timestamp);
   std::string base_string = CreateTokenBaseString(header, claim_set);
   std::string sig = Sign(base_string, key);
   if (sig.empty()) {
@@ -102,7 +115,8 @@ std::string JsonWebToken::CreateHeaderJson() {
 }
 
 /* static */
-std::string JsonWebToken::CreateClaimSetJson(const ClaimSet& cs, time_t now) {
+std::string JsonWebToken::CreateClaimSetJson(const ClaimSet& cs,
+                                             absl::Time timestamp) {
   std::stringstream ss;
   ss << "{";
   ss << "\"iss\":" << EscapeString(cs.iss);
@@ -111,8 +125,8 @@ std::string JsonWebToken::CreateClaimSetJson(const ClaimSet& cs, time_t now) {
   }
   ss << ",\"scope\":" << EscapeString(absl::StrJoin(cs.scopes, " "));
   ss << ",\"aud\":" << EscapeString(kAssertionTarget);
-  ss << ",\"exp\":" << now + cs.expires_in_sec;
-  ss << ",\"iat\":" << now;
+  ss << ",\"exp\":" << absl::ToTimeT(timestamp + kExpiresIn);
+  ss << ",\"iat\":" << absl::ToTimeT(timestamp);
   ss << "}";
   return ss.str();
 }

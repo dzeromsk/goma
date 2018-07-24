@@ -9,13 +9,12 @@
 
 #include "cros_util.h"
 
-#include <sys/time.h>
-#include <time.h>
-
 #include <memory>
 
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "basictypes.h"
 #include "file_helper.h"
 #include "glog/logging.h"
@@ -109,16 +108,14 @@ float GetLoadAverage() {
   return load;
 }
 
-int RandInt(int a, int b) {
+int64_t RandInt64(int64_t a, int64_t b) {
   static bool initialized = false;
   if (!initialized) {
-    // I chose gettimeofday because I believe it is more unlikely to cause the
-    // same random number pattern than srand(time(nullptr)).
-    struct timeval tv;
-    CHECK_EQ(gettimeofday(&tv, nullptr), 0);
-    srandom(tv.tv_usec);
+    srand(absl::ToInt64Nanoseconds(
+        absl::Now().In(absl::UTCTimeZone()).subsecond));
   }
-  return a + random() % (b - a + 1);
+  int64_t rand_value = (static_cast<uint64_t>(rand()) << 32) + rand();
+  return a + rand_value % (b - a + 1);
 }
 
 bool CanGomaccHandleCwd() {
@@ -130,17 +127,17 @@ bool CanGomaccHandleCwd() {
   return true;
 }
 
-void WaitUntilLoadAvgLowerThan(float load, int max_sleep_time) {
+void WaitUntilLoadAvgLowerThan(float load, absl::Duration max_sleep_time) {
   CHECK_GT(load, 0.0)
       << "load must be larger than 0.  Or, this function won't finish."
       << " load=" << load;
-  CHECK_GT(max_sleep_time, 0)
-      << "Max sleep time should be larger than 0."
+  CHECK(max_sleep_time > absl::ZeroDuration())
+      << "Max sleep time should be larger than 0 seconds."
       << " max_sleep_time=" << max_sleep_time;
-  time_t current_time, last_update;
-  current_time = last_update = time(nullptr);
+  absl::Time current_time, last_update;
+  current_time = last_update = absl::Now();
 
-  int sleep_time = 1;
+  absl::Duration sleep_time = absl::Seconds(1);
   for (;;) {
     float current_loadavg = GetLoadAverage();
     CHECK_GE(current_loadavg, 0.0)
@@ -149,7 +146,7 @@ void WaitUntilLoadAvgLowerThan(float load, int max_sleep_time) {
     if (current_loadavg < load)
       break;
 
-    current_time = time(nullptr);
+    current_time = absl::Now();
     if (current_time - last_update > max_sleep_time) {
       LOG(WARNING) << "waiting."
                    << " load=" << load
@@ -160,7 +157,10 @@ void WaitUntilLoadAvgLowerThan(float load, int max_sleep_time) {
     sleep_time *= 2;
     if (sleep_time > max_sleep_time)
       sleep_time = max_sleep_time;
-    sleep(RandInt(1, sleep_time));
+    absl::SleepFor(
+        absl::Nanoseconds(
+            RandInt64(absl::ToInt64Nanoseconds(absl::Seconds(1)),
+                      absl::ToInt64Nanoseconds(sleep_time))));
   }
 }
 

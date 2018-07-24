@@ -19,6 +19,16 @@ namespace devtools_goma {
 
 const int kNetworkBufSize = 1024 * 32;
 
+extern const absl::string_view kAcceptEncoding;
+extern const absl::string_view kAuthorization;
+extern const absl::string_view kContentEncoding;
+extern const absl::string_view kContentLength;
+extern const absl::string_view kContentType;
+extern const absl::string_view kCookie;
+extern const absl::string_view kHost;
+extern const absl::string_view kUserAgent;
+extern const absl::string_view kTransferEncoding;
+
 // Parse the HTTP response header.
 // Return true if it got all header, or error response.
 // Return false if it needs more data.
@@ -51,24 +61,6 @@ bool ParseHttpResponse(absl::string_view response,
 bool FindContentLengthAndBodyOffset(
     absl::string_view data, size_t *content_length, size_t *body_offset,
     bool *is_chunked);
-
-// Parse body encoded with chunked transfer coding.
-// Return true if whole chunks parsed, or error.
-// Return false if it needs more data.
-//
-// remaining_chunk_length:
-// - 0: success (returns true).
-// - string::npos: error (returns true).
-// - otherwise, need more data (returns false).
-//
-// chunks is set only when ParseChunkedBody returns true and
-// *remaining_chunk_length == 0.
-// DEPRECATED: use HttpChunkParser instead.
-bool ParseChunkedBody(absl::string_view response,
-                      size_t offset, size_t* remaining_chunk_length,
-                      std::vector<absl::string_view>* chunks);
-
-std::string CombineChunks(const std::vector<absl::string_view>& chunks);
 
 // Parse http request query parameter.
 std::map<std::string, std::string> ParseQuery(const std::string& query);

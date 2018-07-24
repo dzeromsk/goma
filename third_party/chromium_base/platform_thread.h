@@ -73,9 +73,6 @@ class PlatformThread {
   PlatformThread(const PlatformThread&) = delete;
   void operator=(const PlatformThread&) = delete;
 
-  // Sleeps for the specified duration (units are milliseconds).
-  static void Sleep(int32_t duration_ms);
-
   // Creates a new thread using default stack size.  Upon success,
   // |*thread_handle| will be assigned a handle to the newly created thread,
   // and |delegate|'s ThreadMain method will be executed on the newly created

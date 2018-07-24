@@ -39,7 +39,8 @@ bool CppMacroExpanderCBV::Expand(ArrayTokenList::const_iterator input_begin,
 
     // We don't support these.
     if (token.type == CppToken::SHARP || token.type == CppToken::DOUBLESHARP ||
-        token.type == CppToken::MACRO_PARAM_VA_ARGS) {
+        token.type == CppToken::MACRO_PARAM_VA_ARGS ||
+        token.type == CppToken::VA_OPT) {
       return false;
     }
 

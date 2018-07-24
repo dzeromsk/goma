@@ -19,6 +19,8 @@
 #endif
 
 #include "absl/strings/ascii.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "compiler_specific.h"
 #include "fileflag.h"
 #include "glog/logging.h"
@@ -115,6 +117,13 @@ void SubProcessControllerServer::Loop() {
     }
     fd_set read_fd;
     fd_set write_fd;
+#ifdef MEMORY_SANITIZER
+    // workaround to make MSan understand fd_set initialized.
+    // FD_ZERO use inline asm.  MSan cannot understand that.
+    // See: https://github.com/google/sanitizers/issues/192
+    memset(&read_fd, 0, sizeof(read_fd));
+    memset(&write_fd, 0, sizeof(write_fd));
+#endif // MEMORY_SANITIZER
     FD_ZERO(&read_fd);
     FD_ZERO(&write_fd);
     MSVC_PUSH_DISABLE_WARNING_FOR_FD_SET();
@@ -178,7 +187,7 @@ void SubProcessControllerServer::Loop() {
     // terminate the subprocess, it will sleep for a while.
     // b/5370450
     while ((terminated = s->Wait(true)) == nullptr) {
-      devtools_goma::PlatformThread::Sleep(10000);
+      absl::SleepFor(absl::Seconds(10));
     }
   }
   FlushLogFiles();

@@ -59,7 +59,9 @@ class CppMacroExpanderNaive {
               bool skip_space,
               TokenHSList* output);
 
-  bool Substitute(const ArrayTokenList& replacement,
+  bool Substitute(const Macro& macro,
+                  ArrayTokenList::const_iterator replacement_begin,
+                  ArrayTokenList::const_iterator replacement_end,
                   const ArgVector& actuals,
                   const MacroSet& hideset,
                   TokenHSList* output);
@@ -74,7 +76,19 @@ class CppMacroExpanderNaive {
                                TokenHSList::iterator* cur,
                                TokenHSListRange* arg_range);
 
+  // Parses __VA_OPT__. |range_begin| should be just after __VA_OPT__.
+  // |range_end| is the end of current token list.
+  // argument_begin and argument_end is trimmed front/back spaces.
+  // right_paren indicates ')'.
+  static bool GetVaOptArgument(ArrayTokenList::const_iterator range_begin,
+                               ArrayTokenList::const_iterator range_end,
+                               ArrayTokenList::const_iterator* argument_begin,
+                               ArrayTokenList::const_iterator* argument_end,
+                               ArrayTokenList::const_iterator* right_paren_pos);
+
   static CppToken Stringize(const TokenHSList& list);
+  static CppToken Stringize(ArrayTokenList::const_iterator arg_begin,
+                            ArrayTokenList::const_iterator arg_end);
 
   CppParser* parser_;
 
@@ -83,6 +97,7 @@ class CppMacroExpanderNaive {
   FRIEND_TEST(CppMacroExpanderNaiveTest, GetMacroArgumentsEmptyArg);
   FRIEND_TEST(CppMacroExpanderNaiveTest, GetMacroArgumentsNoParen);
   FRIEND_TEST(CppMacroExpanderNaiveTest, GetMacroArgumentsUnterminatedParen);
+  FRIEND_TEST(CppMacroExpanderNaiveTest, GetVaOptArgument);
 };
 
 }  // namespace devtools_goma

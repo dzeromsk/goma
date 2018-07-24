@@ -8,7 +8,6 @@
 #include <fstream>
 #include <utility>
 
-#include "file.h"
 #include "file_helper.h"
 #include "glog/logging.h"
 #include "goma_hash.h"

@@ -217,7 +217,15 @@ config("tsan") {
 }
 
 config("msan") {
-  cflags = [ "-fsanitize=memory" ]
+  if (!defined(msan_blacklist_path)) {
+    msan_blacklist_path =
+        rebase_path("//build/sanitizers/msan_blacklist.txt", root_build_dir)
+  }
+  cflags = [
+    "-fsanitize=memory",
+    "-fsanitize-blacklist=$msan_blacklist_path",
+    "-fsanitize-memory-track-origins=2",
+  ]
   ldflags = [ "-fsanitize=memory" ]
   defines = [ "MEMORY_SANITIZER" ]
 }
@@ -242,6 +250,10 @@ config("enable_revision_check") {
 
 config("enable_lzma") {
   defines = [ "ENABLE_LZMA" ]
+}
+
+config("keep_subproc_stderr") {
+  defines = [ "KEEP_SUBPROC_STDERR" ]
 }
 
 # Optimization --------------------------------------------------------------

@@ -158,6 +158,13 @@ std::unique_ptr<CppDirective> ReadFunctionMacro(const string& name,
       } else if (token.string_value == "__VA_ARGS__" && is_vararg) {
         // __VA_ARGS__ is valid only for variadic template.
         token.MakeMacroParamVaArgs(params.size());
+      } else if (token.string_value == "__VA_OPT__" &&
+                 (is_vararg || params.size() > 0)) {
+        // __VA_OPT__ is valid only for variadic template.
+        // If __VA_OPT__ is used in non variadic template: (as of 2018-07-13)
+        //   1. clang preserves __VA_OPT__ if argument size is 0.
+        //   2. In the other cases, it converts to empty token.
+        token.MakeMacroParamVaOpt();
       }
     }
 

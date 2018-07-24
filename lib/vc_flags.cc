@@ -11,7 +11,6 @@
 #include "absl/strings/str_split.h"
 #include "cmdline_parser.h"
 #include "compiler_flags.h"
-#include "file.h"
 #include "file_helper.h"
 #include "flag_parser.h"
 #include "glog/logging.h"

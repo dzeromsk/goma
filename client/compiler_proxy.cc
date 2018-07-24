@@ -41,7 +41,8 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_replace.h"
 #include "absl/strings/str_split.h"
-#include "arfile_reader.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "auto_updater.h"
 #include "autolock_timer.h"
 #include "basictypes.h"
@@ -87,6 +88,7 @@
 #include "ioutil.h"
 #include "java/jarfile_reader.h"
 #include "jquery.min.h"
+#include "linker/linker_input_processor/arfile_reader.h"
 #include "list_dir_cache.h"
 #include "local_output_cache.h"
 #include "log_cleaner.h"
@@ -186,7 +188,8 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
         log_cleaner_closure_id_(kInvalidPeriodicClosureId),
         memory_tracker_closure_id_(kInvalidPeriodicClosureId),
         rpc_sent_count_(0),
-        tmpdir_(std::move(tmpdir))
+        tmpdir_(std::move(tmpdir)),
+        last_memory_byte_(0)
 #if HAVE_HEAP_PROFILER
         ,
         compiler_proxy_heap_profile_file_(file::JoinPathRespectAbsolute(
@@ -550,7 +553,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
             backoff_ms, true);
         LOG(INFO) << "backoff " << backoff_ms << " msec"
                   << " because of http_status_code=" << http_status_code;
-        PlatformThread::Sleep(backoff_ms);
+        absl::SleepFor(absl::Milliseconds(backoff_ms));
       }
       LOG(ERROR) << "Going to retry ping."
                  << " http_status_code=" << http_status_code
@@ -935,6 +938,12 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
 #endif
 #ifdef ADDRESS_SANITIZER
     *ss << "WARNING: ASAN BINARY -- Performance may suffer" << kBr;
+#endif
+#ifdef THREAD_SANITIZER
+    *ss << "WARNING: TSAN BINARY -- Performance may suffer" << kBr;
+#endif
+#ifdef MEMORY_SANITIZER
+    *ss << "WARNING: MSAN BINARY -- Performance may suffer" << kBr;
 #endif
 
     *ss << "PID is " << Getpid() << kBr;
@@ -1384,8 +1393,8 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   void CleanOldLogs() {
     if (FLAGS_LOG_CLEAN_INTERVAL <= 0)
       return;
-    time_t now = time(nullptr);
-    log_cleaner_.CleanOldLogs(now - FLAGS_LOG_CLEAN_INTERVAL);
+    log_cleaner_.CleanOldLogs(
+        absl::Now() - absl::Seconds(FLAGS_LOG_CLEAN_INTERVAL));
   }
 
   void RunTrackMemory() {
@@ -1403,8 +1412,24 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
         WorkerThreadManager::PRIORITY_LOW);
   }
 
-  void TrackMemory() {
+  void TrackMemory() LOCKS_EXCLUDED(memory_mu_) {
     int64_t memory_byte = GetConsumingMemoryOfCurrentProcess();
+
+    {
+      AUTOLOCK(lock, &memory_mu_);
+
+      // When compiler_proxy is idle, the consumed memory size won't change
+      // so much. To reduce log size, we don't do anything. b/110089630
+      // On Linux, memory size looks stable, but not for the other platforms.
+      // We allow 1MB margin.
+      int64_t diff = memory_byte - last_memory_byte_;
+      if (-1024 * 1024 < diff && diff < 1024 * 1024) {
+        return;
+      }
+
+      last_memory_byte_ = memory_byte;
+    }
+
     int64_t warning_threshold =
         static_cast<int64_t>(FLAGS_MEMORY_WARNING_THRESHOLD_IN_MB) *
         1024 * 1024;
@@ -1577,6 +1602,9 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   std::map<string, HttpHandlerMethod> internal_http_handlers_;
 
   const string tmpdir_;
+
+  mutable Lock memory_mu_;
+  int64_t last_memory_byte_ GUARDED_BY(memory_mu_);
 
 #if HAVE_HEAP_PROFILER
   const string compiler_proxy_heap_profile_file_;

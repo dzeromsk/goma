@@ -26,7 +26,15 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/strings/string_view.h"
 #include "basictypes.h"
+#include "base/compiler_specific.h"
+#include "compress_util.h"
 #include "gtest/gtest_prod.h"
+MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
+#include "google/protobuf/io/zero_copy_stream.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
+#include "google/protobuf/io/zero_copy_stream_impl_lite.h"
+MSVC_POP_WARNING()
+#include "http_util.h"
 #include "lockhelper.h"
 #include "luci_context.h"
 #include "oauth2.h"
@@ -34,14 +42,6 @@
 #include "worker_thread_manager.h"
 
 using std::string;
-
-namespace google {
-namespace protobuf {
-namespace io {
-class ZeroCopyInputStream;
-}  // namespace io
-}  // namespace protobuf
-}  // namespace google
 
 namespace devtools_goma {
 
@@ -109,6 +109,8 @@ class HttpClient {
   //  - timeout_should_be_http_error
   //  - timeouts.
   // The other fields are filled by HttpClient.
+  // Once it is passed to HttpClient, caller should not access
+  // all fields, except finished, until finished becomes true.
   struct Status {
     enum State {
       // Running state. If failed in some step, State would be kept as-is.
@@ -230,20 +232,24 @@ class HttpClient {
     void SetCookie(const string& cookie);
     void AddHeader(const string& key, const string& value);
 
-    // CreateMessage returns HTTP request message.
-    virtual string CreateMessage() const = 0;
-
     // Clone returns clone of this Request.
     virtual std::unique_ptr<Request> Clone() const = 0;
 
+    // Returns stream of the request message.
+    virtual std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>
+      NewStream() const = 0;
+
    protected:
     // CreateHeader creates a header line.
-    static string CreateHeader(const string& key, const string& value);
+    static string CreateHeader(absl::string_view key, absl::string_view value);
 
-    // BuildMessage creates HTTP request message with additional headers
-    // and body.
-    string BuildMessage(const std::vector<string>& headers,
-                        absl::string_view body) const;
+    // BuildHeader creates HTTP request message with additional headers.
+    // If content_length >= 0, set Content-Length: header.
+    // If content_length < 0, header should include
+    // "Transfer-Encoding: chunked" and NewStream should provide
+    // chunked-body.
+    string BuildHeader(
+        const std::vector<string>& headers, int content_length) const;
 
    private:
     string method_;
@@ -260,6 +266,41 @@ class HttpClient {
   // Response is a response of HTTP transaction.
   class Response {
    public:
+    // Body receives http response body.
+    // Body parses Transfer-Encoding (i.e. chunked),
+    // and Content-Encoding (e.g. deflate).
+    class Body {
+     public:
+      enum class State {
+        Error = -1,
+        Ok = 0,
+        Incomplete = 1,
+      };
+      Body() = default;
+      virtual ~Body() = default;
+
+      // Next obtains a buffer into which data can be written.
+      // Any data written into this buffer will be parsed accoding to
+      // Tarnsfer-Encoding and Content-Encoding.
+      // Ownership of buffer remains to the Body, and the buffer remains
+      // valid until some other method of Body is called or
+      // Body is destroyed.
+      // Different from ZeroCopyOutputStream, *body_size never be 0.
+      virtual void Next(char** buf, int* buf_size) = 0;
+
+      // Process processes data stored in the buffer returned by the
+      // last Next call at most data_size bytes.
+      // Data in the buffer after data_size bytes will be ignored,
+      // and may be reused in the next Next call (or not).
+      // If data_size == 0, it means EOF.
+      // If data_size is negative, it means error and must return
+      // State::Error.
+      virtual State Process(int data_size) = 0;
+
+      // Returns the total number of bytes written.
+      virtual size_t ByteCount() const = 0;
+    };
+
     Response();
     virtual ~Response();
 
@@ -291,11 +332,6 @@ class HttpClient {
     // HttpResponse grows buffer size in Buffer if necessary.
     size_t buffer_size() const { return buffer_.size(); }
 
-    // Remaining bytes for complete responses.
-    // remaining might be zero, if it is not yet known.
-    // Use Recv to check complete response has been received or not.
-    size_t remaining() const { return remaining_; }
-
     // status_code reports HTTP status code.
     int status_code() const { return status_code_; }
 
@@ -309,25 +345,35 @@ class HttpClient {
    protected:
     // ParseBody parses body.
     // if error occured, updates result_, err_message_.
-    virtual void ParseBody(
-        google::protobuf::io::ZeroCopyInputStream* input) = 0;
+    virtual void ParseBody() = 0;
+
+    // called to initialize body_.
+    // subclass must own Body.  Body should be valid until next NewBody
+    // call or Response is destroyed.
+    virtual Body* NewBody(
+        size_t content_length, bool is_chunked,
+        EncodingType encoding_type) = 0;
 
     int result_;
     string err_message_;
     string trace_id_;
 
    private:
+    // BodyRecv receives r bytes in body.
+    // Returns true if no more data needed.
+    // Returns false if need more data.
+    bool BodyRecv(int r);
+
     string request_path_;
 
     string buffer_;  // whole buffer
-    size_t len_;     // received length in buffer_
-    size_t body_offset_;  // position to start response body in buffer_
-    size_t content_length_;  // content length specified in http response header
-    bool is_chunked_;  // chunked transfer encoding?
-    size_t remaining_;  // remaining bytes for full response.
-    std::vector<absl::string_view> chunks_;
+    size_t len_ = 0UL;     // received length in buffer_
+    size_t body_offset_ = 0UL;  // position to start response body in buffer_
 
-    int status_code_;
+    // body becomes non nullptr when start receiving response body.
+    Body *body_ = nullptr;
+
+    int status_code_ = 0;
 
     DISALLOW_COPY_AND_ASSIGN(Response);
   };
@@ -383,6 +429,9 @@ class HttpClient {
   // last 3 seconds having status code other than 200.
   bool IsHealthyRecently();
   string GetHealthStatusMessage() const;
+  // Prefer to use IsHealthyRecently instead of IsHealthy to judge
+  // network is healthy or not.  HTTP status could be temporarily unhealthy,
+  // but we prefer to ignore the case.
   bool IsHealthy() const;
 
   // Get email address to login with oauth2.
@@ -585,9 +634,10 @@ class HttpRequest : public HttpClient::Request {
   HttpRequest();
   ~HttpRequest() override;
 
+  // TODO: set body stream producer instead of string.
   void SetBody(const string& body);
-
-  string CreateMessage() const override;
+  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>
+    NewStream() const override;
 
   std::unique_ptr<HttpClient::Request> Clone() const override {
     return std::unique_ptr<HttpClient::Request>(new HttpRequest(*this));
@@ -602,20 +652,103 @@ class HttpRequest : public HttpClient::Request {
 // HttpResponse is a response of HTTP transaction.
 class HttpResponse : public HttpClient::Response {
  public:
+  class Body : public HttpClient::Response::Body {
+   public:
+    Body(size_t content_length, bool is_chunked, EncodingType encoding_type);
+    ~Body() override = default;
+
+    void Next(char** buf, int* buf_size) override;
+    State Process(int data_size) override;
+    size_t ByteCount() const override { return len_; }
+
+    std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>
+      ParsedStream() const;
+
+   private:
+    const size_t content_length_;
+    std::unique_ptr<HttpChunkParser> chunk_parser_;
+    const EncodingType encoding_type_;
+
+    // buffer_ holds receiving data.
+    // each char[] has kNetworkBufSize.
+    // it uses std::unique_ptr<char[]> to avoid relocation of backing array.
+    // [0, len_) is processed data, chunks_ would point several areas
+    // in this region.
+    // [len_, end) is in last char[] in buffer_
+    // returned by Next to receive body data.
+    std::vector<std::unique_ptr<char[]>> buffer_;
+    size_t len_ = 0;
+
+    std::vector<absl::string_view> chunks_;
+  };
+
   HttpResponse();
   ~HttpResponse() override;
 
-  const string& Body() const;
+  const string& parsed_body() const { return parsed_body_; }
+
+  HttpClient::Response::Body* NewBody(
+      size_t content_length, bool is_chunked,
+      EncodingType encoding_type) override;
 
  protected:
   // ParseBody parses body.
   // if error occured, updates result_, err_message_.
-  void ParseBody(google::protobuf::io::ZeroCopyInputStream* input) override;
+  void ParseBody() override;
 
  private:
+  std::unique_ptr<Body> response_body_;
   string parsed_body_;  // dechunked and uncompressed
 
   DISALLOW_COPY_AND_ASSIGN(HttpResponse);
+};
+
+// StringInputStream is helper for ArrayInputStream.
+// It owns input string, so no need for caller to own the string
+// along with input stream.
+class StringInputStream : public google::protobuf::io::ZeroCopyInputStream {
+ public:
+  explicit StringInputStream(string data);
+  ~StringInputStream() override = default;
+
+  bool Next(const void** data, int* size) override {
+    return stream_->Next(data, size);
+  }
+  void BackUp(int count) override { stream_->BackUp(count); }
+  bool Skip(int count) override { return stream_->Skip(count); }
+  google::protobuf::int64 ByteCount() const override {
+    return stream_->ByteCount();
+  }
+
+ private:
+  const string data_;
+  std::unique_ptr<google::protobuf::io::ArrayInputStream> stream_;
+};
+
+// ChainedInputStream is similar with ContatinatingInputStream,
+// but it owns all underlying input streams.
+class ChainedInputStream
+    : public google::protobuf::io::ZeroCopyInputStream {
+ public:
+  explicit ChainedInputStream(
+      std::vector<
+      std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>> s);
+  ~ChainedInputStream() override = default;
+
+  bool Next(const void** data, int* size) override {
+    return stream_->Next(data, size);
+  }
+  void BackUp(int count) override { stream_->BackUp(count); }
+  bool Skip(int count) override { return stream_->Skip(count); }
+  google::protobuf::int64 ByteCount() const override {
+    return stream_->ByteCount();
+  }
+
+ private:
+  std::vector<std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>>
+    streams_;
+  std::vector<google::protobuf::io::ZeroCopyInputStream*> streams_array_;
+  std::unique_ptr<google::protobuf::io::ConcatenatingInputStream> stream_;
 };
 
 }  // namespace devtools_goma

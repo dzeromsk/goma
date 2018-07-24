@@ -22,14 +22,18 @@
 #include "absl/base/call_once.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/match.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
-#include "file.h"
 #include "file_dir.h"
 #include "file_helper.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
+MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
+#include "google/protobuf/io/zero_copy_stream.h"
+MSVC_POP_WARNING()
 #include "http.h"
 #include "http_util.h"
 #include "mypath.h"
@@ -48,10 +52,10 @@ namespace devtools_goma {
 namespace {
 
 // Prevent use of SSL on error for this period.
-static const time_t kErrorTimeoutSecs = 60;
+constexpr absl::Duration kErrorTimeout = absl::Seconds(60);
 
 // Wait for this period if no more sockets are in the pool.
-static const unsigned int kWaitForThingsGetsBetterInMs = 1000;
+constexpr absl::Duration kWaitForThingsGetsBetter = absl::Seconds(1);
 
 absl::once_flag g_openssl_init_once;
 
@@ -744,11 +748,18 @@ void DownloadCrl(
     return;
   }
 
-  const string& request = req.CreateMessage();
-  if (sock->WriteString(request, kCrlIoTimeout) != OK) {
-    LOG(ERROR) << "write failure:"
-               << " fd=" << *sock;
-    return;
+  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> request =
+      req.NewStream();
+
+  const void* data = nullptr;
+  int size = 0;
+  while (request->Next(&data, &size)) {
+    absl::string_view buf(static_cast<const char*>(data), size);
+    if (sock->WriteString(buf, kCrlIoTimeout) != OK) {
+      LOG(ERROR) << "write failure:"
+                 << " fd=" << *sock;
+      return;
+    }
   }
 
   for (;;) {
@@ -886,8 +897,7 @@ void OpenSSLContext::Init(
   notify_invalidate_closure_ = invalidate_closure;
 }
 
-OpenSSLContext::OpenSSLContext()
-    : is_crl_ready_(false), last_error_time_(0), ref_cnt_(0) {
+OpenSSLContext::OpenSSLContext() : is_crl_ready_(false), ref_cnt_(0) {
 }
 
 OpenSSLContext::~OpenSSLContext() {
@@ -939,8 +949,8 @@ ScopedX509CRL OpenSSLContext::GetX509CrlsFromUrl(
       LOG(WARNING) << "It seems to fail to connect to all available addresses."
                    << " Going to wait for a while."
                    << " kWaitForThingsGetsBetterInMs="
-                   << kWaitForThingsGetsBetterInMs;
-      PlatformThread::Sleep(kWaitForThingsGetsBetterInMs);
+                   << kWaitForThingsGetsBetter;
+      absl::SleepFor(kWaitForThingsGetsBetter);
       continue;
     }
     DownloadCrl(&sock, req, &resp);
@@ -952,7 +962,7 @@ ScopedX509CRL OpenSSLContext::GetX509CrlsFromUrl(
       socket_pool->CloseSocket(std::move(sock), true);
       continue;
     }
-    crl_str->assign(resp.Body());
+    crl_str->assign(resp.parsed_body());
     ScopedX509CRL x509_crl(ParseCrl(*crl_str));
     if (x509_crl == nullptr) {
       LOG(WARNING) << "failed to parse CRL data:"
@@ -1054,7 +1064,7 @@ bool OpenSSLContext::SetupCrlsUnlocked(STACK_OF(X509)* x509s) {
       std::ostringstream ss;
       ss << "CRL is not available";
       last_error_ = ss.str();
-      last_error_time_ = time(nullptr);
+      last_error_time_ = absl::Now();
       ss << ":" << GetHumanReadableCert(x509);
       // This error may occurs if the network is broken, unstable,
       // or untrustable.
@@ -1117,10 +1127,10 @@ bool OpenSSLContext::SetupCrlsUnlocked(STACK_OF(X509)* x509s) {
 
 bool OpenSSLContext::IsRevoked(STACK_OF(X509)* x509s) {
   AUTOLOCK(lock, &mu_);
-  time_t now = time(nullptr);
-  if (!last_error_.empty() && now < last_error_time_ + kErrorTimeoutSecs) {
+  if (!last_error_.empty() && last_error_time_ &&
+      absl::Now() < *last_error_time_ + kErrorTimeout) {
     LOG(ERROR) << "Preventing using SSL because of:" << last_error_
-               << " last_error_time_=" << last_error_time_;
+               << " last_error_time_=" << *last_error_time_;
     return true;
   }
   if (!is_crl_ready_ && !SetupCrlsUnlocked(x509s)) {

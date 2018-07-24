@@ -40,9 +40,9 @@
 #include <memory>
 #include <vector>
 
+#include "absl/time/clock.h"
 #include "callback.h"
 #include "compiler_flag_type_specific.h"
-#include "file.h"
 #include "file_dir.h"
 #include "file_helper.h"
 #include "file_stat.h"
@@ -69,6 +69,9 @@ MSVC_POP_WARNING()
 using std::string;
 
 namespace {
+
+// Timeout value in seconds for LoadCacheEntries().
+constexpr double kLoadCacheEntriesTimeoutSec = 1.0;
 
 bool DeleteFile(const char* path) {
 #ifndef _WIN32
@@ -188,8 +191,8 @@ void LocalOutputCache::LoadCacheEntries() {
       LoadCacheEntriesDone();
       return;
     }
-    list_directory_histogram.Add(timer.GetInNanoSeconds());
-    if (timer.Get() >= 1.0) {
+    list_directory_histogram.Add(timer.GetInNanoseconds());
+    if (timer.GetInSeconds() >= kLoadCacheEntriesTimeoutSec) {
       LOG(WARNING) << "SLOW ListDirectory: " << cache_dir_;
     }
   }
@@ -211,8 +214,8 @@ void LocalOutputCache::LoadCacheEntries() {
         // Might be better to remove this directory contents.
         continue;
       }
-      list_directory_histogram.Add(timer.GetInNanoSeconds());
-      if (timer.Get() >= 1.0) {
+      list_directory_histogram.Add(timer.GetInNanoseconds());
+      if (timer.GetInSeconds() >= kLoadCacheEntriesTimeoutSec) {
         LOG(WARNING) << "SLOW ListDirectory: " << cache_dir_with_key_prefix;
       }
     }
@@ -248,8 +251,8 @@ void LocalOutputCache::LoadCacheEntries() {
       {
         SimpleTimer timer(SimpleTimer::START);
         file_stat = FileStat(cache_file_path);
-        file_stat_histogram.Add(timer.GetInNanoSeconds());
-        if (timer.Get() >= 1.0) {
+        file_stat_histogram.Add(timer.GetInNanoseconds());
+        if (timer.GetInSeconds() >= kLoadCacheEntriesTimeoutSec) {
           LOG(WARNING) << "SLOW FileStat: " << cache_file_path;
         }
       }
@@ -261,12 +264,12 @@ void LocalOutputCache::LoadCacheEntries() {
       }
 
       total_file_size += file_stat.size;
-      cache_entries.emplace_back(key,
-                                 CacheEntry(file_stat.mtime, file_stat.size));
+      cache_entries.emplace_back(
+          key, CacheEntry(absl::FromTimeT(file_stat.mtime), file_stat.size));
     }
   }
 
-  LOG(INFO) << "walk_time_in_seconds=" << walk_timer.Get() << " "
+  LOG(INFO) << "walk_time_in_seconds=" << walk_timer.GetInSeconds() << " "
             << "total_cache_count=" << cache_entries.size() << " "
             << "total_size_in_byte=" << total_file_size;
 
@@ -311,7 +314,7 @@ void LocalOutputCache::WaitUntilReady() {
 
 void LocalOutputCache::AddCacheEntry(const SHA256HashValue& key,
                                      std::int64_t cache_size) {
-  time_t cache_mtime = time(nullptr);
+  const absl::Time cache_mtime = absl::Now();
   bool needs_wake_gc_thread = false;
   {
     AUTO_EXCLUSIVE_LOCK(lock, &entries_mu_);
@@ -465,7 +468,7 @@ void LocalOutputCache::RunGarbageCollection(GarbageCollectionStat* stat) {
     entries_.pop_front();
   }
 
-  stats_gc_total_time_ms_.Add(timer.GetInMs());
+  stats_gc_total_time_ms_.Add(timer.GetInIntMilliseconds());
 }
 
 void LocalOutputCache::WaitUntilGarbageCollectionThreadDone() {
@@ -562,7 +565,7 @@ bool LocalOutputCache::SaveOutput(const string& key,
   AddCacheEntry(key_hash, cache_amount_in_byte);
 
   stats_save_success_.Add(1);
-  stats_save_success_time_ms_.Add(timer.GetInMs());
+  stats_save_success_time_ms_.Add(timer.GetInIntMilliseconds());
   return true;
 }
 
@@ -622,7 +625,7 @@ bool LocalOutputCache::Lookup(const string& key, ExecResp* resp,
   }
 
   stats_lookup_success_.Add(1);
-  stats_lookup_success_time_ms_.Add(timer.GetInMs());
+  stats_lookup_success_time_ms_.Add(timer.GetInIntMilliseconds());
   return true;
 }
 

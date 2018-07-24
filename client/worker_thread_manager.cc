@@ -12,13 +12,15 @@
 #include <queue>
 #include <sstream>
 
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
-#include "socket_descriptor.h"
 #include "descriptor_poller.h"
 #include "glog/logging.h"
 #include "simple_timer.h"
+#include "socket_descriptor.h"
 #include "worker_thread.h"
 
 #ifdef _WIN32
@@ -247,10 +249,10 @@ void WorkerThreadManager::UnregisterPeriodicClosure(PeriodicClosureId id) {
         << "UnregisterPeriodicClosure id=" << id
         << " location="
         << (location ? location : "")
-        << " timer=" << timer.GetInMilliSeconds() << " [ms]";
-    CHECK_LT(timer.GetInMilliSeconds(), 60 * 1000)
+        << " timer=" << timer.GetInMilliseconds() << " [ms]";
+    CHECK_LT(timer.GetInMilliseconds(), 60 * 1000)
         << "UnregisterPeriodicClosure didn't finish in 60 seconds";
-    PlatformThread::Sleep(10);
+    absl::SleepFor(absl::Milliseconds(10));
   }
 }
 

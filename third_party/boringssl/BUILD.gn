@@ -58,7 +58,9 @@ if (os == "win") {
     asmflags = []
     include_dirs = [ "src/include" ]
 
-    if (cpu_arch == "x64") {
+    if (is_msan) {
+      public_configs = [ ":no_asm_config" ]
+    } else if (cpu_arch == "x64") {
       if (os == "mac") {
         sources += crypto_sources_mac_x86_64
       } else if (os == "linux") {

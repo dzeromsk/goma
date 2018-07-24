@@ -15,7 +15,6 @@
 
 #include "absl/strings/str_cat.h"
 #include "clang_tidy_flags.h"
-#include "file.h"
 #include "file_dir.h"
 #include "file_helper.h"
 #include "filesystem.h"

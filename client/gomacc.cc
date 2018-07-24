@@ -337,8 +337,9 @@ int main(int argc, char* argv[], const char* envp[]) {
     // For ChromiumOS.
     // TODO: support other platforms?
     float load = strtof(FLAGS_LOAD_AVERAGE_LIMIT.c_str(), nullptr);
+    const absl::Duration max_sleep_time = absl::Seconds(FLAGS_MAX_SLEEP_TIME);
     if (load >= 1.0 && FLAGS_MAX_SLEEP_TIME > 0) {
-      devtools_goma::WaitUntilLoadAvgLowerThan(load, FLAGS_MAX_SLEEP_TIME);
+      devtools_goma::WaitUntilLoadAvgLowerThan(load, max_sleep_time);
     } else {
       LOG(WARNING) << "Will not wait for the low load average because of "
                    << "wrong value."

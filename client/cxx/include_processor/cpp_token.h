@@ -20,14 +20,42 @@ namespace devtools_goma {
 
 struct CppToken {
   enum Type {
-    IDENTIFIER, STRING, NUMBER, SHARP, DOUBLESHARP, TRIPLEDOT,
-    SPACE, NEWLINE, ESCAPED, PUNCTUATOR, END, MACRO_PARAM,
-    MACRO_PARAM_VA_ARGS, CHAR_LITERAL,
+    IDENTIFIER,
+    STRING,
+    NUMBER,
+    SHARP,
+    DOUBLESHARP,
+    TRIPLEDOT,
+    SPACE,
+    NEWLINE,
+    ESCAPED,
+    PUNCTUATOR,
+    END,
+    MACRO_PARAM,
+    MACRO_PARAM_VA_ARGS,
+    CHAR_LITERAL,
+    VA_OPT,
 
     // Operators
     OP_BEGIN,
-    MUL = OP_BEGIN, DIV, MOD, ADD, SUB, RSHIFT, LSHIFT, GT, LT,
-    GE, LE, EQ, NE, AND, XOR, OR, LAND, LOR,
+    MUL = OP_BEGIN,
+    DIV,
+    MOD,
+    ADD,
+    SUB,
+    RSHIFT,
+    LSHIFT,
+    GT,
+    LT,
+    GE,
+    LE,
+    EQ,
+    NE,
+    AND,
+    XOR,
+    OR,
+    LAND,
+    LOR,
   };
 
   typedef int (*OperatorFunction)(int, int);
@@ -70,6 +98,7 @@ struct CppToken {
   void MakeMacroParam(size_t param_index);
   // For F(X, Y, ...), __VA_ARGS__ param_index is 2 in this case.
   void MakeMacroParamVaArgs(size_t param_index);
+  void MakeMacroParamVaOpt();
 
   string DebugString() const;
   string GetCanonicalString() const;
@@ -127,9 +156,12 @@ inline void CppToken::Append(const string& str) {
   string_value.append(str);
 }
 
+#ifndef MEMORY_SANITIZER
+// Shows false positive if following code is used with msan.
 inline bool CppToken::IsPuncChar(int c) const {
   return ((type == PUNCTUATOR || type >= OP_BEGIN) && v.int_value == c);
 }
+#endif  // !MEMORY_SANITIZER
 
 inline bool CppToken::IsOperator() const {
   return (type >= OP_BEGIN);
@@ -147,6 +179,13 @@ inline void CppToken::MakeMacroParamVaArgs(size_t param_index) {
   DCHECK_EQ("__VA_ARGS__", string_value);
   type = MACRO_PARAM_VA_ARGS;
   v.param_index = param_index;
+  string_value.clear();
+}
+
+inline void CppToken::MakeMacroParamVaOpt() {
+  DCHECK_EQ(IDENTIFIER, type);
+  DCHECK_EQ("__VA_OPT__", string_value);
+  type = VA_OPT;
   string_value.clear();
 }
 

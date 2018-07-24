@@ -14,6 +14,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "absl/time/time.h"
 #include "compiler_specific.h"
 #include "cpp_directive_parser.h"
 #include "cpp_parser.h"
@@ -751,6 +752,18 @@ TEST(CppParserTest, CharToken) {
   EXPECT_TRUE(cpp_parser.IsMacroDefined("LF_OK"));
 
   EXPECT_TRUE(cpp_parser.IsMacroDefined("INCLUDE_LLIMITS"));
+}
+
+TEST(CppParserTest, DateTimeToken) {
+  CppParser cpp_parser;
+
+  // We care that the date/time string format is valid. The value is not
+  // important.
+  absl::Time dummy_time;
+  EXPECT_TRUE(absl::ParseTime("%b %d %Y", cpp_parser.GetDate().string_value,
+              &dummy_time, nullptr));
+  EXPECT_TRUE(absl::ParseTime("%H:%M:%S", cpp_parser.GetTime().string_value,
+              &dummy_time, nullptr));
 }
 
 TEST(CppParserTest, MacroSetChanged) {

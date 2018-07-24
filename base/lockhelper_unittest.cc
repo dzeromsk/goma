@@ -8,6 +8,8 @@
 #include <memory>
 
 #include "absl/memory/memory.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "gtest/gtest.h"
 #include "platform_thread.h"
 
@@ -29,13 +31,13 @@ class BasicLockTestThread : public PlatformThread::Delegate {
     for (int i = 0; i < 10; i++) {
       lock_->Acquire();
       acquired_++;
-      PlatformThread::Sleep(rand() % 20);
+      absl::SleepFor(absl::Milliseconds(rand() % 20));
       lock_->Release();
     }
     for (int i = 0; i < 10; i++) {
       if (lock_->Try()) {
         acquired_++;
-        PlatformThread::Sleep(rand() % 20);
+        absl::SleepFor(absl::Milliseconds(rand() % 20));
         lock_->Release();
       }
     }
@@ -66,20 +68,20 @@ bool BasicLockTest() {
   for (int i = 0; i < 10; i++) {
     lock.Acquire();
     acquired++;
-    PlatformThread::Sleep(rand() % 20);
+    absl::SleepFor(absl::Milliseconds(rand() % 20));
     lock.Release();
   }
   for (int i = 0; i < 10; i++) {
     if (lock.Try()) {
       acquired++;
-      PlatformThread::Sleep(rand() % 20);
+      absl::SleepFor(absl::Milliseconds(rand() % 20));
       lock.Release();
     }
   }
   for (int i = 0; i < 5; i++) {
     lock.Acquire();
     acquired++;
-    PlatformThread::Sleep(rand() % 20);
+    absl::SleepFor(absl::Milliseconds(rand() % 20));
     lock.Release();
   }
 
@@ -168,7 +170,7 @@ class MutexLockTestThread : public PlatformThread::Delegate {
     for (int i = 0; i < 40; i++) {
       lock->Acquire();
       int v = *value;
-      PlatformThread::Sleep(rand() % 10);
+      absl::SleepFor(absl::Milliseconds(rand() % 10));
       *value = v + 1;
       lock->Release();
     }
@@ -346,14 +348,14 @@ class ReadWriteLockBasicTestThread : public PlatformThread::Delegate {
     for (int i = 0; i < 10; i++) {
       AutoSharedLock shared_autolock(lock_);
       int num1 = *num_;
-      PlatformThread::Sleep(rand() % 20);
+      absl::SleepFor(absl::Milliseconds(rand() % 20));
       int num2 = *num_;
       EXPECT_EQ(num1, num2);
     }
     for (int i = 0; i < 10; i++) {
       AutoExclusiveLock exclusive_autolock(lock_);
       *num_ += 1;
-      PlatformThread::Sleep(rand() % 20);
+      absl::SleepFor(absl::Milliseconds(rand() % 20));
     }
   }
 
@@ -432,7 +434,7 @@ bool ReadWriteLockAcquireExclusiveTest1() {
 
   // Wait until |thread| is really started.
   while (!thread.started()) {
-    PlatformThread::Sleep(1);
+    absl::SleepFor(absl::Milliseconds(1));
   }
 
   // Try to run the thread.
@@ -463,7 +465,7 @@ bool ReadWriteLockAcquireExclusiveTest2() {
 
   // Wait until |thread| is really started.
   while (!thread.started()) {
-    PlatformThread::Sleep(1);
+    absl::SleepFor(absl::Milliseconds(1));
   }
 
   EXPECT_EQ(num, 0);
@@ -532,7 +534,7 @@ bool ReadWriteLockAcquireSharedWithExclusiveLockTest() {
 
   // Wait until |thread| is really started.
   while (!thread.started()) {
-    PlatformThread::Sleep(1);
+    absl::SleepFor(absl::Milliseconds(1));
   }
 
   EXPECT_EQ(num, 0);

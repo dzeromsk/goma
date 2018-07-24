@@ -16,4 +16,10 @@ Options CreationMode(int mode) {
   return opt;
 }
 
+Options Overwrite() {
+  Options opt;
+  opt.overwrite_ = true;
+  return opt;
+}
+
 }  // namespace file

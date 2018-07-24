@@ -19,7 +19,6 @@
 #endif
 
 #include "absl/strings/match.h"
-#include "file.h"
 #include "file_dir.h"
 #include "file_stat.h"
 #include "glog/logging.h"
@@ -40,13 +39,13 @@ void LogCleaner::AddLogBasename(const string& basename) {
   basenames_.push_back(basename);
 }
 
-void LogCleaner::CleanOldLogs(time_t t) {
+void LogCleaner::CleanOldLogs(absl::Time time) {
   const std::vector<string>& log_dirs = google::GetLoggingDirectories();
   LOG(INFO) << "clean old logs in " << log_dirs;
 
   std::set<string> old_logs;
   for (const auto& dir : log_dirs) {
-    FindOldLogsInDir(dir, t, &old_logs);
+    FindOldLogsInDir(dir, time, &old_logs);
   }
   if (old_logs.empty()) {
     LOG(INFO) << "no old logs found.";
@@ -60,7 +59,7 @@ void LogCleaner::CleanOldLogs(time_t t) {
   }
 }
 
-void LogCleaner::FindOldLogsInDir(const string& log_dir, time_t t,
+void LogCleaner::FindOldLogsInDir(const string& log_dir, absl::Time time,
                                   std::set<string>* old_logs) {
   VLOG(1) << "log_dir:" << log_dir;
   std::vector<DirEntry> entries;
@@ -88,7 +87,7 @@ void LogCleaner::FindOldLogsInDir(const string& log_dir, time_t t,
     FileStat file_stat(log_filename);
     if (!file_stat.IsValid()) {
       LOG(ERROR) << "Failed to get file id:" << log_filename;
-    } else if (file_stat.mtime < t) {
+    } else if (absl::FromTimeT(file_stat.mtime) < time) {
       VLOG(1) << "old log:" << log_filename;
       old_logs->insert(log_filename);
     } else {

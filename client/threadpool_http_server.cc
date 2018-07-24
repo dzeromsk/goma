@@ -34,17 +34,18 @@
 #include <vector>
 
 #include "absl/strings/str_split.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
-#include "socket_descriptor.h"
-#include "file.h"
 #include "fileflag.h"
 #include "glog/logging.h"
 #include "goma_ipc_addr.h"
 #include "goma_ipc_peer.h"
 #include "http_util.h"
+#include "socket_descriptor.h"
 #ifdef _WIN32
 #include "named_pipe_server_win.h"
 #endif
@@ -156,7 +157,7 @@ void ThreadpoolHttpServer::StartIPC(
       socket_ok = true;
       break;
     }
-    devtools_goma::PlatformThread::Sleep(1);
+    absl::SleepFor(absl::Milliseconds(1));
   }
   CHECK(socket_ok) << "Failed to open " << addr;
   LOG(INFO) << "unix domain:" << addr;
@@ -318,7 +319,7 @@ bool ThreadpoolHttpServer::RequestFromNamedPipe::CheckCredential() {
 }
 
 void ThreadpoolHttpServer::RequestFromNamedPipe::Start() {
-  stat_.waiting_time_msec = stat_.timer.GetInMs();
+  stat_.waiting_time_msec = stat_.timer.GetInIntMilliseconds();
   stat_.timer.Start();
   thread_id_ = wm_->GetCurrentThreadId();
 
@@ -350,7 +351,7 @@ void ThreadpoolHttpServer::RequestFromNamedPipe::Start() {
     server_->HandleIncoming(this);
     return;
   }
-  stat_.read_req_time_msec = stat_.timer.GetInMs();
+  stat_.read_req_time_msec = stat_.timer.GetInIntMilliseconds();
   if (!ParseRequestLine(request_,
                         &method_, &req_path_, &query_)) {
     LOG(ERROR) << "parse request line failed";
@@ -365,7 +366,7 @@ void ThreadpoolHttpServer::RequestFromNamedPipe::Start() {
 
 void ThreadpoolHttpServer::RequestFromNamedPipe::SendReply(
     const string& response) {
-  stat_.handler_time_msec = stat_.timer.GetInMs();
+  stat_.handler_time_msec = stat_.timer.GetInIntMilliseconds();
   stat_.resp_size = response.size();
   stat_.timer.Start();
   req_->SendReply(response);
@@ -510,7 +511,7 @@ bool ThreadpoolHttpServer::RequestFromSocket::IsTrusted() {
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::Start() {
-  stat_.waiting_time_msec = stat_.timer.GetInMs();
+  stat_.waiting_time_msec = stat_.timer.GetInIntMilliseconds();
   stat_.timer.Start();
   thread_id_ = wm_->GetCurrentThreadId();
   d_ = wm_->RegisterSocketDescriptor(std::move(sock_),
@@ -612,7 +613,7 @@ void ThreadpoolHttpServer::RequestFromSocket::DoRead() {
       // not fully received yet.
       return;
     }
-    stat_.read_req_time_msec = stat_.timer.GetInMs();
+    stat_.read_req_time_msec = stat_.timer.GetInIntMilliseconds();
     if (ParseRequestLine(req, &method_, &req_path_, &query_)) {
       d_->StopRead();
       stat_.req_size = request_len_;
@@ -648,7 +649,7 @@ void ThreadpoolHttpServer::RequestFromSocket::DoWrite() {
   response_written_ += n;
   if (response_written_ == response_.size()) {
     d_->StopWrite();
-    stat_.write_resp_time_msec = stat_.timer.GetInMs();
+    stat_.write_resp_time_msec = stat_.timer.GetInIntMilliseconds();
     wm_->RunClosureInThread(
         FROM_HERE,
         thread_id_,
@@ -756,7 +757,7 @@ void ThreadpoolHttpServer::RequestFromSocket::Finish() {
 void ThreadpoolHttpServer::RequestFromSocket::SendReply(
     const string& response) {
   response_ = response;
-  stat_.handler_time_msec = stat_.timer.GetInMs();
+  stat_.handler_time_msec = stat_.timer.GetInIntMilliseconds();
   stat_.resp_size = response.size();
   stat_.timer.Start();
   d_->NotifyWhenWritable(
@@ -1006,7 +1007,7 @@ int ThreadpoolHttpServer::Loop() {
           continue;
         PLOG(ERROR) << "accept unix domain socket";
         if (errno == EMFILE) {
-          PlatformThread::Sleep(100000);
+          absl::SleepFor(absl::Seconds(100));
           continue;
         }
         return 1;

@@ -44,7 +44,6 @@
 #include "compiler_specific.h"
 #include "cxx/include_processor/cpp_include_processor.h"
 #include "cxx/include_processor/include_file_utils.h"
-#include "file.h"
 #include "file_dir.h"
 #include "file_hash_cache.h"
 #include "file_helper.h"
@@ -62,7 +61,8 @@
 #include "ioutil.h"
 #include "java/jar_parser.h"
 #include "java_flags.h"
-#include "linker_input_processor.h"
+#include "linker/linker_input_processor/linker_input_processor.h"
+#include "linker/linker_input_processor/thinlto_import_processor.h"
 #include "local_output_cache.h"
 #include "lockhelper.h"
 #include "multi_http_rpc.h"
@@ -72,7 +72,6 @@
 #include "path_util.h"
 #include "simple_timer.h"
 #include "subprocess_task.h"
-#include "thinlto_import_processor.h"
 #include "timestamp.h"
 #include "util.h"
 #include "vc_flags.h"
@@ -468,7 +467,7 @@ class CompileTask::InputFileTask {
   bool missed_content() const { return missed_content_; }
   bool need_hash_only() const { return need_hash_only_; }
   time_t mtime() const { return file_stat_.mtime; }
-  int GetInMs() const { return timer_.GetInMs(); }
+  const SimpleTimer& timer() const { return timer_; }
   ssize_t file_size() const { return file_stat_.size; }
   const string& old_hash_key() const { return old_hash_key_; }
   const string& hash_key() const { return blob_uploader_->hash_key(); }
@@ -724,7 +723,7 @@ class CompileTask::OutputFileTask {
 
   CompileTask* task() const { return task_; }
   const ExecResult_Output& output() const { return output_; }
-  int GetInMs() const { return timer_.GetInMs(); }
+  const SimpleTimer& timer() const { return timer_; }
   bool success() const { return success_; }
   bool IsInMemory() const {
     return info_->tmp_filename.empty();
@@ -811,7 +810,7 @@ class CompileTask::LocalOutputFileTask {
   CompileTask* task() const { return task_; }
   const string& filename() const { return filename_; }
   const FileBlob& blob() const { return blob_; }
-  int GetInMs() const { return timer_.GetInMs(); }
+  const SimpleTimer& timer() const { return timer_; }
   bool success() const { return success_; }
 
  private:
@@ -926,7 +925,7 @@ void CompileTask::Init(CompileService::RpcController* rpc,
 void CompileTask::Start() {
   VLOG(1) << trace_id_ << " start";
   CHECK_EQ(INIT, state_);
-  stats_->set_pending_time(handler_timer_.GetInMs());
+  stats_->set_pending_time(handler_timer_.GetInIntMilliseconds());
 
   // We switched to new thread.
   DCHECK(!BelongsToCurrentThread());
@@ -996,8 +995,8 @@ void CompileTask::Start() {
         LOG(INFO) << trace_id_ << " copy " << input_filename
                   << " " << output_filename;
         if (input_filename != output_filename) {
-          if (File::Copy(input_filename.c_str(),
-                         output_filename.c_str(), true)) {
+          if (file::Copy(input_filename, output_filename, file::Overwrite())
+                  .ok()) {
             VLOG(1) << trace_id_ << " copy ok";
             resp_->mutable_result()->set_exit_status(0);
           } else {
@@ -1096,7 +1095,7 @@ void CompileTask::Start() {
     } else if (delay_subproc_ms <= 0) {
       stats_->set_local_run_reason("slow goma");
       SetupSubProcess();
-    } else if (!service_->http_client()->IsHealthy()) {
+    } else if (!service_->http_client()->IsHealthyRecently()) {
       stats_->set_local_run_reason("goma unhealthy");
       SetupSubProcess();
     } else {
@@ -1155,7 +1154,7 @@ bool CompileTask::IsGomaccRunning() {
                               gomacc_pid_));
     running = proc.valid();
   }
-  int ms = timer.GetInMs();
+  int ms = timer.GetInIntMilliseconds();
   LOG_IF(WARNING, ms > 100) << trace_id_
                             << " SLOW IsGomaccRunning in " << ms << " msec";
   if (!running) {
@@ -1221,7 +1220,8 @@ void CompileTask::ProcessFileRequest() {
   // FILE_RESP: failed with missing inputs, and retry
   CHECK(state_ == SETUP || state_ == FILE_REQ || state_ == FILE_RESP)
       << trace_id_ << " " << StateName(state_);
-  stats_->add_include_fileload_pending_time(file_request_timer_.GetInMs());
+  stats_->add_include_fileload_pending_time(
+      file_request_timer_.GetInIntMilliseconds());
   file_request_timer_.Start();
   if (abort_) {
     ProcessPendingFileRequest();
@@ -1374,9 +1374,10 @@ void CompileTask::ProcessFileRequestDone() {
   VLOG(1) << trace_id_ << " file req done";
   CHECK(BelongsToCurrentThread());
   CHECK_EQ(FILE_REQ, state_);
-  stats_->add_include_fileload_run_time(file_request_timer_.GetInMs());
-  stats_->set_include_fileload_time(
-      include_timer_.GetInMs() - stats_->include_preprocess_time());
+  stats_->add_include_fileload_run_time(
+      file_request_timer_.GetInIntMilliseconds());
+  stats_->set_include_fileload_time(include_timer_.GetInIntMilliseconds() -
+                                    stats_->include_preprocess_time());
 
   VLOG(1) << trace_id_
           << " input files processing preprocess "
@@ -1398,7 +1399,7 @@ void CompileTask::ProcessFileRequestDone() {
       return;
     }
     AddErrorToResponse(TO_LOG, "Failed to process file request", true);
-    if (service_->http_client()->IsHealthy() &&
+    if (service_->http_client()->IsHealthyRecently() &&
         stats_->num_uploading_input_file_size() > 0 &&
         stats_->num_uploading_input_file(
             stats_->num_uploading_input_file_size() - 1) > 0) {
@@ -1546,7 +1547,7 @@ void CompileTask::ProcessCallExecDone() {
   // server error message logged, but not send back to user.
   resp_->clear_error_message();
 
-  stats_->add_rpc_call_time(rpc_call_timer_.GetInMs());
+  stats_->add_rpc_call_time(rpc_call_timer_.GetInIntMilliseconds());
 
   if (http_rpc_status_->master_trace_id.empty() ||
       http_rpc_status_->master_trace_id == http_rpc_status_->trace_id) {
@@ -1637,8 +1638,11 @@ void CompileTask::ProcessCallExecDone() {
     LOG(WARNING) << trace_id_ << " rpc err=" << err << " "
                  << (err == ERR_TIMEOUT ? " timed out" : " failed")
                  << " " << http_rpc_status_->err_message;
-    if (IsSubprocRunning()) {
-      VLOG(1) << trace_id_ << " goma failed, but subprocess running.";
+    if (IsSubprocRunning() &&
+        http_rpc_status_->state != HttpClient::Status::RECEIVING_RESPONSE) {
+      // If rpc was failed while receiving response, goma should retry Exec call
+      // because the reponse will be replied from cache with high probability.
+      LOG(WARNING) << trace_id_ << " goma failed, but subprocess running.";
       state_ = LOCAL_RUN;
       stats_->set_local_run_reason("fail goma, local run started in CALL_EXEC");
       return;
@@ -1676,7 +1680,7 @@ void CompileTask::ProcessCallExecDone() {
         << trace_id_ << " missing inputs:" << resp_->missing_input_size()
         << " but retry_reason set:" << retry_reason;
   } else if (!retry_reason.empty()) {
-    if (service_->http_client()->IsHealthy()) {
+    if (service_->http_client()->IsHealthyRecently()) {
       LOG(INFO) << trace_id_ << " exec retry:"
                 << stats_->exec_request_retry()
                 << " error=" << resp_->error()
@@ -1715,6 +1719,9 @@ void CompileTask::ProcessCallExecDone() {
                      << " " << retry_reason
                      << " but http is healthy";
       }
+    } else {
+      LOG(WARNING) << trace_id_
+                   << " won't retry because http client is not healthy.";
     }
     CheckNoMatchingCommandSpec(retry_reason);
     ProcessFinished("fail in call exec");
@@ -1931,7 +1938,7 @@ void CompileTask::ProcessFileResponseDone() {
   CHECK(BelongsToCurrentThread());
   CHECK_EQ(FILE_RESP, state_);
 
-  stats_->set_file_response_time(file_response_timer_.GetInMs());
+  stats_->set_file_response_time(file_response_timer_.GetInIntMilliseconds());
 
   if (abort_) {
     ProcessFinished("aborted in file resp");
@@ -2528,7 +2535,7 @@ void CompileTask::CommitOutput(bool use_remote) {
             << " " << hash_key;
     LOG_IF(ERROR, !info.content.empty())
         << trace_id_ << " content was not released: " << filename;
-    int ms = timer.GetInMs();
+    int ms = timer.GetInIntMilliseconds();
     LOG_IF(WARNING, ms > 100) << trace_id_
                               << " CommitOutput " << ms << " msec"
                               << " size=" << info.size
@@ -2624,7 +2631,7 @@ void CompileTask::ReplyResponse(const string& msg) {
     }
   }
   responsecode_ = 200;
-  stats_->set_handler_time(handler_timer_.GetInMs());
+  stats_->set_handler_time(handler_timer_.GetInIntMilliseconds());
   gomacc_pid_ = SubProcessState::kInvalidPid;
 
   static const int kSlowTaskInMs = 5 * 60 * 1000;  // 5 mins
@@ -2782,7 +2789,7 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
 
   if ((state_ < FINISHED && !abort_) || state_ == LOCAL_RUN) {
     // elapsed total time for current running process.
-    (*root)["elapsed"] = handler_timer_.GetInMs();
+    (*root)["elapsed"] = handler_timer_.GetInIntMilliseconds();
   }
   if (stats_->handler_time()) (*root)["time"] = stats_->handler_time();
   if (gomacc_pid_ != SubProcessState::kInvalidPid)
@@ -3525,7 +3532,7 @@ void CompileTask::FillCompilerInfoDone(
     std::unique_ptr<CompileService::GetCompilerInfoParam> param) {
   CHECK_EQ(SETUP, state_);
 
-  int msec = compiler_info_timer_.GetInMs();
+  int msec = compiler_info_timer_.GetInIntMilliseconds();
   stats_->set_compiler_info_process_time(msec);
   std::ostringstream ss;
   ss << " cache_hit=" << param->cache_hit
@@ -3692,7 +3699,7 @@ void CompileTask::UpdateRequiredFilesDone(bool ok) {
   }
   req_->clear_input();
 
-  stats_->set_include_preprocess_time(include_timer_.GetInMs());
+  stats_->set_include_preprocess_time(include_timer_.GetInIntMilliseconds());
   stats_->set_depscache_used(depscache_used_);
 
   LOG_IF(WARNING, stats_->include_processor_run_time() > 1000)
@@ -4018,7 +4025,8 @@ void CompileTask::RunCppIncludeProcessor(
   // Pass ownership temporary to IncludeProcessor thread.
   param->file_stat_cache->AcquireOwner();
 
-  stats_->set_include_processor_wait_time(include_wait_timer_.GetInMs());
+  stats_->set_include_processor_wait_time(
+      include_wait_timer_.GetInIntMilliseconds());
   LOG_IF(WARNING, stats_->include_processor_wait_time() > 1000)
       << trace_id_ << " SLOW start IncludeProcessor"
       << " in " << stats_->include_processor_wait_time() << " msec";
@@ -4029,7 +4037,7 @@ void CompileTask::RunCppIncludeProcessor(
       param->input_filename, flags_->cwd_for_include_processor(), *flags_,
       ToCxxCompilerInfo(compiler_info_state_.get()->info()),
       &param->required_files, param->file_stat_cache.get());
-  stats_->set_include_processor_run_time(include_timer.GetInMs());
+  stats_->set_include_processor_run_time(include_timer.GetInIntMilliseconds());
 
   if (!param->result_status) {
     LOG(WARNING) << trace_id_
@@ -4273,7 +4281,7 @@ void CompileTask::InputFileTaskFinished(InputFileTask* input_file_task) {
     return;
   }
   DCHECK(!hash_key.empty()) << filename;
-  stats_->add_input_file_time(input_file_task->GetInMs());
+  stats_->add_input_file_time(input_file_task->timer().GetInIntMilliseconds());
   stats_->add_input_file_size(file_size);
   if (!input_file_task->UpdateInputInTask(this)) {
     LOG(ERROR) << trace_id_ << " bad input data "
@@ -4722,7 +4730,7 @@ void CompileTask::OutputFileTaskFinished(
     }
     return;
   }
-  int output_file_time = output_file_task->GetInMs();
+  int output_file_time = output_file_task->timer().GetInIntMilliseconds();
   LOG_IF(WARNING, output_file_time > 60 * 1000)
       << trace_id_
       << " SLOW output file:"
@@ -4885,7 +4893,8 @@ void CompileTask::LocalOutputFileTaskFinished(
     return;
   }
   const FileBlob& blob = local_output_file_task->blob();
-  stats_->add_local_output_file_time(local_output_file_task->GetInMs());
+  stats_->add_local_output_file_time(
+      local_output_file_task->timer().GetInIntMilliseconds());
   stats_->add_local_output_file_size(blob.file_size());
 }
 
@@ -4911,7 +4920,8 @@ void CompileTask::MaybeRunLocalOutputFileCallback(bool task_finished) {
 void CompileTask::UpdateStats() {
   CHECK(state_ >= FINISHED || abort_);
 
-  resp_->set_compiler_proxy_time(handler_timer_.GetInMs() / 1000.0);
+  resp_->set_compiler_proxy_time(
+      handler_timer_.GetInIntMilliseconds() / 1000.0);
   resp_->set_compiler_proxy_include_preproc_time(
       stats_->include_preprocess_time() / 1000.0);
   resp_->set_compiler_proxy_include_fileload_time(
@@ -5320,7 +5330,7 @@ void CompileTask::AddErrorToResponse(
       LOG(WARNING) << trace_id_ << " " << error_message;
     std::ostringstream msg;
     msg << "compiler_proxy:";
-    msg << handler_timer_.GetInMs() << "ms: ";
+    msg << handler_timer_.GetInIntMilliseconds() << "ms: ";
     msg << error_message;
     if (dest == TO_USER) {
       DCHECK(set_error) << trace_id_

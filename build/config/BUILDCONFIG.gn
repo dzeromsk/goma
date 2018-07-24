@@ -54,6 +54,11 @@ if (current_os == "") {
 
 is_posix = os == "mac" || os == "linux"
 using_sanitizer = is_asan || is_tsan || is_msan
+declare_args() {
+  # Since sanitizers kills subprocess on violation with messages shown to
+  # stderr, let me automatically enable the feature for them.
+  keep_subproc_stderr = using_sanitizer
+}
 
 # Since we cannot read result of perftools if we create position independent
 # executable (PIE), let me disable hardening if profiling options are set.
@@ -111,6 +116,10 @@ if (is_msan) {
 }
 if (enable_lzma) {
   default_compiler_configs += [ "//build/config/compiler:enable_lzma" ]
+}
+
+if (keep_subproc_stderr) {
+  default_compiler_configs += [ "//build/config/compiler:keep_subproc_stderr" ]
 }
 
 if (with_cpu_profiling) {

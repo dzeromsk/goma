@@ -10,7 +10,6 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #endif
-#include <time.h>
 
 #include <deque>
 #include <string>
@@ -18,11 +17,13 @@
 #include <utility>
 #include <vector>
 
+#include "absl/time/time.h"
+#include "absl/types/optional.h"
 #include "basictypes.h"
 #include "lockhelper.h"
+#include "scoped_fd.h"
 #include "simple_timer.h"
 #include "socket_factory.h"
-#include "scoped_fd.h"
 
 using std::string;
 
@@ -66,7 +67,7 @@ class SocketPool : public SocketFactory {
     int ai_socktype;
     int ai_protocol;
     string name;
-    time_t error_timestamp;
+    absl::optional<absl::Time> error_timestamp;
 
     const struct sockaddr* addr_ptr() const;
     void Invalidate();
@@ -87,8 +88,8 @@ class SocketPool : public SocketFactory {
   // Returns ERR_TIMEOUT if timeout.
   Errno InitializeUnlocked() EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
-  // Sets error_timetamp in AddrData for sock to t
-  void SetErrorTimestampUnlocked(int sock, time_t t);
+  // Sets error_timetamp in AddrData for sock to |time|.
+  void SetErrorTimestampUnlocked(int sock, absl::optional<absl::Time> time);
 
   // This host:port is for means the address we will connect directly.
   // So, this can be either a destination address or a proxy address.

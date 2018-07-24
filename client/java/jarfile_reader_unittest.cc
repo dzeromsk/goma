@@ -11,8 +11,8 @@
 
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
-#include "file.h"
 #include "file_helper.h"
+#include "filesystem.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "gtest/gtest.h"
@@ -49,7 +49,7 @@ class JarFileReaderTest : public testing::Test {
     const std::string source_file =
         file::JoinPath(test_dir, test_name + ".jar");
     const std::string output_file = tmpdir_util_->FullPath(archive);
-    CHECK(File::Copy(source_file.c_str(), output_file.c_str(), false));
+    CHECK(file::Copy(source_file, output_file, file::Defaults()).ok());
     return output_file;
   }
 

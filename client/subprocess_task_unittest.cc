@@ -13,6 +13,8 @@
 
 #include "absl/memory/memory.h"
 #include "absl/synchronization/notification.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "basictypes.h"
 #include "callback.h"
 #include "env_flags.h"
@@ -85,7 +87,7 @@ class SubProcessTaskTest : public ::testing::Test {
     int max_wait = 1000;
     while (!SubProcessControllerClient::Get()->Initialized()) {
       // TODO: use condvar on initialized_ instead of sleep.
-      PlatformThread::Sleep(100);
+      absl::SleepFor(absl::Milliseconds(100));
       if (--max_wait <= 0) {
         LOG(FATAL) << "SubProcessControllerClient not running.";
       }
@@ -214,7 +216,7 @@ class SubProcessTaskTest : public ::testing::Test {
 
     ASSERT_TRUE(c.started_.WaitForNotificationWithTimeout(absl::Seconds(10)));
     while (SubProcessState::PENDING == c.s_->state()) {
-      PlatformThread::Sleep(100);
+      absl::SleepFor(absl::Milliseconds(100));
     }
 
     EXPECT_EQ(SubProcessState::RUN, c.s_->state());
@@ -288,7 +290,7 @@ class SubProcessTaskTest : public ::testing::Test {
 
     ASSERT_TRUE(c.started_.WaitForNotificationWithTimeout(absl::Seconds(10)));
     while (SubProcessState::PENDING == c.s_->state()) {
-      PlatformThread::Sleep(10);
+      absl::SleepFor(absl::Milliseconds(10));
     }
 
     EXPECT_EQ(SubProcessState::RUN, c.s_->state());

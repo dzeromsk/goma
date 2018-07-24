@@ -11,7 +11,11 @@
 #include <utility>
 #include <vector>
 
+#include "absl/memory/memory.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
@@ -23,7 +27,7 @@ MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 MSVC_POP_WARNING()
-#include "ioutil.h"
+#include "http_util.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_data.pb.h"
 MSVC_POP_WARNING()
@@ -44,7 +48,8 @@ class HttpRPC::Request : public HttpClient::Request {
   }
   ~Request() override {}
 
-  string CreateMessage() const override = 0;
+  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> NewStream()
+      const override = 0;
 
   std::unique_ptr<HttpClient::Request> Clone() const override = 0;
 
@@ -64,7 +69,8 @@ class HttpRPC::CallRequest : public HttpRPC::Request {
     compression_level_ = level;
     accept_encoding_ = accept_encoding;
   }
-  string CreateMessage() const override;
+  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>
+    NewStream() const override;
 
   std::unique_ptr<HttpClient::Request> Clone() const override {
     return std::unique_ptr<HttpClient::Request>(
@@ -86,13 +92,23 @@ class HttpRPC::Response : public HttpClient::Response {
   }
   ~Response() override {}
 
+  HttpClient::Response::Body* NewBody(
+      size_t content_length, bool is_chunked,
+      EncodingType encoding_type) override {
+    response_body_ =
+        absl::make_unique<HttpResponse::Body>(
+            content_length, is_chunked, encoding_type);
+    return response_body_.get();
+  }
+
  protected:
-  void ParseBody(google::protobuf::io::ZeroCopyInputStream* input) override = 0;
+  void ParseBody() override;
 
   google::protobuf::Message* resp_;
   HttpRPC::Status* status_;
 
  private:
+  std::unique_ptr<HttpResponse::Body> response_body_;
   DISALLOW_COPY_AND_ASSIGN(Response);
 };
 
@@ -102,7 +118,6 @@ class HttpRPC::CallResponse : public HttpRPC::Response {
                HttpRPC::Status* status)
       : Response(resp, status) {}
   ~CallResponse() override {}
-  void ParseBody(google::protobuf::io::ZeroCopyInputStream* input) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CallResponse);
@@ -197,16 +212,20 @@ int HttpRPC::Ping(WorkerThreadManager* wm,
   // on a thread in the worker thread manager only.
   // TODO: use conditional variable to wait?
   while (!ping_status->finished) {
-    PlatformThread::Sleep(100);
+    absl::SleepFor(absl::Milliseconds(100));
     if (timeout_secs > 0 &&
-        timer->GetInNanoSeconds() > timeout_secs * 1000000000) {
+        timer->GetInNanoseconds() > timeout_secs * 1000000000) {
       // TODO: fix HttpRPC's timeout.
       LOG(ERROR) << "ping timed out, but not finished yet."
-                 << "timer=" << timer->GetInMilliSeconds() << " [ms]";
+                 << "timer=" << timer->GetInMilliseconds() << " [ms]";
       break;
     }
   }
-  *status = *ping_status;
+  if (ping_status->finished) {
+    *status = *ping_status;
+  } else {
+    status->err = ERR_TIMEOUT;
+  }
   wm->RunClosure(
       FROM_HERE,
       NewCallback(this, &HttpRPC::PingDone,
@@ -229,7 +248,7 @@ void HttpRPC::PingDone(std::unique_ptr<Status> status,
                        std::unique_ptr<SimpleTimer> timer) {
   LOG(INFO) << "Wait ping status " << status.get();
   Wait(status.get());
-  int round_trip_time = timer->GetInMs();
+  int round_trip_time = timer->GetInIntMilliseconds();
   LOG_IF(WARNING, !status->connect_success)
       << "failed to connect to backend servers";
   LOG_IF(WARNING, status->err == ERR_TIMEOUT)
@@ -281,8 +300,12 @@ void HttpRPC::CallWithCallback(
     OneshotClosure* callback) {
   std::unique_ptr<CallRequest> call_req(new CallRequest(req, status));
   if (IsCompressionEnabled()) {
+    VLOG(2) << "compression enabled level=" << options_.compression_level
+            << " accept_encoding=" << options_.accept_encoding;
     call_req->EnableCompression(
         options_.compression_level, options_.accept_encoding);
+  } else {
+    VLOG(2) << "compression is not enabled";
   }
   std::unique_ptr<Request> http_req = std::move(call_req);
   client_->InitHttpRequest(http_req.get(), "POST", path);
@@ -358,13 +381,11 @@ void HttpRPC::DisableCompression() {
 void HttpRPC::EnableCompression(absl::string_view header) {
   AUTOLOCK(lock, &mu_);
   absl::string_view::size_type accept_encoding =
-      header.find("Accept-Encoding: deflate");
+      header.find(absl::StrCat(kAcceptEncoding, ": deflate"));
   if (accept_encoding != absl::string_view::npos) {
     if (!compression_enabled_)
       LOG(INFO) << "Compression enabled";
     compression_enabled_ = true;
-  } else {
-    compression_enabled_ = false;
   }
 }
 
@@ -384,12 +405,14 @@ HttpRPC::CallRequest::CallRequest(
       compression_level_(0) {
 }
 
-string HttpRPC::CallRequest::CreateMessage() const {
+std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>
+HttpRPC::CallRequest::NewStream() const {
+  std::vector<std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>>
+      streams;
   std::vector<string> headers;
   if (compression_level_ > 0 && accept_encoding_ != "" && req_) {
     string compressed;
-    headers.push_back(HttpClient::Request::CreateHeader(
-        "Accept-Encoding", accept_encoding_));
+    headers.push_back(CreateHeader(kAcceptEncoding, accept_encoding_));
     SimpleTimer compression_timer;
     google::protobuf::io::StringOutputStream stream(&compressed);
     google::protobuf::io::GzipOutputStream::Options options;
@@ -403,13 +426,18 @@ string HttpRPC::CallRequest::CreateMessage() const {
     } else if (compressed.size() > 1 && (compressed[1] >> 5 & 1)) {
       LOG(WARNING) << "response has FDICT, which should not be supported";
     } else {
-      headers.push_back(
-          HttpClient::Request::CreateHeader("Content-Encoding", "deflate"));
+      headers.push_back(CreateHeader(kContentEncoding, "deflate"));
       status_->raw_req_size = gzip_stream.ByteCount();
       absl::string_view body(compressed);
       // Omit zlib header (since server assumes no zlib header).
       body.remove_prefix(2);
-      return BuildMessage(headers, body);
+      streams.reserve(2);
+      streams.push_back(
+          absl::make_unique<StringInputStream>(
+              BuildHeader(headers, body.size())));
+      streams.push_back(
+          absl::make_unique<StringInputStream>(string(body)));
+      return absl::make_unique<ChainedInputStream>(std::move(streams));
     }
   } else {
     VLOG(1) << "compression unavailable.";
@@ -421,13 +449,25 @@ string HttpRPC::CallRequest::CreateMessage() const {
     req_->SerializeToString(&raw_body);
   }
   status_->raw_req_size = raw_body.size();
-  return BuildMessage(headers, raw_body);
+  streams.reserve(2);
+  streams.push_back(
+      absl::make_unique<StringInputStream>(
+          BuildHeader(headers, raw_body.size())));
+  streams.push_back(
+      absl::make_unique<StringInputStream>(std::move(raw_body)));
+  return absl::make_unique<ChainedInputStream>(std::move(streams));
 }
 
-void HttpRPC::CallResponse::ParseBody(
-    google::protobuf::io::ZeroCopyInputStream* input) {
+void HttpRPC::Response::ParseBody() {
   if (resp_) {
-    if (!resp_->ParseFromZeroCopyStream(input)) {
+    std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> input =
+        response_body_->ParsedStream();
+    if (input == nullptr) {
+      err_message_ = "failed to create parsed stream";
+      result_ = FAIL;
+      return;
+    }
+    if (!resp_->ParseFromZeroCopyStream(input.get())) {
       LOG(WARNING) << trace_id_ << " Parse response failed";
       err_message_ = "Parse response failed";
       result_ = FAIL;

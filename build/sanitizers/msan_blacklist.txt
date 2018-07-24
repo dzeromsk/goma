@@ -1,0 +1,2 @@
+# Causes use-of-uninitialized-value in google::StrError(int).
+src:*third_party/glog/src/logging.cc

@@ -14,7 +14,7 @@
 #include <gtest/gtest.h>
 
 #include "absl/memory/memory.h"
-#include "file.h"
+#include "filesystem.h"
 #include "ioutil.h"
 #include "jar_parser.h"
 #include "mypath.h"
@@ -46,7 +46,7 @@ class JarParserTest : public testing::Test {
     const string test_dir = file::JoinPath(top_dir, "test");
     const string source_file = file::JoinPath(test_dir, test_name + ".jar");
     const string output_file = tmpdir_util_->FullPath(archive);
-    CHECK(File::Copy(source_file.c_str(), output_file.c_str(), false));
+    CHECK(file::Copy(source_file, output_file, file::Defaults()).ok());
     return output_file;
   }
 

@@ -42,6 +42,51 @@ ArrayTokenList::const_iterator NextNonSpaceTokenFrom(
   return it;
 }
 
+// Stringize the given token list.
+// stringize() in http://www.spinellis.gr/blog/20060626/
+//
+// Iter can be any iterator, to_token should convert the value to
+// const CppToken&.
+template <typename ToToken, typename Iter>
+CppToken StringizeInternal(Iter begin, Iter end, ToToken to_token) {
+  string s;
+  for (Iter it = begin; it != end; ++it) {
+    const CppToken& token = to_token(*it);
+    if (token.type == CppToken::STRING) {
+      string temp;
+      temp += "\"";
+      for (char c : token.string_value) {
+        if (c == '\\' || c == '"') {
+          temp += '\\';
+        }
+        temp += c;
+      }
+      temp += "\"";
+      s += temp;
+    } else {
+      s += token.GetCanonicalString();
+    }
+  }
+
+  return CppToken(CppToken::STRING, s);
+}
+
+bool HasVariadicArgs(const Macro& macro,
+                     const std::vector<TokenHSList>& actuals) {
+  if (!macro.is_vararg) {
+    return false;
+  }
+
+  // VariadicArgs is always the last one.
+  // If Macro is vararg, actuals must not be empty.
+  LOG_IF(DFATAL, actuals.empty()) << "actuals must not be empty";
+  if (actuals.empty()) {
+    return false;
+  }
+
+  return !actuals.back().empty();
+}
+
 }  // anonymous namespace
 
 void CppMacroExpanderNaive::ExpandMacro(const ArrayTokenList& input_tokens,
@@ -131,7 +176,9 @@ bool CppMacroExpanderNaive::Expand(TokenHSList* input,
       MacroSet new_hideset(input_range.begin->hideset);
       new_hideset.Set(macro);
       TokenHSList substitute_output;
-      if (!Substitute(macro->replacement, ArgVector(), new_hideset,
+      if (!Substitute(*macro, macro->replacement.begin(),
+                      macro->replacement.end(), ArgVector(), new_hideset,
+
                       &substitute_output)) {
         return false;
       }
@@ -248,7 +295,8 @@ bool CppMacroExpanderNaive::Expand(TokenHSList* input,
         new_hideset.Intersection(it->hideset);
         new_hideset.Set(macro);
 
-        if (!Substitute(macro->replacement, args, new_hideset,
+        if (!Substitute(*macro, macro->replacement.begin(),
+                        macro->replacement.end(), args, new_hideset,
                         &substitute_output)) {
           return false;
         }
@@ -283,28 +331,86 @@ bool CppMacroExpanderNaive::Expand(TokenHSList* input,
   return true;
 }
 
-bool CppMacroExpanderNaive::Substitute(const ArrayTokenList& replacement,
-                                       const ArgVector& actuals,
-                                       const MacroSet& hideset,
-                                       TokenHSList* output) {
+bool CppMacroExpanderNaive::Substitute(
+    const Macro& macro,
+    ArrayTokenList::const_iterator replacement_begin,
+    ArrayTokenList::const_iterator replacement_end,
+    const ArgVector& actuals,
+    const MacroSet& hideset,
+    TokenHSList* output) {
   DCHECK(output);
-  for (auto it = replacement.begin(); it != replacement.end();) {
+  for (auto it = replacement_begin; it != replacement_end;) {
     // Note: next_it cannot be used instead of ++it to keep whitespace.
-    auto next_it = NextNonSpaceTokenFrom(it, replacement.end());
+    const auto next_it = NextNonSpaceTokenFrom(it, replacement_end);
 
-    // Case 1. # param
-    if (it->type == CppToken::SHARP && next_it != replacement.end() &&
-        next_it->IsMacroParamType()) {
-      DCHECK_LT(next_it->v.param_index, actuals.size());
-      TokenHS ths(Stringize(actuals[next_it->v.param_index]), MacroSet());
-      output->push_back(std::move(ths));
-      it = next_it;
+    // Case 0. __VA_OPT__
+    // If __VA_OPT__ is found, take arguments, and replace.
+    if (it->type == CppToken::VA_OPT) {
+      ArrayTokenList::const_iterator argument_begin;
+      ArrayTokenList::const_iterator argument_end;
+      ArrayTokenList::const_iterator right_paren_pos;
+      if (!GetVaOptArgument(next_it, replacement_end, &argument_begin,
+                            &argument_end, &right_paren_pos)) {
+        parser_->Error("__VA_OPT__ is ill-formed");
+        return false;
+      }
+
+      if (HasVariadicArgs(macro, actuals)) {
+        if (!Substitute(macro, argument_begin, argument_end, actuals, hideset,
+                        output)) {
+          return false;
+        }
+      }
+
+      it = right_paren_pos;
       ++it;
       continue;
     }
 
+    // Case 1. # param
+    if (it->type == CppToken::SHARP) {
+      if (next_it == replacement_end) {
+        parser_->Error("'#' is not followed by a macro parameter");
+        return false;
+      }
+      if (next_it->IsMacroParamType()) {
+        DCHECK_LT(next_it->v.param_index, actuals.size());
+        output->emplace_back(Stringize(actuals[next_it->v.param_index]),
+                             MacroSet());
+        it = next_it;
+        ++it;
+      } else if (next_it->type == CppToken::VA_OPT) {
+        auto next2_it = next_it;
+        ++next2_it;
+
+        ArrayTokenList::const_iterator argument_begin;
+        ArrayTokenList::const_iterator argument_end;
+        ArrayTokenList::const_iterator right_paren_pos;
+        if (!GetVaOptArgument(next2_it, replacement_end, &argument_begin,
+                              &argument_end, &right_paren_pos)) {
+          parser_->Error("__VA_OPT__ is ill-formed");
+          return false;
+        }
+
+        if (HasVariadicArgs(macro, actuals)) {
+          output->emplace_back(Stringize(argument_begin, argument_end),
+                               MacroSet());
+        } else {
+          // # __VA_OPT__(X) generates "" if variadic argument is empty.
+          output->emplace_back(CppToken(CppToken::STRING, ""), MacroSet());
+        }
+        it = right_paren_pos;
+        ++it;
+      } else {
+        parser_->Error("'#' is not followed by a macro parameter");
+        it = next_it;
+        ++it;
+      }
+      continue;
+    }
+
     // Case 2. ## param
-    if (it->type == CppToken::DOUBLESHARP && next_it != replacement.end() &&
+    if (it->type == CppToken::DOUBLESHARP && next_it != replacement_end &&
         next_it->IsMacroParamType()) {
       DCHECK_LT(next_it->v.param_index, actuals.size());
       if (!actuals[next_it->v.param_index].empty()) {
@@ -323,8 +429,44 @@ bool CppMacroExpanderNaive::Substitute(const ArrayTokenList& replacement,
       continue;
     }
 
+    // Case 2.b. ## __VA_OPT__
+    if (it->type == CppToken::DOUBLESHARP && next_it != replacement_end &&
+        next_it->type == CppToken::VA_OPT) {
+      auto next2_it = next_it;
+      ++next2_it;
+
+      ArrayTokenList::const_iterator argument_begin;
+      ArrayTokenList::const_iterator argument_end;
+      ArrayTokenList::const_iterator right_paren_pos;
+      if (!GetVaOptArgument(next2_it, replacement_end, &argument_begin,
+                            &argument_end, &right_paren_pos)) {
+        parser_->Error("__VA_OPT__ is ill-formed");
+        return false;
+      }
+
+      TokenHSList tmp_output;
+      if (HasVariadicArgs(macro, actuals)) {
+        if (!Substitute(macro, argument_begin, argument_end, actuals, hideset,
+                        &tmp_output)) {
+          return false;
+        }
+      }
+
+      if (!tmp_output.empty()) {
+        if (!Glue(output, tmp_output.front())) {
+          return false;
+        }
+        tmp_output.pop_front();
+        output->splice(output->end(), tmp_output);
+      }
+
+      it = right_paren_pos;
+      ++it;
+      continue;
+    }
+
     // Case 3. ## token <remainder>
-    if (it->type == CppToken::DOUBLESHARP && next_it != replacement.end()) {
+    if (it->type == CppToken::DOUBLESHARP && next_it != replacement_end) {
       if (!Glue(output, TokenHS(*next_it, MacroSet()))) {
         return false;
       }
@@ -335,18 +477,18 @@ bool CppMacroExpanderNaive::Substitute(const ArrayTokenList& replacement,
     }
 
     // Case 4. param ## <remainder>
-    if (it->IsMacroParamType() && next_it != replacement.end() &&
+    if (it->IsMacroParamType() && next_it != replacement_end &&
         next_it->type == CppToken::DOUBLESHARP) {
       if (actuals[it->v.param_index].empty()) {
         // param ## param2 <remainder> w
         auto next2_it = next_it;
         ++next2_it;
-        while (next2_it != replacement.end() &&
+        while (next2_it != replacement_end &&
                next2_it->type == CppToken::SPACE) {
           ++next2_it;
         }
 
-        if (next2_it != replacement.end() && next2_it->IsMacroParamType()) {
+        if (next2_it != replacement_end && next2_it->IsMacroParamType()) {
           output->insert(output->end(),
                          actuals[next2_it->v.param_index].begin(),
                          actuals[next2_it->v.param_index].end());
@@ -442,31 +584,20 @@ bool CppMacroExpanderNaive::Glue(TokenHSList* output, const TokenHS& ths) {
   return true;
 }
 
-// Stringize the given token list.
-// stringize() in http://www.spinellis.gr/blog/20060626/
-//
 // static
 CppToken CppMacroExpanderNaive::Stringize(const TokenHSList& list) {
-  string s;
-  for (const auto& ths : list) {
-    if (ths.token.type == CppToken::STRING) {
-      const auto& token = ths.token;
-      string temp;
-      temp += "\"";
-      for (char c : token.string_value) {
-        if (c == '\\' || c == '"') {
-          temp += '\\';
-        }
-        temp += c;
-      }
-      temp += "\"";
-      s += temp;
-    } else {
-      s += ths.token.GetCanonicalString();
-    }
-  }
+  return StringizeInternal(
+      list.begin(), list.end(),
+      [](const TokenHS& ths) -> const CppToken& { return ths.token; });
+}
 
-  return CppToken(CppToken::STRING, s);
+// static
+CppToken CppMacroExpanderNaive::Stringize(
+    ArrayTokenList::const_iterator arg_begin,
+    ArrayTokenList::const_iterator arg_end) {
+  return StringizeInternal(
+      arg_begin, arg_end,
+      [](const CppToken& token) -> const CppToken& { return token; });
 }
 
 // static
@@ -559,6 +690,64 @@ bool CppMacroExpanderNaive::GetMacroArgument(const TokenHSListRange& range,
   arg_range->end = *cur;
 
   return paren_depth == 0;
+}
+
+// static
+bool CppMacroExpanderNaive::GetVaOptArgument(
+    ArrayTokenList::const_iterator range_begin,
+    ArrayTokenList::const_iterator range_end,
+    ArrayTokenList::const_iterator* argument_begin,
+    ArrayTokenList::const_iterator* argument_end,
+    ArrayTokenList::const_iterator* right_paren_pos) {
+  if (range_begin == range_end) {
+    return false;
+  }
+
+  ArrayTokenList::const_iterator cur = range_begin;
+  while (cur != range_end && cur->type == CppToken::SPACE) {
+    ++cur;
+  }
+
+  if (cur == range_end || !cur->IsPuncChar('(')) {
+    return false;
+  }
+  ++cur;  // Skip '('
+
+  while (cur != range_end && cur->type == CppToken::SPACE) {
+    ++cur;
+  }
+  if (cur == range_end) {
+    return false;
+  }
+  *argument_begin = cur;
+
+  int paren_level = 1;
+  while (cur != range_end) {
+    if (cur->IsPuncChar(')')) {
+      --paren_level;
+      if (paren_level == 0) {
+        *right_paren_pos = cur;
+        break;
+      }
+    } else if (cur->IsPuncChar('(')) {
+      ++paren_level;
+    }
+
+    if (cur->type != CppToken::SPACE) {
+      *argument_end = cur;
+    }
+
+    ++cur;
+  }
+
+  if (cur == range_end || paren_level != 0) {
+    return false;
+  }
+
+  // OK to +1, since ')' should exist.
+  ++*argument_end;
+
+  return true;
 }
 
 }  // namespace devtools_goma

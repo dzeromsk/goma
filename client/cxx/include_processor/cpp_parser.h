@@ -161,6 +161,7 @@ class CppParser {
   //  #include <...> search starts from bracket_include_dir_index_.
   static const int kIncludeDirIndexStarting = 1;
  private:
+  FRIEND_TEST(CppParserTest, DateTimeToken);
 
   // Manage files having #pragma once.
   class PragmaOnceFileSet {

@@ -6,11 +6,11 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_LOG_CLEANER_H_
 #define DEVTOOLS_GOMA_CLIENT_LOG_CLEANER_H_
 
-#include <ctime>
 #include <set>
 #include <string>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "basictypes.h"
 
 using std::string;
@@ -25,12 +25,12 @@ class LogCleaner {
   // Adds log's basename to be cleaned.
   void AddLogBasename(const string& basename);
 
-  // Cleans log files older than t.
-  void CleanOldLogs(time_t t);
+  // Cleans log files older than |time|.
+  void CleanOldLogs(absl::Time time);
 
  private:
   friend class LogCleanerTest;
-  void FindOldLogsInDir(const string& log_dir, time_t t,
+  void FindOldLogsInDir(const string& log_dir, absl::Time time,
                         std::set<string>* old_logs);
   bool IsMyLogFile(const string& name) const;
 

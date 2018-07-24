@@ -12,6 +12,8 @@
 #include "socket_helper_win.h"
 #endif
 
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "callback.h"
 #include "compiler_specific.h"
 #include "platform_thread.h"
@@ -90,7 +92,7 @@ MockSocketServer::MockSocketServer(WorkerThreadManager* wm)
   int n = wm_->num_threads();
   pool_ = wm_->StartPool(1, "mock_socket_server");
   while (wm_->num_threads() < n + 1U)
-    PlatformThread::Sleep(1000);
+    absl::SleepFor(absl::Seconds(1));
 }
 
 MockSocketServer::~MockSocketServer() {
@@ -173,6 +175,21 @@ void MockSocketServer::DoServerClose(int sock) {
 #else
   closesocket(sock);
 #endif
+}
+
+void MockSocketServer::ServerWait(absl::Duration wait_time) {
+  wm_->RunClosureInPool(
+      FROM_HERE,
+      pool_,
+      NewCallback(
+          this, &MockSocketServer::DoServerWait, wait_time),
+      WorkerThreadManager::PRIORITY_LOW);
+}
+
+void MockSocketServer::DoServerWait(absl::Duration wait_time) {
+  LOG(INFO) << "DoServerWait " << wait_time;
+  absl::SleepFor(wait_time);
+  LOG(INFO) << "DoServerWait " << wait_time << " done";
 }
 
 }  // namespace devtools_goma

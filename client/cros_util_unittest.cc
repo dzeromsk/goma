@@ -103,14 +103,23 @@ TEST(CrosUtil, GetLoadAverage) {
   EXPECT_GE(GetLoadAverage(), 0.0);
 }
 
-TEST(CrosUtil, RandInt) {
+TEST(CrosUtil, RandInt64) {
+  const int64_t kInt64Offset = static_cast<int64_t>(INT32_MAX) + 1;
+  static_assert(kInt64Offset > 0 && kInt64Offset > INT32_MAX,
+                "Did not create int64 value correctly");
   // Smoke test
-  for (size_t i = 0; i < 100; ++i) {
-    int r = RandInt(10, 20);
+  for (int64_t i = 0; i < 100; ++i) {
+    int64_t r = RandInt64(10, 20);
     EXPECT_LT(r, 21);
     EXPECT_GT(r, 9);
+
+    r = RandInt64(10 + kInt64Offset, 20 + kInt64Offset);
+    EXPECT_LT(r, 21 + kInt64Offset);
+    EXPECT_GT(r, 9 + kInt64Offset);
   }
-  EXPECT_EQ(128, RandInt(128, 128));
+  EXPECT_EQ(128, RandInt64(128, 128));
+  EXPECT_EQ(128 + kInt64Offset,
+            RandInt64(128 + kInt64Offset, 128 + kInt64Offset));
 }
 
 }  // namespace devtools_goma

@@ -42,7 +42,6 @@
 #include "compiler_info_state.h"
 #include "cpp_include_processor.h"
 #include "cxx/cxx_compiler_info.h"
-#include "file.h"
 #include "file_helper.h"
 #include "file_stat_cache.h"
 #include "filesystem.h"

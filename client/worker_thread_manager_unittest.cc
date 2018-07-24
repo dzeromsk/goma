@@ -513,7 +513,7 @@ TEST_F(WorkerThreadManagerTest, PeriodicClosure) {
   WaitTestPeriodicRun(2);
   wm_->UnregisterPeriodicClosure(id);
   wm_->Finish();
-  EXPECT_GE(timer.GetInMs(), 200);
+  EXPECT_GE(timer.GetInMilliseconds(), 200);
 }
 
 TEST_F(WorkerThreadManagerTest, DescriptorReadable) {

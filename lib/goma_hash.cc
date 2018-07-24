@@ -23,7 +23,6 @@
 #  error "We expect BoringSSL in the third_party directory is used."
 # endif
 #endif
-#include "file.h"
 #include "file_helper.h"
 #include "glog/logging.h"
 using std::string;

@@ -42,7 +42,6 @@
 #include "cpp_parser.h"
 #include "directive_filter.h"
 #include "env_flags.h"
-#include "file.h"
 #include "file_dir.h"
 #include "filesystem.h"
 #include "flag_parser.h"
@@ -389,7 +388,7 @@ static void CopyOriginalFileFromHashCriteria(const string& filepath) {
           << original_filepath;
 
   const string tmp_filepath = filepath + ".tmp";
-  File::Copy(original_filepath.c_str(), tmp_filepath.c_str(), true);
+  file::Copy(original_filepath, tmp_filepath, file::Overwrite());
   rename(tmp_filepath.c_str(), filepath.c_str());
 }
 #endif

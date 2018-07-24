@@ -26,7 +26,6 @@
 #include "cxx/cxx_compiler_info.h"
 #include "cxx/include_processor/directive_filter.h"
 #include "cxx/include_processor/include_cache.h"
-#include "file.h"
 #include "gcc_flags.h"
 #include "goma_hash.h"
 #include "path.h"

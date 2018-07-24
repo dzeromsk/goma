@@ -10,6 +10,7 @@
 #include <string>
 
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
 #include "atomic_stats_counter.h"
 #include "autolock_timer.h"
 #include "compiler_specific.h"
@@ -86,14 +87,12 @@ class LocalOutputCache {
 
  private:
   struct CacheEntry {
-    CacheEntry() : mtime(0), amount_byte(0) {}
-    CacheEntry(time_t mtime, std::int64_t amount_byte)
-        : mtime(mtime), amount_byte(amount_byte) {
-    }
-    ~CacheEntry() {
-    }
+    CacheEntry() : amount_byte(0) {}
+    CacheEntry(absl::Time mtime, std::int64_t amount_byte)
+        : mtime(mtime), amount_byte(amount_byte) {}
+    ~CacheEntry() {}
 
-    time_t mtime;
+    absl::Time mtime;
     std::int64_t amount_byte;
   };
 

@@ -16,6 +16,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/time/time.h"
+#include "absl/types/optional.h"
 #include "autolock_timer.h"
 #include "tls_engine.h"
 
@@ -103,7 +105,7 @@ class OpenSSLContext {
   string hostname_;
   bool is_crl_ready_;
   string last_error_;
-  time_t last_error_time_;
+  absl::optional<absl::Time> last_error_time_;
   int crl_max_valid_duration_;
 
   // ref_cnt_ represents the number of OpenSSLEngine using the class instance.

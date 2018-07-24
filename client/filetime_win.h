@@ -10,16 +10,14 @@
 #error Win32 only
 #endif
 
-#include <ctime>
-
+#include "absl/time/time.h"
 #include "config_win.h"
 
 namespace devtools_goma {
 
 // FILETIME contains a 64-bit value representing the number of 100-nanosecond
 // intervals since January 1, 1601 (UTC).
-// time_t is the number of seconds since Januray 1, 1970 (UTC).
-time_t ConvertFiletimeToUnixTime(const FILETIME& filetime);
+absl::Time ConvertFiletimeToAbslTime(const FILETIME& filetime);
 
 }  // namespace devtools_goma
 

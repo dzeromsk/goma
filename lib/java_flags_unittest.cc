@@ -7,7 +7,6 @@
 
 #include "absl/strings/str_cat.h"
 #include "compiler_flags_parser.h"
-#include "file.h"
 #include "file_helper.h"
 #include "filesystem.h"
 #include "glog/logging.h"

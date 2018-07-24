@@ -52,7 +52,7 @@ ssize_t WaitAsyncOp(HANDLE handle, ssize_t bufsize,
     w = WaitForSingleObjectEx(handle, timeout_millisec, TRUE);
     switch (w) {
       case WAIT_OBJECT_0:
-        timeout_millisec -= t.GetInMs();
+        timeout_millisec -= t.GetInIntMilliseconds();
         {
           DWORD num_bytes = 0;
           if (GetOverlappedResult(handle, op, &num_bytes, FALSE)) {
@@ -70,7 +70,7 @@ ssize_t WaitAsyncOp(HANDLE handle, ssize_t bufsize,
         }
 
       case WAIT_IO_COMPLETION:
-        timeout_millisec -= t.GetInMs();
+        timeout_millisec -= t.GetInIntMilliseconds();
         continue;
 
       case WAIT_TIMEOUT:

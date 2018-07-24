@@ -11,6 +11,8 @@
 #include <sstream>
 
 #include "absl/strings/string_view.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
@@ -39,8 +41,9 @@ namespace {
 class Fetcher {
  public:
   // Takes ownership of HttpClient.
-  Fetcher(string method, std::unique_ptr<HttpClient> client)
+  Fetcher(string method, string body, std::unique_ptr<HttpClient> client)
       : method_(std::move(method)),
+        body_(std::move(body)),
         client_(std::move(client)) {
   }
   ~Fetcher() {
@@ -53,6 +56,9 @@ class Fetcher {
     for (int i = 0; i < FLAGS_FETCH_RETRY; ++i) {
       client_->InitHttpRequest(&req_, method_, "");
       req_.AddHeader("Connection", "close");
+      if (!body_.empty()) {
+        req_.SetBody(body_);
+      }
       err_messages += status_.err_message + " ";
       status_ = HttpClient::Status();
       client_->Do(&req_, &resp_, &status_);
@@ -73,7 +79,7 @@ class Fetcher {
         backoff_ms = HttpClient::BackoffMsec(client_->options(),
                                              backoff_ms, true);
         LOG(INFO) << "backoff " << backoff_ms << "msec";
-        PlatformThread::Sleep(backoff_ms);
+        absl::SleepFor(absl::Milliseconds(backoff_ms));
       }
     }
     status_.err_message = err_messages + status_.err_message;
@@ -92,6 +98,7 @@ class Fetcher {
 
  private:
   const string method_;
+  const string body_;
   std::unique_ptr<HttpClient> client_;
   devtools_goma::HttpRequest req_;
   devtools_goma::HttpResponse resp_;
@@ -101,7 +108,9 @@ class Fetcher {
 };
 
 void usage(const char* prog) {
-  std::cerr << "usage: " << prog << "[--head] url" << std::endl;
+  std::cerr << "usage: " << prog << "url" << std::endl;
+  std::cerr << "usage: " << prog << "--head url" << std::endl;
+  std::cerr << "usage: " << prog << "--post url [--data body]" << std::endl;
 }
 
 }  // anonymous namespace
@@ -118,6 +127,7 @@ int main(int argc, char* argv[], const char* envp[]) {
 
   absl::string_view method = "GET";
   absl::string_view url = argv[1];
+  absl::string_view body = "";
   if (strcmp(argv[1], "--head") == 0) {
     method = "HEAD";
     if (argc < 3) {
@@ -125,6 +135,27 @@ int main(int argc, char* argv[], const char* envp[]) {
       exit(1);
     }
     url = argv[2];
+  } else if (strcmp(argv[1], "--post") == 0) {
+    method = "POST";
+    if (argc < 3) {
+      usage(argv[0]);
+      exit(1);
+    }
+    url = argv[2];
+    switch (argc) {
+      case 3:  // --post <url>
+        break;
+      case 5:  // --post <url> --data <body>
+        if (strcmp(argv[3], "--data") != 0) {
+          usage(argv[0]);
+          exit(1);
+        }
+        body = argv[4];
+        break;
+      default:
+        usage(argv[0]);
+        exit(1);
+    }
   }
 
 #ifdef _WIN32
@@ -151,7 +182,9 @@ int main(int argc, char* argv[], const char* envp[]) {
       http_options, &wm));
 
   std::unique_ptr<Fetcher> fetcher(
-      new Fetcher(string(method), std::move(client)));
+      new Fetcher(string(method),
+                  string(body),
+                  std::move(client)));
 
   std::unique_ptr<WorkerThreadRunner> fetch(
       new WorkerThreadRunner(
@@ -175,14 +208,14 @@ int main(int argc, char* argv[], const char* envp[]) {
     return 1;
   }
   LOG(INFO) << status.DebugString();
-  absl::string_view body = fetcher->resp().Body();
+  absl::string_view received_body = fetcher->resp().parsed_body();
   if (status.http_return_code != 200 && status.http_return_code != 204) {
     LOG(ERROR) << "fetch " << method << " " << url
                << " http code:" << status.http_return_code
                << " " << status.err_message;
-    LOG(INFO) << body;
+    LOG(INFO) << received_body;
     return 1;
   }
-  devtools_goma::WriteStdout(body);
+  devtools_goma::WriteStdout(received_body);
   return 0;
 }

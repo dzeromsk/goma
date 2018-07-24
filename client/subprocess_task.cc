@@ -17,7 +17,6 @@
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
-#include "file.h"
 #include "file_helper.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"

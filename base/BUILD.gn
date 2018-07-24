@@ -10,8 +10,6 @@ static_library("base") {
   sources = [
     "basictypes.h",
     "compiler_specific.h",
-    "file.cc",
-    "file.h",
     "file_dir.cc",
     "file_dir.h",
     "filesystem.cc",
@@ -98,6 +96,7 @@ if (os == "win") {
       "//build/config:exe_and_shlib_deps",
       "//third_party:glog",
       "//third_party:gtest",
+      "//third_party/abseil",
     ]
   }
 }

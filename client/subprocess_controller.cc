@@ -85,7 +85,9 @@ void SubProcessController::Initialize(
     ScopedFd devnullfd(ScopedFd::OpenNull());
     PCHECK(dup2(devnullfd.fd(), STDIN_FILENO) >= 0);
     PCHECK(dup2(devnullfd.fd(), STDOUT_FILENO) >= 0);
+#ifndef KEEP_SUBPROC_STDERR
     PCHECK(dup2(devnullfd.fd(), STDERR_FILENO) >= 0);
+#endif  // !KEEP_SUBPROC_STDERR
     devnullfd.reset(-1);
     close(sockfd[1]);
     for (int i = STDERR_FILENO + 1; i < 256; ++i) {

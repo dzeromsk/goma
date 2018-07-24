@@ -6,11 +6,13 @@
 
 #include <stdlib.h>
 
+#include "absl/base/attributes.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/strip.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "glog/logging.h"
 #include "ioutil.h"
@@ -93,6 +95,7 @@ class Stream {
   }
 
   Status ConsumeSize(size_t* size) {
+    bool size_found = false;
     *size = 0;
     do {
       absl::string_view buf = Ensure(1);
@@ -104,7 +107,13 @@ class Stream {
       }
       char ch = buf[0];
       if (!absl::ascii_isxdigit(ch)) {
+        if (!size_found) {
+          *error_message_ = absl::StrCat("no size found at=",
+                                         absl::CEscape(buf.substr(0, 1)));
+          return Status::ParseError;
+        }
         if (ch == '\r' || ch == ';') {
+          VLOG(2) << "chunk-size=" << *size;
           return Status::ParseOk;
         }
         *error_message_ = absl::StrCat("chunk-size wrong data=",
@@ -117,13 +126,14 @@ class Stream {
       }
       *size <<= 4;
       if (ch >= 'a' && ch <= 'f') {
-        *size += ch - 'a';
+        *size += ch - 'a' + 10;
       } else if (ch >= 'A' && ch <= 'F') {
-        *size += ch - 'A';
+        *size += ch - 'A' + 10;
       } else {
         CHECK(absl::ascii_isdigit(ch)) << ch;
         *size += ch - '0';
       }
+      size_found = true;
       offset_++;
     } while (!input_->empty());
     return Status::ParseIncomplete;
@@ -168,6 +178,16 @@ class Stream {
 
 namespace devtools_goma {
 
+ABSL_CONST_INIT const absl::string_view kAcceptEncoding = "Accept-Encoding";
+ABSL_CONST_INIT const absl::string_view kAuthorization = "Authorization";
+ABSL_CONST_INIT const absl::string_view kContentEncoding = "Content-Encoding";
+ABSL_CONST_INIT const absl::string_view kContentLength = "Content-Length";
+ABSL_CONST_INIT const absl::string_view kContentType = "Content-Type";
+ABSL_CONST_INIT const absl::string_view kCookie = "Cookie";
+ABSL_CONST_INIT const absl::string_view kHost = "Host";
+ABSL_CONST_INIT const absl::string_view kUserAgent = "User-Agent";
+ABSL_CONST_INIT const absl::string_view kTransferEncoding = "Transfer-Encoding";
+
 // Parse HTTP request and response headers and return offset into body
 // and content-length. Content-Length may be missing, and in that case
 // content_length will be set to string::npos.
@@ -175,14 +195,12 @@ namespace devtools_goma {
 bool FindContentLengthAndBodyOffset(
     absl::string_view data, size_t *content_length, size_t *body_offset,
     bool *is_chunked) {
-  const char kContentLength[] = "Content-Length: ";
-  const char kTransferEncoding[] = "Transfer-Encoding: ";
   const char kChunked[] = "chunked";
   const char kCrlf[] = "\r\n";
   const absl::string_view::size_type content_length_pos =
-      data.find(kContentLength);
+      data.find(absl::StrCat(kContentLength, ": "));
   const absl::string_view::size_type transfer_encoding_pos =
-      data.find(kTransferEncoding);
+      data.find(absl::StrCat(kTransferEncoding, ": "));
   const absl::string_view::size_type response_body = data.find("\r\n\r\n");
 
   if (response_body == absl::string_view::npos) {
@@ -202,7 +220,8 @@ bool FindContentLengthAndBodyOffset(
     *content_length = string::npos;
   } else {
     absl::string_view lenstr =
-        data.substr(content_length_pos + strlen(kContentLength));
+        data.substr(content_length_pos +
+                    kContentLength.size() +  2);
     *content_length = atoi(string(lenstr).c_str());
   }
 
@@ -217,7 +236,8 @@ bool FindContentLengthAndBodyOffset(
       // The Transfer-Encoding string is in the header.
       // We should check its value is "chunked" or not.
       absl::string_view transfer_encoding_value = data.substr(
-          transfer_encoding_pos + strlen(kTransferEncoding));
+          transfer_encoding_pos +
+          kTransferEncoding.size() + 2);
       absl::string_view::size_type value_end =
           transfer_encoding_value.find(kCrlf);
       transfer_encoding_value = StringStrip(
@@ -270,161 +290,7 @@ bool ParseHttpResponse(absl::string_view response,
   }
 
   VLOG(3) << "HTTP header=" << response.substr(0, *offset);
-  if (is_chunked != nullptr && *is_chunked) {
-    return true;
-  }
-
-  if (*content_length == string::npos) {
-    return true;
-  }
-
-  if (response.size() < *offset + *content_length) {
-    // if response size is too small, there was some network error.
-    return false;
-  }
   return true;
-}
-
-// Parse chunked transfer coding.
-// You SHOULD NOT indicates trailers in a TE header of a request since we do
-// not expect important headers in the trailers.  In other words, we just
-// discard trailers.
-//
-// Reference: RFC2616 3.6.1 Chunked Transfer Coding.
-bool ParseChunkedBody(absl::string_view response,
-                      size_t offset,
-                      size_t* remaining_chunk_length,
-                      std::vector<absl::string_view>* chunks) {
-  size_t head = offset;
-  *remaining_chunk_length = string::npos;
-  chunks->clear();
-
-  if (head > response.size()) {
-    LOG(ERROR) << "Given offset is shorter than response length."
-               << " response_len=" << response.size()
-               << " offset=" << offset;
-    return true;
-  }
-
-  while (head < response.size()) {
-    if (!isxdigit(response[head])) {
-      LOG(ERROR) << "Expected hexdigit but got:" << (int)response[head];
-      LOG(ERROR) << " response_len=" << response.size()
-                 << " head=" << head;
-      LOG(ERROR) << "broken chunk:" << response;
-      return true;
-    }
-    char *endptr;
-    const unsigned long chunk_length =
-        strtoul(response.data() + head, &endptr, 16);
-    if (endptr >= response.data() + response.size()) {
-      // reached the end of response.
-      *remaining_chunk_length = chunk_length + 4;
-      return false;
-    }
-    if (*endptr != '\r' && *endptr != ';') {
-      LOG(ERROR) << "Unexpected character after length:"
-                 << *endptr;
-      return true;
-    }
-
-    if (chunk_length == 0) {  // last chunk.
-      VLOG(2) << "Found last-chunk.";
-      // Confirm the remaining of resp should be like:
-      // 0; chunk-extension CRLF
-      // trailer
-      // CRLF
-
-      // skip chunk-extension.
-      absl::string_view::size_type crlf_pos = response.find("\r\n", head);
-      if (crlf_pos == absl::string_view::npos) {
-        // need more data.
-        // 4 comes from \r\n<trailer (which can be omitted)>\r\n.
-        *remaining_chunk_length = 4;
-        return false;
-      }
-
-      head = crlf_pos + 2;
-
-      // skip trailer.
-      while (head < response.size()) {
-        // incomplete CR after trailer headers
-        if (response.substr(head) == "\r") {
-          *remaining_chunk_length = 1;
-          return false;
-        }
-
-        // CRLF after trailer headers
-        if (response.substr(head) == "\r\n") {
-          *remaining_chunk_length = 0;
-          return true;
-        }
-
-        crlf_pos = response.find("\r\n", head);
-
-        if (crlf_pos == absl::string_view::npos) {
-          // incomplete trailer header ends with CR
-          if (absl::EndsWith(response, "\r")) {
-            *remaining_chunk_length = 3;
-            return false;
-          }
-
-          // incomplete trailer header not include CRLF
-          *remaining_chunk_length = 4;
-          return false;
-        }
-
-        LOG(WARNING) << "Ignoring Chunked Transfer Coding trailer: "
-                     << response.substr(head, crlf_pos - head);
-        head = crlf_pos + 2;
-      }
-
-      // need one more CRLF after trailer headers
-      *remaining_chunk_length = 2;
-      return false;
-    }
-
-    VLOG(2) << "resp len:" << response.size()
-            << ", head:" << head
-            << ", chunk_len:" << chunk_length;
-    // skip chunk-extension.
-    absl::string_view::size_type crlf_pos = response.find("\r\n", head);
-    if (crlf_pos == absl::string_view::npos) {
-      // need more data.
-      // 4 comes from \r\n<chunk>\r\n.
-      *remaining_chunk_length = chunk_length + 4;
-      return false;
-    }
-    if (response.size() < crlf_pos + chunk_length + 4) {
-      // need more data.
-      // 4 comes from \r\n<chunk>\r\n.
-      *remaining_chunk_length = crlf_pos + chunk_length + 4 - response.size();
-      return false;
-    }
-
-    head = crlf_pos + 2;
-    chunks->push_back(response.substr(head, chunk_length));
-    if (strncmp(response.data() + head + chunk_length, "\r\n", 2)) {
-      LOG(ERROR) << "chunk does not end with expected CRLF.:"
-                 << "Actual: " << response.substr(head, 2);
-      return true;
-    }
-    head += chunk_length + 2;
-  }
-  // Need more data.  However, I do not know how much remains.
-  // All chunks has read but last chunk's size is not 0.
-  // This means at least one chunk will come.
-  // 0;<chunk-extension>\r\n<trailers>\r\n.
-  *remaining_chunk_length = 5;
-  return false;
-}
-
-string CombineChunks(const std::vector<absl::string_view>& chunks) {
-  string dechunked;
-  for (const auto& it : chunks) {
-    dechunked.append(it.data(), it.size());
-  }
-  return dechunked;
 }
 
 std::map<string, string> ParseQuery(const string& query) {

@@ -31,7 +31,6 @@
 # include <lmcons.h>  // for UNLEN
 #endif
 #include "env_flags.h"
-#include "file.h"
 #include "file_dir.h"
 #include "filesystem.h"
 #include "file_stat.h"

@@ -203,8 +203,8 @@ TEST(HttpUtilTest, ParseHttpResponseInHeader) {
 
   response = "HTTP/1.1 200 Ok\r\nHost: example.com\r\n"
       "Content-Length: 5\r\n\r\n";
-  EXPECT_FALSE(ParseHttpResponse(response, &http_status_code,
-                                 &offset, &content_length, &is_chunked));
+  EXPECT_TRUE(ParseHttpResponse(response, &http_status_code,
+                                &offset, &content_length, &is_chunked));
   EXPECT_EQ(200, http_status_code);
   EXPECT_EQ(response.size(), offset);
   EXPECT_EQ(5UL, content_length);
@@ -218,8 +218,8 @@ TEST(HttpUtilTest, ParseHttpResponseShortBody) {
   size_t offset = string::npos;
   size_t content_length = string::npos;
   bool is_chunked = false;
-  EXPECT_FALSE(ParseHttpResponse(response, &http_status_code,
-                                 &offset, &content_length, &is_chunked));
+  EXPECT_TRUE(ParseHttpResponse(response, &http_status_code,
+                                &offset, &content_length, &is_chunked));
   EXPECT_EQ(200, http_status_code);
   EXPECT_EQ(response.size() - 1, offset);
   EXPECT_EQ(5UL, content_length);
@@ -241,346 +241,12 @@ TEST(HttpUtilTest, ParseHttpResponseChunked) {
   EXPECT_TRUE(is_chunked);
 }
 
-TEST(HttpUtilTest, ParseChunkedBodyShouldParse) {
-  // HTTP header is dummy.
-  static const char* kResponse =
-      "Dummy\r\n\r\n3\r\ncon\r\n8\r\nsequence\r\n0\r\n\r\n";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining = string::npos;
-
-  EXPECT_TRUE(ParseChunkedBody(kResponse,
-                               body_offset, &remaining, &chunks));
-  EXPECT_EQ(0U, remaining);
-  EXPECT_EQ(2U, chunks.size());
-  const string dechunked = CombineChunks(chunks);
-  EXPECT_EQ(11U, dechunked.size());
-  EXPECT_EQ("consequence", dechunked);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldSkipChunkExtension) {
-  // HTTP header is dummy.
-  static const char* kResponse =
-      "Dummy\r\n\r\n3;n=v\r\ncon\r\n8\r\nsequence\r\n0\r\n\r\n";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining = string::npos;
-
-  EXPECT_TRUE(ParseChunkedBody(kResponse,
-                               body_offset, &remaining, &chunks));
-  EXPECT_EQ(0U, remaining);
-  EXPECT_EQ(2U, chunks.size());
-  const string dechunked = CombineChunks(chunks);
-  EXPECT_EQ(11U, dechunked.size());
-  EXPECT_EQ("consequence", dechunked);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldIgnoreOriginalDechunkedData) {
-  // HTTP header is dummy.
-  static const char* kResponse =
-      "Dummy\r\n\r\n3;n=v\r\ncon\r\n8\r\nsequence\r\n0\r\n\r\n";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  chunks.push_back("con");
-  size_t remaining = string::npos;
-
-  EXPECT_TRUE(ParseChunkedBody(kResponse,
-                               body_offset, &remaining, &chunks));
-  EXPECT_EQ(0U, remaining);
-  EXPECT_EQ(2U, chunks.size());
-  const string dechunked = CombineChunks(chunks);
-  EXPECT_EQ(11U, dechunked.size());
-  EXPECT_EQ("consequence", dechunked);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldReturnFalseWithShortChunk) {
-  // HTTP header is dummy.
-  static const char* kResponse = "Dummy\r\n\r\n3\r\ncon\r\n8\r\nseq";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining = string::npos;
-
-  EXPECT_FALSE(ParseChunkedBody(kResponse,
-                                body_offset, &remaining, &chunks));
-  EXPECT_GT(remaining, 0U);
-  EXPECT_NE(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldReturnFalseIfLengthNotReady) {
-  // HTTP header is dummy.
-  static const char* kResponse = "Dummy\r\n\r\n";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining = string::npos;
-
-  EXPECT_FALSE(ParseChunkedBody(kResponse,
-                               body_offset, &remaining, &chunks));
-  EXPECT_GT(remaining, 0U);
-  EXPECT_NE(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldReturnTrueWithIllInput) {
-  // HTTP header is dummy.
-  static const char* kResponse = "Dummy\r\n\r\n\r\n";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-
-  EXPECT_TRUE(ParseChunkedBody(kResponse,
-                               body_offset, &remaining, &chunks));
-  EXPECT_EQ(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldReturnFalseEvenIfSizeIsMuchLarger) {
-  // HTTP header is dummy.
-  string response = "Dummy\r\n\r\n3\r\na";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-  size_t orig_len = response.size();
-
-  response.resize(1000);
-  absl::string_view resp(response.data(), orig_len);
-  EXPECT_FALSE(ParseChunkedBody(resp,
-                                body_offset, &remaining, &chunks));
-  EXPECT_GT(remaining, 0U);
-  EXPECT_NE(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldReturnFalseIfEndWithChunkLength) {
-  // HTTP header is dummy.
-  string response = "Dummy\r\n\r\n3";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-  size_t orig_len = response.size();
-
-  response.resize(1000);
-  absl::string_view resp(response.data(), orig_len);
-  EXPECT_FALSE(ParseChunkedBody(resp,
-                                body_offset, &remaining, &chunks));
-  EXPECT_GT(remaining, 0U);
-  EXPECT_NE(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldReturnTrueIfChunkIsBroken) {
-  // HTTP header is dummy.
-  string response = "Dummy\r\n\r\n3\r\ncon128\r\nseq";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-  size_t orig_len = response.size();
-
-  absl::string_view resp(response.data(), orig_len);
-  EXPECT_TRUE(ParseChunkedBody(resp,
-                               body_offset, &remaining, &chunks));
-  EXPECT_EQ(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldReturnTrueIfChunkLengthIsBroken) {
-  // HTTP header is dummy.
-  string response = "Dummy\r\n\r\n3omg_broken_extension\r\nfoo\r\n";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-  size_t orig_len = response.size();
-
-  absl::string_view resp(response.data(), orig_len);
-  EXPECT_TRUE(ParseChunkedBody(resp,
-                               body_offset, &remaining, &chunks));
-  EXPECT_EQ(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldReturnFalseIfLengthNotComplete) {
-  // HTTP header is dummy.
-  string response = "Dummy\r\n\r\n3\r\nfoo\r\n0";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-  size_t orig_len = response.size();
-
-  response.resize(1000);
-  absl::string_view resp(response.data(), orig_len);
-  EXPECT_FALSE(ParseChunkedBody(resp,
-                                body_offset, &remaining, &chunks));
-  EXPECT_GT(remaining, 0U);
-  EXPECT_NE(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldReturnTrueIfOffsetIsWrong) {
-  // HTTP header is dummy.
-  string response = "foo";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-  size_t orig_len = response.size();
-
-  response.resize(1000);
-  absl::string_view resp(response.data(), orig_len);
-  EXPECT_TRUE(ParseChunkedBody(resp,
-                               body_offset, &remaining, &chunks));
-  EXPECT_EQ(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldReturnTrueIfLengthIsNegativeNumber) {
-  // HTTP header is dummy.
-  string response = "Dummy\r\n\r\n-1\r\n";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-  size_t orig_len = response.size();
-
-  response.resize(1000);
-  absl::string_view resp(response.data(), orig_len);
-  EXPECT_TRUE(ParseChunkedBody(resp,
-                               body_offset, &remaining, &chunks));
-  EXPECT_EQ(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldReturnFalseIfNoBody) {
-  // HTTP header is dummy.
-  string response = "dummy\r\n";
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-  size_t orig_len = response.size();
-
-  response.resize(1000);
-  absl::string_view resp(response.data(), orig_len);
-  EXPECT_FALSE(ParseChunkedBody(resp,
-                                orig_len, &remaining, &chunks));
-  EXPECT_GT(remaining, 0U);
-  EXPECT_NE(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ShouldParseCrimeMitigation) {
-  // CRIME mitigation does followings for obfscating Record Length:
-  // 1. Add a particular number of leading zeros to the size string
-  // 2. Sub-chunk the body to even smaller chunks
-  //
-  // See:
-  // - go/crime-mitigation-at-gfe-faq
-  // - go/crime-mitigation-at-gfe
-  static const char* kResponse =
-      "HTTP/1.1 200 OK\r\n"
-      "Transfer-Encoding: chunked\r\n"
-      "Content-Type: text/plain\r\n"
-      "\r\n"
-      "000004\r\n"
-      "abcd\r\n"
-      "0016\r\n"
-      "efghijklmnopqrstuvwxyz\r\n"
-      "0\r\n"
-      "\r\n";
-  int http_status_code = 0;
-  size_t offset = string::npos;
-  size_t content_length = string::npos;
-  bool is_chunked = false;
-  EXPECT_TRUE(ParseHttpResponse(kResponse, &http_status_code,
-                                &offset, &content_length, &is_chunked));
-  EXPECT_EQ(200, http_status_code);
-  EXPECT_EQ(string::npos, content_length);
-  EXPECT_EQ(true, is_chunked);
-
-  std::vector<absl::string_view> chunks;
-  size_t remaining = string::npos;
-
-  EXPECT_TRUE(ParseChunkedBody(kResponse,
-                               offset, &remaining, &chunks));
-  EXPECT_EQ(0U, remaining);
-  EXPECT_EQ(2U, chunks.size());
-  const string dechunked = CombineChunks(chunks);
-  EXPECT_EQ(26U, dechunked.size());
-  EXPECT_EQ("abcdefghijklmnopqrstuvwxyz", dechunked);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldRequireCrlfAfterLastChunk) {
-  // HTTP header is dummy.
-  string response = "dummy\r\n\r\n0\r\n";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-  size_t orig_len = response.size();
-
-  response.resize(1000);
-  absl::string_view resp(response.data(), orig_len);
-  EXPECT_FALSE(ParseChunkedBody(resp,
-                                body_offset, &remaining, &chunks));
-  EXPECT_GT(remaining, 0U);
-  EXPECT_NE(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldRequireCrlfAfterTrailer) {
-  // HTTP header is dummy.
-  string response = "dummy\r\n\r\n0\r\nX-header: x\r\n";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-  size_t orig_len = response.size();
-
-  response.resize(1000);
-  absl::string_view resp(response.data(), orig_len);
-  EXPECT_FALSE(ParseChunkedBody(resp,
-                                body_offset, &remaining, &chunks));
-  EXPECT_GT(remaining, 0U);
-  EXPECT_NE(string::npos, remaining);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyTrailerNotHavingCRLF) {
-  // HTTP header is dummy.
-  string response = "dummy\r\n\r\n0\r\nX-header: x";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-
-  EXPECT_FALSE(ParseChunkedBody(response, body_offset, &remaining, &chunks));
-  EXPECT_EQ(remaining, 4U);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyTrailerEndsWithCR) {
-  // HTTP header is dummy.
-  string response = "dummy\r\n\r\n0\r\nX-header: x\r";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-
-  EXPECT_FALSE(ParseChunkedBody(response, body_offset, &remaining, &chunks));
-  EXPECT_EQ(remaining, 3U);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyTrailerEndsWithCRLF) {
-  // HTTP header is dummy.
-  string response = "dummy\r\n\r\n0\r\nX-header: x\r\n";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-
-  EXPECT_FALSE(ParseChunkedBody(response, body_offset, &remaining, &chunks));
-  EXPECT_EQ(remaining, 2U);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyTrailerEndsWithCRLFCR) {
-  // HTTP header is dummy.
-  string response = "dummy\r\n\r\n0\r\nX-header: x\r\n\r";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-
-  EXPECT_FALSE(ParseChunkedBody(response, body_offset, &remaining, &chunks));
-  EXPECT_EQ(remaining, 1U);
-}
-
-TEST(HttpUtilTest, ParseChunkedBodyShouldIgnoreTrailer) {
-  // HTTP header is dummy.
-  string response = "dummy\r\n\r\n0\r\nX-header: x\r\n\r\n";
-  const size_t body_offset = 9;  // Index to start HTTP body.
-  std::vector<absl::string_view> chunks;
-  size_t remaining;
-  size_t orig_len = response.size();
-
-  response.resize(1000);
-  absl::string_view resp(response.data(), orig_len);
-  EXPECT_TRUE(ParseChunkedBody(resp,
-                               body_offset, &remaining, &chunks));
+string CombineChunks(const std::vector<absl::string_view>& chunks) {
+  string dechunked;
+  for (const auto& it : chunks) {
+    dechunked.append(it.data(), it.size());
+  }
+  return dechunked;
 }
 
 TEST(HttpUtilTest, ChunkedTransferEncodingWithTwoSpace) {
@@ -631,7 +297,7 @@ void TestHttpChunkParser(absl::string_view response_body,
   SCOPED_TRACE(absl::CEscape(response_body));
 
   // test on any boundary.
-  for (size_t i = 1; i + 1 < response_body.size(); ++i) {
+  for (size_t i = 0; i + 1 < response_body.size(); ++i) {
     HttpChunkParser parser;
     std::vector<absl::string_view> pieces;
 
@@ -681,6 +347,13 @@ void TestHttpChunkParser(absl::string_view response_body,
 }
 
 TEST(HttpChunkParser, Parse) {
+  TestHttpChunkParser("3\r\n"
+                      "con\r\n"
+                      "8\r\n"
+                      "sequence\r\n"
+                      "0\r\n"
+                      "\r\n",
+                      "consequence");
   TestHttpChunkParser("3;n=v\r\n"
                       "con\r\n"
                       "8\r\n"
@@ -707,6 +380,23 @@ TEST(HttpChunkParser, ParseCrimeMitigation) {
                       "abcdefghijklmnopqrstuvwxyz");
 }
 
+TEST(HttpChunkParser, ParseWikipediaEncodedDataSample) {
+  // http://en.wikipedia.org/wiki/Chunked_transfer_encoding#Encoded_data
+  TestHttpChunkParser("4\r\n"
+                      "Wiki\r\n"
+                      "5\r\n"
+                      "pedia\r\n"
+                      "E\r\n"
+                      " in\r\n"
+                      "\r\n"
+                      "chunks.\r\n"
+                      "0\r\n"
+                      "\r\n",
+                      "Wikipedia in\r\n"
+                      "\r\n"
+                      "chunks.");
+}
+
 TEST(HttpChunkParser, ParseLastChunkExtension) {
   TestHttpChunkParser("3;n=v\r\n"
                       "con\r\n"
@@ -715,6 +405,21 @@ TEST(HttpChunkParser, ParseLastChunkExtension) {
                       "0;n=v\r\n"
                       "\r\n",
                       "consequence");
+}
+
+TEST(HttpChunkParser, ParseHexSize) {
+  TestHttpChunkParser("3\r\n"
+                      "abc\r\n"
+                      "0d\r\n"
+                      "defghijklmnop\r\n"
+                      "a\r\n"
+                      "qrstuvwxyz\r\n"
+                      "0\r\n\r\n",
+                      "abcdefghijklmnopqrstuvwxyz");
+  TestHttpChunkParser("1A\r\n"
+                      "abcdefghijklmnopqrstuvwxyz\r\n"
+                      "0\r\n\r\n",
+                      "abcdefghijklmnopqrstuvwxyz");
 }
 
 TEST(HttpChunkParser, ParseTrailer) {
@@ -755,11 +460,22 @@ void TestHttpChunkParserErrorInput(absl::string_view response_body) {
 }
 
 TEST(HttpChunkParser, ParseError) {
+  TestHttpChunkParserErrorInput("3\r\n"
+                                "con123\r\n"
+                                "seq");
   TestHttpChunkParserErrorInput("3;n=v\r\n"
                                 "con128\r\n"
                                 "sequence\r\n"
                                 "0\r\n"
                                 "\r\n");
+  TestHttpChunkParserErrorInput("3omg_broken_extension\r\n"
+                                "foo\r\n"
+                                "0\r\n"
+                                "\r\n");
+  TestHttpChunkParserErrorInput("-1\r\n"
+                                "0\r\n"
+                                "\r\n");
+  TestHttpChunkParserErrorInput("\r\n\r\n");
 }
 
 }  // namespace devtools_goma

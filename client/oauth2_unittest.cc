@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include "absl/time/time.h"
 #include "glog/logging.h"
 
 using std::string;
@@ -24,12 +25,12 @@ TEST(OAuth2Test, ParseOAuth2AccessToken) {
 
   string token_type;
   string access_token;
-  int expires_in;
+  absl::Duration expires_in;
   EXPECT_TRUE(ParseOAuth2AccessToken(
       kJsonResponse, &token_type, &access_token, &expires_in));
   EXPECT_EQ("Bearer", token_type);
   EXPECT_EQ("ya12.this_is_token", access_token);
-  EXPECT_EQ(3600, expires_in);
+  EXPECT_EQ(absl::Seconds(3600), expires_in);
 }
 
 TEST(OAuth2Test, ParseOAuth2AccessTokenNoSpaces) {
@@ -42,12 +43,12 @@ TEST(OAuth2Test, ParseOAuth2AccessTokenNoSpaces) {
 
   string token_type;
   string access_token;
-  int expires_in;
+  absl::Duration expires_in;
   EXPECT_TRUE(ParseOAuth2AccessToken(
       kJsonResponse, &token_type, &access_token, &expires_in));
   EXPECT_EQ("Bearer", token_type);
   EXPECT_EQ("1/fFBGRNJru1FQd44AzqT3Zg", access_token);
-  EXPECT_EQ(3920, expires_in);
+  EXPECT_EQ(absl::Seconds(3920), expires_in);
 }
 
 TEST(OAuth2Test, ParseOAuth2AccessTokenError) {
@@ -57,7 +58,7 @@ TEST(OAuth2Test, ParseOAuth2AccessTokenError) {
       "}\r\n";
   string token_type;
   string access_token;
-  int expires_in;
+  absl::Duration expires_in;
   EXPECT_FALSE(ParseOAuth2AccessToken(
       kJsonResponse, &token_type, &access_token, &expires_in));
 }

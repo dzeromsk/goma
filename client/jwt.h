@@ -9,14 +9,15 @@
 #include <openssl/digest.h>
 #include <openssl/pem.h>
 #include <openssl/evp.h>
-#include <time.h>
 
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "basictypes.h"
 #include "glog/logging.h"
+#include "gtest/gtest_prod.h"
 
 namespace devtools_goma {
 
@@ -25,8 +26,6 @@ namespace devtools_goma {
 class JsonWebToken {
  public:
   struct ClaimSet {
-    ClaimSet() : expires_in_sec(3600) {}
-
     // The email address of the service account.
     std::string iss;
     // The email address of the user for which the application is
@@ -35,8 +34,6 @@ class JsonWebToken {
 
     // The permissions that the application requests.
     std::vector<std::string> scopes;
-    // The seconds until access token will expire (at most 1 hour).
-    int expires_in_sec;
   };
   // Key is private key to sign.
   class Key {
@@ -86,27 +83,35 @@ class JsonWebToken {
     return Key::Load(pem_key);
   }
 
-  // Token generates JWT, including signature, signed by key.
-  std::string Token(const Key& key, time_t now) const;
+  // Token generates JWT, including signature, signed by key, with the current
+  // time as the timestamp  .
+  std::string Token(const Key& key) const;
 
   static const char kGrantTypeEncoded[];
  private:
   friend class JsonWebTokenTest;
+  FRIEND_TEST(JsonWebTokenTest, CreateClaimSetJson);
+  FRIEND_TEST(JsonWebTokenTest, CreateTokenBaseString);
+  FRIEND_TEST(JsonWebTokenTest, TokenWithTimestamp);
 
   // helper functions.
+
+  // Token generates JWT, including signature, signed by key, with a timestamp.
+  std::string TokenWithTimestamp(const Key& key, absl::Time timestamp) const;
 
   // CreateHeaderJson returns JSON representation of JWT header.
   static std::string CreateHeaderJson();
 
-  // CreateClaimSetJson returns JSON representation of JWT claim set.
-  static std::string CreateClaimSetJson(const ClaimSet& cs, time_t now);
+  // CreateClaimSetJson returns JSON representation of JWT claim set with a
+  // timestamp.
+  static std::string CreateClaimSetJson(const ClaimSet& cs,
+                                        absl::Time timestamp);
 
   // CreateTokenBaseString returns JWT token's base string, which will be
   // a base string, i.e. an input for Sign.
   // i.e. {Base64url encoded header}.{Base64url encoded claim set}.
-  static std::string CreateTokenBaseString(
-      const std::string& header,
-      const std::string& claim_set);
+  static std::string CreateTokenBaseString(const std::string& header,
+                                           const std::string& claim_set);
 
   // Sign returns signature bytes for base_string.
   static std::string Sign(const std::string& base_string, const Key& key);

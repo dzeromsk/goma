@@ -43,7 +43,7 @@ void SimpleTimer::Start() {
   start_time_ = mach_absolute_time();
 }
 
-long long SimpleTimer::GetInNanoSeconds() const {
+long long SimpleTimer::GetInNanoseconds() const {
   uint64_t end_time = mach_absolute_time();
 
   DCHECK_LE(start_time_, end_time);

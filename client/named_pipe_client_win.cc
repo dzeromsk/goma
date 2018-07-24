@@ -26,7 +26,7 @@ ScopedNamedPipe NamedPipeFactory::New() {
   SimpleTimer t;
 
   for (;;) {
-    int left_time = timeout_ms_ - t.GetInMs();
+    int left_time = timeout_ms_ - t.GetInIntMilliseconds();
     if (left_time <= 0) {
       break;
     }
@@ -36,7 +36,7 @@ ScopedNamedPipe NamedPipeFactory::New() {
       if (last_error == ERROR_SEM_TIMEOUT) {
         LOG(ERROR) << "Timed-out to WaitNamedPipe " << pipename
                    << " with timeout_ms=" << timeout_ms_
-                   << ", passed " << t.GetInMs() << " ms."
+                   << ", passed " << t.GetInMilliseconds() << " ms."
                    << " Please consider to specify longer timeout by"
                    << " setting GOMA_NAMEDPIPE_WAIT_TIMEOUT_MS envvar"
                    << " before `gn gen` or invoking gomacc directly."

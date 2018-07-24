@@ -14,7 +14,6 @@
 #endif  // _WIN32
 
 #include "absl/strings/string_view.h"
-#include "file.h"
 #include "glog/logging.h"
 #include "path.h"
 #include "scoped_fd.h"

@@ -183,7 +183,7 @@ LogServiceClient::LogServiceClient(HttpRPC* http_rpc,
       last_timestamp_ms_(0) {
   CHECK_GT(max_log_in_req_, 0U);
   timer_.Start();
-  last_timestamp_ms_ = timer_.GetInMilliSeconds();
+  last_timestamp_ms_ = timer_.GetInMilliseconds();
 }
 
 LogServiceClient::~LogServiceClient() {
@@ -224,7 +224,7 @@ void LogServiceClient::SaveLogImpl(const SaveLogFunc& func) {
   SaveLogJob* job = nullptr;
   {
     AUTOLOCK(lock, &mu_);
-    last_timestamp_ms_ = timer_.GetInMilliSeconds();
+    last_timestamp_ms_ = timer_.GetInMilliseconds();
     if (!http_rpc_->client()->shutting_down() &&
         periodic_callback_id_ == kInvalidPeriodicClosureId) {
       periodic_callback_id_ = wm_->RegisterPeriodicClosure(
@@ -255,7 +255,7 @@ void LogServiceClient::Flush() {
   SaveLogJob* job = nullptr;
   {
     AUTOLOCK(lock, &mu_);
-    last_timestamp_ms_ = timer_.GetInMilliSeconds();
+    last_timestamp_ms_ = timer_.GetInMilliseconds();
     if (save_log_job_ == nullptr)
       return;
     if (save_log_job_->num_log() == 0) {
@@ -304,7 +304,7 @@ void LogServiceClient::CheckPending() {
       return;
     if (save_log_job_->num_log() == 0)
       return;
-    if (timer_.GetInMilliSeconds() < last_timestamp_ms_ + max_pending_ms_)
+    if (timer_.GetInMilliseconds() < last_timestamp_ms_ + max_pending_ms_)
       return;
     job = save_log_job_;
     save_log_job_ = nullptr;

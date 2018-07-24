@@ -13,6 +13,13 @@
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
 #include "fake_tls_engine.h"
+MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
+#include "google/protobuf/message_lite.h"
+#include "google/protobuf/io/gzip_stream.h"
+#include "google/protobuf/io/zero_copy_stream.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
+#include "google/protobuf/io/zero_copy_stream_impl_lite.h"
+MSVC_POP_WARNING()
 #include "ioutil.h"
 #include "lockhelper.h"
 #include "mock_socket_factory.h"
@@ -123,6 +130,26 @@ class HttpRPCTest : public ::testing::Test {
     AutoLock lock(&mu_);
     *done = true;
     cond_.Signal();
+  }
+
+  void SerializeCompressToString(
+      const google::protobuf::Message& msg,
+      int compression_level,
+      string* serialized) {
+    string buf;
+    google::protobuf::io::StringOutputStream stream(&buf);
+    google::protobuf::io::GzipOutputStream::Options options;
+    options.format = google::protobuf::io::GzipOutputStream::ZLIB;
+    options.compression_level = compression_level;
+    google::protobuf::io::GzipOutputStream gzip_stream(&stream, options);
+    msg.SerializeToZeroCopyStream(&gzip_stream);
+    ASSERT_TRUE(gzip_stream.Close());
+    ASSERT_GE(buf.size(), 1);
+    ASSERT_FALSE(buf[1] >> 5 & 1)
+        << "serialized has FDICT, which should not be supported";
+    absl::string_view v(buf);
+    v.remove_prefix(2);
+    *serialized = string(v);
   }
 
   std::unique_ptr<WorkerThreadManager> wm_;
@@ -396,9 +423,9 @@ TEST_F(HttpRPCTest, CallAsyncLookupFile) {
 
 TEST_F(HttpRPCTest, TLSEnginePingFail) {
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(-1));
+      absl::make_unique<MockSocketFactory>(-1));
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
   options.dest_port = 443;
@@ -442,13 +469,13 @@ TEST_F(HttpRPCTest, TLSEnginePingRejected) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
   options.dest_port = 443;
@@ -495,13 +522,13 @@ TEST_F(HttpRPCTest, TLSEnginePingOk) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
   options.dest_port = 443;
@@ -553,13 +580,13 @@ TEST_F(HttpRPCTest, TLSEngineCallLookupFile) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
   options.dest_port = 443;
@@ -570,6 +597,85 @@ TEST_F(HttpRPCTest, TLSEngineCallLookupFile) {
   HttpRPC::Options rpc_options;
   rpc_options.content_type_for_protobuf = "binary/x-protocol-buffer";
   rpc_options.start_compression = false;
+  HttpRPC http_rpc(&http_client, rpc_options);
+  TestLookupFileContext tc(&http_rpc, nullptr);
+  RunTestLookupFile(&tc);
+  {
+    AutoLock lock(&mu_);
+    while (tc.state_ != TestLookupFileContext::DONE) {
+      cond_.Wait(&mu_);
+    }
+
+    EXPECT_EQ(req_expected, req_buf);
+    EXPECT_EQ(0, tc.r_);
+    EXPECT_TRUE(tc.status_.connect_success);
+    EXPECT_TRUE(tc.status_.finished);
+    EXPECT_EQ(0, tc.status_.err);
+    EXPECT_EQ("", tc.status_.err_message);
+    EXPECT_EQ(200, tc.status_.http_return_code);
+  }
+  http_client.WaitNoActive();
+  EXPECT_TRUE(socket_status.is_owned());
+  EXPECT_FALSE(socket_status.is_closed());
+  EXPECT_TRUE(socket_status.is_released());
+}
+
+TEST_F(HttpRPCTest, TLSEngineCallLookupFileDeflate) {
+  int socks[2];
+  PCHECK(OpenSocketPairForTest(socks) == 0);
+  const int kCompressionLevel = 3;
+  LookupFileReq req;
+  string serialized_req;
+  SerializeCompressToString(req, kCompressionLevel, &serialized_req);
+  std::ostringstream req_ss;
+  req_ss << "POST /l HTTP/1.1\r\n"
+         << "Host: clients5.google.com\r\n"
+         << "User-Agent: " << kUserAgentString << "\r\n"
+         << "Content-Type: binary/x-protocol-buffer\r\n"
+         << "Content-Length: " << serialized_req.size() << "\r\n"
+         << "Accept-Encoding: deflate\r\n"
+         << "Content-Encoding: deflate\r\n\r\n"
+         << serialized_req;
+
+  const string req_expected = req_ss.str();
+  string req_buf;
+  req_buf.resize(req_expected.size());
+  mock_server_->ServerRead(socks[0], &req_buf);
+  LookupFileResp resp;
+  string serialized_resp;
+  SerializeCompressToString(resp, kCompressionLevel, &serialized_resp);
+  LOG(INFO) << "resp length=" << serialized_resp.size()
+            << " data=" << serialized_resp;
+  std::ostringstream resp_ss;
+  resp_ss << "HTTP/1.1 200 OK\r\n"
+          << "Content-Type: text/x-protocol-buffer\r\n"
+          << "Accept-Encoding: deflate\r\n"
+          << "Content-Encoding: deflate\r\n"
+          << "Content-Length: " << serialized_resp.size() << "\r\n\r\n"
+          << serialized_resp;
+  mock_server_->ServerWrite(socks[0], resp_ss.str());
+
+  MockSocketFactory::SocketStatus socket_status;
+  std::unique_ptr<MockSocketFactory> socket_factory(
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
+
+  socket_factory->set_dest("clients5.google.com:443");
+  socket_factory->set_host_name("clients5.google.com");
+  socket_factory->set_port(443);
+  std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
+      absl::make_unique<FakeTLSEngineFactory>());
+  HttpClient::Options options;
+  options.dest_host_name = "clients5.google.com";
+  options.dest_port = 443;
+  options.use_ssl = true;
+  HttpClient http_client(std::move(socket_factory),
+                         std::move(tls_engine_factory),
+                         options, wm_.get());
+  HttpRPC::Options rpc_options;
+  rpc_options.content_type_for_protobuf = "binary/x-protocol-buffer";
+  rpc_options.start_compression = true;
+  rpc_options.compression_level = kCompressionLevel;
+  rpc_options.accept_encoding = "deflate";
   HttpRPC http_rpc(&http_client, rpc_options);
   TestLookupFileContext tc(&http_rpc, nullptr);
   RunTestLookupFile(&tc);
@@ -622,13 +728,13 @@ TEST_F(HttpRPCTest, TLSEngineCallAsyncLookupFile) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
   options.dest_port = 443;
@@ -702,13 +808,13 @@ TEST_F(HttpRPCTest, TLSEngineFailWithTLSErrorAtSetData) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   tls_engine_factory->SetBroken(FakeTLSEngine::FAKE_TLS_SET_BROKEN);
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
@@ -751,13 +857,13 @@ TEST_F(HttpRPCTest, TLSEngineFailWithTLSErrorAtRead) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   tls_engine_factory->SetBroken(FakeTLSEngine::FAKE_TLS_READ_BROKEN);
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
@@ -789,13 +895,13 @@ TEST_F(HttpRPCTest, TLSEngineFailWithTLSErrorAtWrite) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   tls_engine_factory->SetBroken(FakeTLSEngine::FAKE_TLS_WRITE_BROKEN);
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
@@ -815,6 +921,56 @@ TEST_F(HttpRPCTest, TLSEngineFailWithTLSErrorAtWrite) {
   // Nothing should be requested to the server.
   EXPECT_EQ("", req_buf);
   mock_server_->ServerClose(socks[0]);
+  http_client.WaitNoActive();
+  EXPECT_FALSE(socket_status.is_owned());
+  EXPECT_TRUE(socket_status.is_closed());
+  EXPECT_TRUE(socket_status.is_err());
+  EXPECT_FALSE(socket_status.is_released());
+}
+
+TEST_F(HttpRPCTest, TLSEngineServerTimeoutSendingHeaderShouldBeError) {
+  int socks[2];
+  PCHECK(OpenSocketPairForTest(socks) == 0);
+  std::ostringstream req_ss;
+  req_ss << "POST /pingz HTTP/1.1\r\n"
+         << "Host: clients5.google.com\r\n"
+         << "User-Agent: " << kUserAgentString << "\r\n"
+         << "Content-Type: binary/x-protocol-buffer\r\n"
+         << "Content-Length: 0\r\n\r\n";
+
+  const string req_expected = req_ss.str();
+  string req_buf;
+  req_buf.resize(req_expected.size());
+  mock_server_->ServerRead(socks[0], &req_buf);
+  mock_server_->ServerWait(absl::Milliseconds(1500));
+  std::ostringstream resp_ss;
+  resp_ss << "HTTP/1.1 200 OK\r\n";
+  mock_server_->ServerWrite(socks[0], resp_ss.str());
+  mock_server_->ServerClose(socks[0]);
+
+  MockSocketFactory::SocketStatus socket_status;
+  std::unique_ptr<MockSocketFactory> socket_factory(
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
+
+  socket_factory->set_dest("clients5.google.com:443");
+  socket_factory->set_host_name("clients5.google.com");
+  socket_factory->set_port(443);
+  std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
+      absl::make_unique<FakeTLSEngineFactory>());
+  HttpClient::Options options;
+  options.dest_host_name = "clients5.google.com";
+  options.dest_port = 443;
+  options.use_ssl = true;
+  HttpClient http_client(std::move(socket_factory),
+                         std::move(tls_engine_factory),
+                         options, wm_.get());
+  HttpRPC::Options rpc_options;
+  rpc_options.content_type_for_protobuf = "binary/x-protocol-buffer";
+  HttpRPC http_rpc(&http_client, rpc_options);
+  HttpRPC::Status status;
+  status.timeout_secs.emplace_back(1);
+  http_rpc.Ping(wm_.get(), "/pingz", &status);
+  EXPECT_EQ(ERR_TIMEOUT, status.err);
   http_client.WaitNoActive();
   EXPECT_FALSE(socket_status.is_owned());
   EXPECT_TRUE(socket_status.is_closed());
@@ -845,13 +1001,13 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseWithoutContentLengthShouldBeOk) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
   options.dest_port = 443;
@@ -895,13 +1051,13 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseBeforeSendingHeaderShouldBeError) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
   options.dest_port = 443;
@@ -930,13 +1086,13 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseBeforeReadingAnythingShouldBeError) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
     HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
   options.dest_port = 443;
@@ -982,13 +1138,13 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseBeforeSendingEnoughDataShouldBeError) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
   options.dest_port = 443;
@@ -1033,13 +1189,13 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseWithoutContentLengthShouldNotHangUp) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   tls_engine_factory->SetMaxReadSize(10);
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
@@ -1086,13 +1242,13 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseWithoutEndOfChunkShouldNotHangUp) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   tls_engine_factory->SetMaxReadSize(10);
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";
@@ -1140,13 +1296,13 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseWithoutAllChunksShouldNotHangUp) {
 
   MockSocketFactory::SocketStatus socket_status;
   std::unique_ptr<MockSocketFactory> socket_factory(
-      new MockSocketFactory(socks[1], &socket_status));
+      absl::make_unique<MockSocketFactory>(socks[1], &socket_status));
 
   socket_factory->set_dest("clients5.google.com:443");
   socket_factory->set_host_name("clients5.google.com");
   socket_factory->set_port(443);
   std::unique_ptr<FakeTLSEngineFactory> tls_engine_factory(
-      new FakeTLSEngineFactory);
+      absl::make_unique<FakeTLSEngineFactory>());
   tls_engine_factory->SetMaxReadSize(10);
   HttpClient::Options options;
   options.dest_host_name = "clients5.google.com";

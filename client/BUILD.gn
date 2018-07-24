@@ -238,34 +238,6 @@ static_library("gomacc_lib") {
   }
 }
 
-static_library("arfile_lib") {
-  sources = [
-    "arfile.cc",
-    "arfile.h",
-  ]
-  public_deps = [
-    ":common",
-    "//lib",
-    "//third_party:gtest_prod",
-  ]
-}
-
-static_library("arfile_reader_lib") {
-  sources = [
-    "arfile_reader.cc",
-    "arfile_reader.h",
-  ]
-  if (os == "mac") {
-    sources += [
-      "mach_o_parser.cc",
-      "mach_o_parser.h",
-    ]
-  }
-  public_deps = [
-    ":arfile_lib",
-  ]
-}
-
 static_library("content_lib") {
   sources = [
     "content.cc",
@@ -362,8 +334,6 @@ static_library("compiler_proxy_lib") {
   sources = [
     "auto_updater.cc",
     "auto_updater.h",
-    "cache_file.cc",
-    "cache_file.h",
     "compilation_database_reader.cc",
     "compilation_database_reader.h",
     "compile_service.cc",
@@ -382,12 +352,6 @@ static_library("compiler_proxy_lib") {
     "compiler_info_state.h",
     "compiler_proxy_histogram.cc",
     "compiler_proxy_histogram.h",
-    "deps_cache.cc",
-    "deps_cache.h",
-    "file_hash_cache.cc",
-    "file_hash_cache.h",
-    "filename_id_table.cc",
-    "filename_id_table.h",
     "goma_blob.cc",
     "goma_blob.h",
     "goma_file_dump.cc",
@@ -461,18 +425,17 @@ static_library("compiler_proxy_lib") {
   ]
   include_dirs = [ "." ]
   deps = [
-    ":arfile_reader_lib",
     ":breakpad_lib",
     ":client_util_lib",
     ":compiler_info_data_proto",
     ":compiler_info_lib",
     ":content_lib",
-    ":deps_cache_proto",
+    ":deps_cache_lib",
     ":error_notice",
+    ":file_hash_cache_lib",
     ":file_stat_cache_lib",
     ":ioutil_lib",
     ":jwt_lib",
-    ":linker_input_processor_lib",
     ":local_output_cache_lib",
     ":local_output_cache_proto",  # for compile_task
     ":oauth2_lib",
@@ -483,7 +446,6 @@ static_library("compiler_proxy_lib") {
     ":sha256_hash_cache_lib",
     ":subprocess_lib",
     ":subprocess_proto",
-    ":thinlto_import_processor_lib",
     "//client/clang_tidy:clang_tidy_compiler_info_builder_lib",
     "//client/cxx:cxx_compiler_info_lib",
     "//client/cxx:gcc_compiler_info_builder_lib",
@@ -494,6 +456,9 @@ static_library("compiler_proxy_lib") {
     "//client/java:jar_parser_lib",
     "//client/java:java_compiler_info_builder_lib",
     "//client/java:java_compiler_info_lib",
+    "//client/linker/linker_input_processor:arfile_reader_lib",
+    "//client/linker/linker_input_processor:linker_input_processor_lib",
+    "//client/linker/linker_input_processor:thinlto_import_processor_lib",
     "//lib:compiler_flag_type_specific",
     "//third_party:minizip",
     "//third_party/abseil",
@@ -557,21 +522,6 @@ static_library("compiler_proxy_lib") {
   }
 }
 
-if (os == "linux") {
-  static_library("elf_parser_lib") {
-    sources = [
-      "elf_parser.cc",
-      "elf_parser.h",
-    ]
-
-    deps = [
-      "//base",
-      "//lib",
-      "//third_party:glog",
-    ]
-  }
-}
-
 static_library("base64_lib") {
   sources = [
     "base64.cc",
@@ -601,6 +551,7 @@ static_library("jwt_lib") {
     ":ioutil_lib",
     "//base",
     "//third_party:glog",
+    "//third_party:gtest_prod",
     "//third_party/boringssl",
   ]
 }
@@ -694,50 +645,56 @@ static_library("rand_util_lib") {
   ]
 }
 
-static_library("linker_input_processor_lib") {
+static_library("cache_file_lib") {
   sources = [
-    "library_path_resolver.cc",
-    "library_path_resolver.h",
-    "linker_input_processor.cc",
-    "linker_input_processor.h",
-    "linker_script_parser.cc",
-    "linker_script_parser.h",
+    "cache_file.cc",
+    "cache_file.h",
   ]
-
   public_deps = [
-    ":content_lib",
     "//base",
-    "//third_party:gtest_prod",
   ]
-
   deps = [
-    ":arfile_lib",
-    ":common",
-    ":compiler_info_lib",
-    ":compiler_proxy_base_lib",
-    ":ioutil_lib",
-    "//lib",
-    "//lib:compiler_flag_type_specific",
-    "//third_party:glog",
+    "//lib:goma_hash",
   ]
-
-  if (os == "linux") {
-    deps += [ ":elf_parser_lib" ]
-  }
 }
 
-static_library("thinlto_import_processor_lib") {
+static_library("file_hash_cache_lib") {
   sources = [
-    "thinlto_import_processor.cc",
-    "thinlto_import_processor.h",
+    "file_hash_cache.cc",
+    "file_hash_cache.h",
   ]
-
+  public_deps = [
+    ":common",
+  ]
   deps = [
-    "//base",
-    "//lib",
-    "//lib:gcc_specific",
     "//third_party:glog",
-    "//third_party/abseil",
+  ]
+}
+
+static_library("deps_cache_lib") {
+  sources = [
+    "deps_cache.cc",
+    "deps_cache.h",
+    "filename_id_table.cc",
+    "filename_id_table.h",
+  ]
+  public_deps = [
+    ":cache_file_lib",
+    ":common",
+    ":compiler_proxy_base_lib",
+    ":file_stat_cache_lib",
+    "//lib:goma_hash",
+  ]
+  deps = [
+    ":compiler_info_lib",
+    ":content_lib",
+    ":deps_cache_proto",
+    ":gen_compiler_proxy_info",
+    "//client/cxx:cxx_compiler_info_lib",
+    "//client/cxx/include_processor:directive_filter_lib",
+    "//client/cxx/include_processor:include_cache_lib",
+    "//lib:gcc_specific",
+    "//lib:vc_specific",
   ]
 }
 
@@ -824,6 +781,7 @@ executable("gomacc") {
     "//lib",
     "//lib:compiler_flag_type_specific",
     "//third_party:glog",
+    "//third_party/abseil",
     "//third_party/protobuf:protobuf_lite",
   ]
   if (os == "linux" && may_make_pie) {
@@ -837,10 +795,10 @@ executable("compiler_proxy") {
   ]
   include_dirs = [ "." ]
   deps = [
-    ":arfile_lib",
-    ":arfile_reader_lib",
     ":breakpad_lib",
     ":compiler_proxy_lib",
+    ":deps_cache_lib",
+    ":file_hash_cache_lib",
     ":file_stat_cache_lib",
     ":ioutil_lib",
     ":local_output_cache_lib",
@@ -852,6 +810,8 @@ executable("compiler_proxy") {
     "//client/cxx/include_processor:cpp_include_processor_lib",
     "//client/cxx/include_processor:include_cache_lib",
     "//client/java:jar_parser_lib",
+    "//client/linker/linker_input_processor:arfile_lib",
+    "//client/linker/linker_input_processor:arfile_reader_lib",
     "//third_party/boringssl",
     "//third_party/protobuf:protobuf_lite",
   ]
@@ -919,37 +879,7 @@ copy("copy_diagnose_goma_log_py") {
   ]
 }
 
-if (os == "linux") {
-  executable("elf_parser") {
-    sources = [
-      "elf_parser_main.cc",
-    ]
-    include_dirs = [ "." ]
-    deps = [
-      ":compiler_proxy_lib",
-      ":elf_parser_lib",
-      "//build/config:exe_and_shlib_deps",
-    ]
-  }
-}
-
 if (os != "win") {
-  executable("linker_input_processor") {
-    sources = [
-      "linker_input_processor_main.cc",
-    ]
-    include_dirs = [ "." ]
-    deps = [
-      ":compiler_info_lib",
-      ":compiler_proxy_lib",
-      ":ioutil_lib",
-      ":linker_input_processor_lib",
-      "//build/config:exe_and_shlib_deps",
-      "//client/cxx:cxx_compiler_info_builder_lib",
-      "//client/cxx/include_processor:cpp_parser_lib",
-      "//lib:compiler_flag_type_specific",
-    ]
-  }
   copy("goma_tool") {
     sources = [
       "goma_ctl.sh",
@@ -1201,35 +1131,6 @@ static_library("gomacc_test_lib") {
   ]
 }
 
-if (os != "win") {
-  executable("arfile_unittest") {
-    testonly = true
-    sources = [
-      "arfile_unittest.cc",
-    ]
-    deps = [
-      ":arfile_lib",
-      ":common",
-      ":goma_test_lib",
-      ":ioutil_lib",
-      "//build/config:exe_and_shlib_deps",
-    ]
-  }
-}
-
-executable("arfile_reader_unittest") {
-  testonly = true
-  sources = [
-    "arfile_reader_unittest.cc",
-  ]
-  deps = [
-    ":arfile_reader_lib",
-    ":common",
-    ":goma_test_lib",
-    "//build/config:exe_and_shlib_deps",
-  ]
-}
-
 executable("atomic_stats_counter_unittest") {
   testonly = true
   sources = [
@@ -1409,6 +1310,8 @@ executable("http_unittest") {
   testonly = true
   sources = [
     "http_unittest.cc",
+    "mock_socket_factory.cc",
+    "mock_socket_factory.h",
   ]
   deps = [
     ":compiler_proxy_lib",
@@ -1491,19 +1394,6 @@ executable("jwt_unittest") {
   ]
 }
 
-executable("library_path_resolver_unittest") {
-  testonly = true
-  sources = [
-    "library_path_resolver_unittest.cc",
-  ]
-  deps = [
-    ":goma_test_lib",
-    ":linker_input_processor_lib",
-    "//build/config:exe_and_shlib_deps",
-    "//third_party:glog",
-  ]
-}
-
 executable("linked_unordered_map_unittest") {
   testonly = true
   sources = [
@@ -1512,37 +1402,6 @@ executable("linked_unordered_map_unittest") {
   deps = [
     ":compiler_proxy_lib",
     ":goma_test_lib",
-    "//build/config:exe_and_shlib_deps",
-  ]
-}
-
-if (os != "win") {
-  executable("linker_input_processor_unittest") {
-    testonly = true
-    sources = [
-      "linker_input_processor_unittest.cc",
-    ]
-    deps = [
-      ":compiler_info_lib",
-      ":compiler_proxy_lib",
-      ":goma_test_lib",
-      ":ioutil_lib",
-      ":linker_input_processor_lib",
-      "//build/config:exe_and_shlib_deps",
-      "//client/cxx/include_processor:cpp_parser_lib",
-    ]
-  }
-}
-
-executable("linker_script_parser_unittest") {
-  testonly = true
-  sources = [
-    "linker_script_parser_unittest.cc",
-  ]
-  deps = [
-    ":content_lib",
-    ":goma_test_lib",
-    ":linker_input_processor_lib",
     "//build/config:exe_and_shlib_deps",
   ]
 }
@@ -1763,8 +1622,9 @@ executable("deps_cache_unittest") {
   ]
   deps = [
     ":compiler_info_lib",
-    ":compiler_proxy_lib",
+    ":deps_cache_lib",
     ":deps_cache_proto",
+    ":file_hash_cache_lib",
     ":goma_test_lib",
     ":subprocess_lib",
     "//build/config:exe_and_shlib_deps",
@@ -1782,7 +1642,7 @@ executable("filename_id_table_unittest") {
     "filename_id_table_unittest.cc",
   ]
   deps = [
-    ":compiler_proxy_lib",
+    ":deps_cache_lib",
     ":deps_cache_proto",
     ":goma_test_lib",
     "//build/config:exe_and_shlib_deps",
@@ -1834,19 +1694,6 @@ executable("sha256_hash_cache_unittest") {
 }
 
 if (os == "linux") {
-  executable("elf_parser_unittest") {
-    testonly = true
-    sources = [
-      "elf_parser_unittest.cc",
-    ]
-    deps = [
-      ":compiler_proxy_lib",
-      ":elf_parser_lib",
-      ":goma_test_lib",
-      ":subprocess_lib",
-      "//build/config:exe_and_shlib_deps",
-    ]
-  }
   executable("cros_util_unittest") {
     testonly = true
     sources = [
@@ -1857,6 +1704,7 @@ if (os == "linux") {
       ":gomacc_test_lib",
       "//build/config:exe_and_shlib_deps",
       "//third_party:gtest",
+      "//third_party/abseil",
     ]
   }
 }
@@ -1871,6 +1719,19 @@ if (os == "win") {
       "//build/config:exe_and_shlib_deps",
     ]
   }
+  executable("filetime_win_unittest") {
+    testonly = true
+    sources = [
+      "filetime_win_unittest.cc",
+    ]
+    deps = [
+      ":common",
+      ":goma_test_lib",
+      "//build/config:exe_and_shlib_deps",
+      "//third_party:gtest",
+      "//third_party/abseil",
+    ]
+  }
   executable("named_pipe_client_win_unittest") {
     testonly = true
     sources = [
@@ -1880,6 +1741,7 @@ if (os == "win") {
       ":compiler_proxy_lib",
       ":goma_test_lib",
       "//build/config:exe_and_shlib_deps",
+      "//third_party/abseil",
     ]
   }
   executable("named_pipe_server_win_unittest") {

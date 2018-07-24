@@ -169,7 +169,7 @@ WorkerThreadManager::WorkerThread::GetCurrentWorker() {
 
 long long WorkerThreadManager::WorkerThread::NowInNs() {
   if (now_ns_ == 0)
-    now_ns_ = timer_.GetInNanoSeconds();
+    now_ns_ = timer_.GetInNanoseconds();
   return now_ns_;
 }
 
@@ -232,9 +232,9 @@ bool WorkerThreadManager::WorkerThread::Dispatch() {
   if (current_.closure_ == nullptr)
     return true;
   VLOG(2) << "Loop closure=" << current_.closure_ << " " << name_;
-  long long start_ns = timer_.GetInNanoSeconds();
+  long long start_ns = timer_.GetInNanoseconds();
   current_.closure_->Run();
-  long long duration_ns = timer_.GetInNanoSeconds() - start_ns;
+  long long duration_ns = timer_.GetInNanoseconds() - start_ns;
   static const double kLongClosureSec = 60.0;
   if (duration_ns > kLongClosureSec * kNanoSecondsPerSecond) {
     LOG(WARNING) << id_ << " closure run too long:"
@@ -459,12 +459,12 @@ bool WorkerThreadManager::WorkerThread::NextClosure() {
   VLOG(2) << "poll_interval=" << poll_interval_;
   CHECK_GE(poll_interval_, 0);
 
-  long long poll_start_time_ns = timer_.GetInNanoSeconds();
+  long long poll_start_time_ns = timer_.GetInNanoseconds();
   poller_->PollEvents(descriptors_, poll_interval_,
                       priority, &io_pendings,
                       &mu_, &auto_lock_stat_poll_events_);
   // update NowInNs().
-  now_ns_ = timer_.GetInNanoSeconds();
+  now_ns_ = timer_.GetInNanoseconds();
   CHECK_GE(now_ns_, poll_start_time_ns);
   // on Windows, poll time would be 0.51481 or so when no event happened.
   // multiply 1.1 (i.e. 0.55) would be good.
@@ -560,7 +560,7 @@ void WorkerThreadManager::WorkerThread::AddClosure(
   ClosureData closure_data(location, closure,
                            pendings_[priority].size(),
                            tick_,
-                           timer_.GetInNanoSeconds());
+                           timer_.GetInNanoseconds());
   if (closure_data.queuelen_ > max_queuelen_[priority]) {
     max_queuelen_[priority] = closure_data.queuelen_;
   }
@@ -575,7 +575,7 @@ WorkerThreadManager::WorkerThread::GetClosure(
   ClosureData closure_data = pendings_[priority].front();
   pendings_[priority].pop_front();
   long long wait_time_ns =
-      timer_.GetInNanoSeconds() - closure_data.timestamp_ns_;
+      timer_.GetInNanoseconds() - closure_data.timestamp_ns_;
   static const long long kLongWaitTimeNanoSec = 60 * kNanoSecondsPerSecond;
   if (wait_time_ns > max_wait_time_ns_[priority]) {
     max_wait_time_ns_[priority] = wait_time_ns;

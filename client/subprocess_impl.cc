@@ -40,7 +40,7 @@ SubProcessStarted* SubProcessImpl::Spawn() {
   DCHECK_EQ(SubProcessState::PENDING, state_);
   DCHECK_EQ(SubProcessState::kInvalidPid, started_.pid());
 
-  started_.set_pending_ms(timer_.GetInMs());
+  started_.set_pending_ms(timer_.GetInIntMilliseconds());
 
   std::vector<string> args(req_.argv().begin(), req_.argv().end());
   std::vector<string> envs;
@@ -136,7 +136,7 @@ std::unique_ptr<SubProcessTerminated> SubProcessImpl::Wait(bool need_kill) {
     terminated_.set_mem_kb(spawner_->ChildMemKb());
   if (spawner_->ChildTermSignal() != 0)
     terminated_.set_term_signal(spawner_->ChildTermSignal());
-  terminated_.set_run_ms(timer_.GetInMs());
+  terminated_.set_run_ms(timer_.GetInIntMilliseconds());
 
   state_ = SubProcessState::FINISHED;
   VLOG(1) << "Terminated " << req_.id() << " " << req_.trace_id()

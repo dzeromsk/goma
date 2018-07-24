@@ -20,7 +20,8 @@
 #include <vector>
 #include <sstream>
 
-#include "file.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "file_helper.h"
 #include "fileflag.h"
 #include "glog/logging.h"
@@ -35,8 +36,11 @@ namespace {
 static const int kInvalidProcessStatus = -256;
 
 struct SubprocExit {
-  SubprocExit() : lineno(0), last_errno(0), status(kInvalidProcessStatus) {
-    memset(&ru, 0, sizeof(ru));
+  SubprocExit() {
+    // Since we send the structure, we should initialize not only variables but
+    // also alighment paddings.  Otherwise, memory sanitizer would fail.
+    memset(this, 0, sizeof(*this));
+    status = kInvalidProcessStatus;
   }
   int lineno;
   int last_errno;
@@ -269,7 +273,7 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
       SubprocExitReport(child_exit_fd.fd(), se, 1);
     }
 
-    pid_t prog_pid;
+    pid_t prog_pid = Spawner::kInvalidPid;
     // TODO: use POSIX_SPAWN_USEVFORK (_GNU_SOURCE).
     if (posix_spawn(
             &prog_pid, prog, nullptr, &spawnattr,
@@ -358,7 +362,7 @@ SpawnerPosix::ProcessStatus SpawnerPosix::Wait(WaitPolicy wait_policy) {
     while ((r = waitpid(monitor_pid_, &status, waitpid_options)) == -1) {
       if (errno == EINTR) {
         // Retry after 10 milliseconds wait.
-        PlatformThread::Sleep(10);
+        absl::SleepFor(absl::Milliseconds(10));
         continue;
       }
       PLOG(FATAL) << "waitpid failed, monitor process id=" << monitor_pid_
@@ -384,7 +388,7 @@ SpawnerPosix::ProcessStatus SpawnerPosix::Wait(WaitPolicy wait_policy) {
       while ((r = waitpid(monitor_pid_, &status, 0)) == -1) {
         if (errno == EINTR) {
           // Retry after 10 milliseconds wait.
-          PlatformThread::Sleep(10);
+          absl::SleepFor(absl::Milliseconds(10));
           continue;
         }
         PLOG(FATAL) << "waitpid failed, monitor process id=" << monitor_pid_
@@ -465,7 +469,8 @@ SpawnerPosix::ProcessStatus SpawnerPosix::Wait(WaitPolicy wait_policy) {
   }
   LOG_IF(INFO, sent_sig_ != 0)
       << "signal=" << sent_sig_ << " sent to monitor_pid=" << monitor_pid_
-      << " prog_pid=" << prog_pid_ << " " << sig_timer_.GetInMs() << "msec ago,"
+      << " prog_pid=" << prog_pid_
+       << " " << sig_timer_.GetInMilliseconds() << "msec ago,"
       << " terminated by signal=" << signal_ << " from " << sig_source
       << " exit=" << status_;
   monitor_pid_ = Spawner::kInvalidPid;

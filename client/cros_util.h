@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "absl/time/time.h"
+
 using std::string;
 
 namespace devtools_goma {
@@ -38,7 +40,7 @@ float GetLoadAverage();
 // Returns random integer x such as |a| <= x <= |b|.
 // Note: a returned random number is not uniform.
 //       I think it enough for randomizing a sleep time.
-int RandInt(int a, int b);
+int64_t RandInt64(int64_t a, int64_t b);
 
 // Returns true if current working directory is not in the black list.
 // If in the black list, gomacc won't send the request to compiler_proxy.
@@ -46,7 +48,7 @@ bool CanGomaccHandleCwd();
 
 // Waits the load average becomes less than |load|.
 // This function may make the program asleep at most |max_sleep_time|.
-void WaitUntilLoadAvgLowerThan(float load, int max_sleep_time);
+void WaitUntilLoadAvgLowerThan(float load, absl::Duration max_sleep_time);
 
 #else
 
@@ -54,7 +56,7 @@ void WaitUntilLoadAvgLowerThan(float load, int max_sleep_time);
 bool CanGomaccHandle(const std::vector<string>& args) {
   return true;
 }
-void WaitUntilLoadAvgLowerThan(float load, int max_sleep_time) {}
+void WaitUntilLoadAvgLowerThan(float load, absl::Duration max_sleep_time) {}
 
 #endif
 

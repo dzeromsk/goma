@@ -33,7 +33,8 @@ bool InitFromInfo(const WIN32_FILE_ATTRIBUTE_DATA& info,
 
   file_stat->size = static_cast<off_t>(info.nFileSizeLow);
   file_stat->mtime =
-      devtools_goma::ConvertFiletimeToUnixTime(info.ftLastWriteTime);
+      absl::ToTimeT(
+          devtools_goma::ConvertFiletimeToAbslTime(info.ftLastWriteTime));
   return true;
 }
 

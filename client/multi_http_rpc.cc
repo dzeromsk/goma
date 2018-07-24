@@ -61,7 +61,7 @@ class MultiHttpRPC::MultiJob {
       if (master_job != nullptr) {
         http_rpc_stat_->master_trace_id = master_job->http_rpc_stat()->trace_id;
       }
-      http_rpc_stat_->pending_time = timer_.GetInMs();
+      http_rpc_stat_->pending_time = timer_.GetInIntMilliseconds();
     }
 
     void Done() {

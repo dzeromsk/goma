@@ -23,6 +23,8 @@
 
 #include "absl/memory/memory.h"
 #include "absl/strings/numbers.h"
+#include "absl/strings/match.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
 #include "autolock_timer.h"
@@ -271,7 +273,6 @@ class HttpClient::Task {
         active_(false),
         close_state_(HttpClient::ERROR_CLOSE),
         auth_status_(OK),
-        request_message_written_(0),
         is_ping_(status_->trace_id == "ping"),
         callback_(callback) {
     if (status_->timeout_secs.empty())
@@ -314,7 +315,7 @@ class HttpClient::Task {
           NewCallback(this, &HttpClient::Task::Start));
       return;
     }
-    int throttle_time = timer_.GetInMs();
+    int throttle_time = timer_.GetInIntMilliseconds();
     status_->throttle_time += throttle_time;
     int backoff = client_->TryStart();
     if (backoff > 0) {
@@ -412,11 +413,8 @@ class HttpClient::Task {
     double t = static_cast<double>(status_->timeout_secs.front());
     status_->timeout_secs.pop_front();
     timer_.Start();
-    request_message_ = req_->CreateMessage();
-    status_->req_build_time = timer_.GetInMs();
-    status_->req_size = request_message_.size();
-    VLOG(1) << status_->trace_id << " request\n"
-            << request_message_;
+    request_stream_ = req_->NewStream();
+    status_->req_build_time = timer_.GetInIntMilliseconds();
 
     d_->NotifyWhenWritable(
         NewPermanentCallback(this, &HttpClient::Task::DoWrite));
@@ -447,32 +445,12 @@ class HttpClient::Task {
     }
     CHECK(d_);
     VLOG(7) << "DoWrite " << d_;
-    int n = d_->Write(
-        request_message_.data() + request_message_written_,
-        request_message_.size() - request_message_written_);
-    VLOG(3) << status_->trace_id << " DoWrite "
-            << (request_message_.size() - request_message_written_)
-            << " -> " << n;
-    if (n < 0 && d_->NeedRetry())
-      return;
-    if (n <= 0) {
-      LOG(WARNING) << status_->trace_id
-                   << " Write failed " << n
-                   << " err=" << d_->GetLastErrorMessage();
-      std::ostringstream err_message;
-      err_message << status_->trace_id
-                  << " Write failed ret=" << n
-                  << " @" << request_message_written_
-                  << " of " << request_message_.size()
-                  << " : " << d_->GetLastErrorMessage();
-      RunCallback(FAIL, err_message.str());
-      return;
-    }
-    request_message_written_ += n;
-    client_->IncWriteByte(n);
-    if (request_message_written_ == request_message_.size()) {
+    const void* data = nullptr;
+    int size = 0;
+    if (!request_stream_->Next(&data, &size)) {
       // Request has been sent.
       DCHECK_EQ(Status::SENDING_REQUEST, status_->state);
+      status_->req_size = request_stream_->ByteCount();
       status_->state = Status::REQUEST_SENT;
       d_->StopWrite();
       wm_->RunClosureInThread(
@@ -480,7 +458,29 @@ class HttpClient::Task {
           thread_id_,
           NewCallback(this, &HttpClient::Task::DoRequestDone),
           WorkerThreadManager::PRIORITY_IMMEDIATE);
+      return;
     }
+    int n = d_->Write(data, size);
+    VLOG(3) << status_->trace_id << " DoWrite "
+            << size << " -> " << n;
+    if (n < 0 && d_->NeedRetry()) {
+      request_stream_->BackUp(size);
+      return;
+    }
+    if (n <= 0) {
+      LOG(WARNING) << status_->trace_id
+                   << " Write failed " << n
+                   << " err=" << d_->GetLastErrorMessage();
+      std::ostringstream err_message;
+      err_message << status_->trace_id
+                  << " Write failed ret=" << n
+                  << " @" << request_stream_->ByteCount()
+                  << " : " << d_->GetLastErrorMessage();
+      RunCallback(FAIL, err_message.str());
+      return;
+    }
+    request_stream_->BackUp(size - n);
+    client_->IncWriteByte(n);
   }
 
   void DoRead() {
@@ -523,7 +523,7 @@ class HttpClient::Task {
       return;
     }
     if (status_->wait_time == 0 && resp_->len() == 0) {
-      status_->wait_time = timer_.GetInMs();
+      status_->wait_time = timer_.GetInIntMilliseconds();
       timer_.Start();
       d_->ChangeTimeout(client_->options().socket_read_timeout_sec);
     }
@@ -531,10 +531,10 @@ class HttpClient::Task {
     if (resp_->Recv(r)) {
       VLOG(1) << status_->trace_id << " response\n"
               << resp_->Header();
-      status_->resp_recv_time = timer_.GetInMs();
+      status_->resp_recv_time = timer_.GetInIntMilliseconds();
       timer_.Start();
       resp_->Parse();
-      status_->resp_parse_time = timer_.GetInMs();
+      status_->resp_parse_time = timer_.GetInIntMilliseconds();
       status_->resp_size = resp_->len();
       if (resp_->status_code() != 200 || resp_->result() == FAIL) {
         DCHECK_EQ(close_state_, HttpClient::ERROR_CLOSE);
@@ -562,7 +562,7 @@ class HttpClient::Task {
     }
     d_->ChangeTimeout(
         client_->options().socket_read_timeout_sec +
-        client_->EstimatedRecvTime(resp_->remaining()));
+        client_->EstimatedRecvTime(kNetworkBufSize));
   }
 
   void DoTimeout() {
@@ -578,19 +578,18 @@ class HttpClient::Task {
     if (status_->timeout_secs.empty()) {
       std::ostringstream err_message;
       err_message << "Timed out: ";
-      if (status_->req_send_time == 0 && !request_message_.empty()) {
-        err_message << "sending request "
-                    << request_message_written_
-                    << " of " << request_message_.size()
-                    << " " << timer_.GetInMs() << "ms";
+      if (request_stream_) {
+        err_message << "sending request header "
+                    << request_stream_->ByteCount()
+                    << " " << timer_.GetInMilliseconds() << "ms";
       } else if (resp_->len() == 0) {
         err_message << "waiting response "
-                    << " " << timer_.GetInMs() << "ms";
+                    << " " << timer_.GetInMilliseconds() << "ms";
       } else {
         err_message << "receiving response "
                     << resp_->len()
                     << " of " << resp_->buffer_size()
-                    << " " << timer_.GetInMs() << "ms";
+                    << " " << timer_.GetInMilliseconds() << "ms";
       }
       LOG(WARNING) << status_->trace_id << " " << err_message.str();
       RunCallback(ERR_TIMEOUT, err_message.str());
@@ -639,8 +638,7 @@ class HttpClient::Task {
     d_ = nullptr;
     client_->ReleaseDescriptor(d, HttpClient::ERROR_CLOSE);
     active_ = false;
-    request_message_.clear();
-    request_message_written_ = 0;
+    request_stream_.reset();
     resp_->Reset();
     ++status_->num_retry;
     Start();
@@ -650,8 +648,8 @@ class HttpClient::Task {
     VLOG(3) << status_->trace_id << " DoWrite " << " done";
     if (!active_)
       return;
-    status_->req_send_time = timer_.GetInMs();
-    request_message_.clear();
+    status_->req_send_time = timer_.GetInIntMilliseconds();
+    request_stream_.reset();
     d_->ClearWritable();
     d_->NotifyWhenReadable(
         NewPermanentCallback(this, &HttpClient::Task::DoRead));
@@ -702,8 +700,7 @@ class HttpClient::Task {
   HttpClient::ConnectionCloseState close_state_;
   AuthorizationStatus auth_status_;
 
-  string request_message_;
-  size_t request_message_written_;
+  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> request_stream_;
 
   const bool is_ping_;
 
@@ -1695,37 +1692,52 @@ void HttpClient::Request::AddHeader(const string& key, const string& value) {
 
 /* static */
 string HttpClient::Request::CreateHeader(
-    const string& key, const string& value) {
+    absl::string_view key, absl::string_view value) {
   std::ostringstream line;
   line << key << ": " << value;
   return line.str();
 }
 
-string HttpClient::Request::BuildMessage(
+string HttpClient::Request::BuildHeader(
     const std::vector<string>& headers,
-    absl::string_view body) const {
+    int content_length) const {
   std::ostringstream msg;
   msg << method_ << " " << request_path_ << " HTTP/1.1\r\n";
   if (host_ != "") {
-    msg << "Host: " << host_ << "\r\n";
+    msg << kHost << ": " << host_ << "\r\n";
   }
-  msg << "User-Agent: " << kUserAgentString << "\r\n";
-  msg << "Content-Type: " << content_type_ << "\r\n";
-  msg << "Content-Length: " << body.size() << "\r\n";
+  msg << kUserAgent << ": " << kUserAgentString << "\r\n";
+  msg << kContentType << ": " << content_type_ << "\r\n";
+  if (content_length >= 0) {
+    msg << kContentLength << ": " << content_length << "\r\n";
+  }
   if (authorization_ != "") {
-    msg << "Authorization: " << authorization_ << "\r\n";
+    msg << kAuthorization << ": " << authorization_ << "\r\n";
   }
   if (cookie_ != "") {
-    msg << "Cookie: " << cookie_ << "\r\n";
+    msg << kCookie << ": " << cookie_ << "\r\n";
   }
+  bool chunked = false;
   for (const auto& header : headers_) {
     msg << header << "\r\n";
+    if (absl::StartsWith(header, absl::StrCat(kTransferEncoding, ":")) &&
+        absl::StrContains(header, "chunked")) {
+      chunked = true;
+    }
   }
   for (const auto& header : headers) {
     msg << header << "\r\n";
+    if (absl::StartsWith(header, absl::StrCat(kTransferEncoding, ":")) &&
+        absl::StrContains(header, "chunked")) {
+      chunked = true;
+    }
   }
+  if (content_length < 0) {
+    CHECK(chunked) << "content-length is not give, but not chunked encoding";
+  }
+  // TODO: request_stream_ should provide chunked-body.
   msg << "\r\n";
-  msg << body;
+  VLOG(1) << "request\n" << msg.str();
   return msg.str();
 }
 
@@ -1739,9 +1751,15 @@ void HttpRequest::SetBody(const string& body) {
   body_ = body;
 }
 
-string HttpRequest::CreateMessage() const {
-  std::vector<string> headers;
-  return BuildMessage(headers, body_);
+std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>
+HttpRequest::NewStream() const {
+  std::vector<std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>> s;
+  s.reserve(2);
+  s.push_back(absl::make_unique<StringInputStream>(
+      BuildHeader(std::vector<string>(), body_.size())));
+  s.push_back(absl::make_unique<google::protobuf::io::ArrayInputStream>(
+      body_.data(), body_.size()));
+  return absl::make_unique<ChainedInputStream>(std::move(s));
 }
 
 // GetConentEncoding reports EncodingType specified in header.
@@ -1749,12 +1767,13 @@ string HttpRequest::CreateMessage() const {
 static EncodingType GetContentEncoding(absl::string_view header) {
   // TODO: Might be better to migrate to lib/compress_util
   absl::string_view::size_type content_encoding_header =
-      header.find("Content-Encoding: deflate\r\n");
+      header.find(absl::StrCat(kContentEncoding, ": deflate\r\n"));
   if (content_encoding_header != absl::string_view::npos) {
     return ENCODING_DEFLATE;
   } else {
 #ifdef ENABLE_LZMA
-    content_encoding_header = header.find("Content-Encoding: lzma2\r\n");
+    content_encoding_header =
+        header.find(absl::StrCat(kContentEncoding, ": lzma2\r\n"));
     if (content_encoding_header != absl::string_view::npos) {
       return ENCODING_LZMA2;
     }
@@ -1764,13 +1783,9 @@ static EncodingType GetContentEncoding(absl::string_view header) {
 }
 
 HttpClient::Response::Response()
-    : result_(FAIL),
-      len_(0),
-      body_offset_(0),
-      content_length_(string::npos),
-      is_chunked_(false),
-      remaining_(0),
-      status_code_(0) {
+    // to initialize in class definition, http.h needs to include
+    // scoped_fd.h for FAIL.
+    : result_(FAIL) {
 }
 
 HttpClient::Response::~Response() {
@@ -1788,14 +1803,12 @@ void HttpClient::Response::Reset() {
   result_ = FAIL;
   len_ = 0;
   body_offset_ = 0;
-  content_length_ = string::npos;
-  is_chunked_ = false;
-  remaining_ = 0;
   status_code_ = 0;
+  body_ = nullptr;
 }
 
 bool HttpClient::Response::HasHeader() const {
-  return body_offset_ > 0 && (is_chunked_ || content_length_ != string::npos);
+  return body_offset_ > 0;
 }
 
 absl::string_view HttpClient::Response::Header() const {
@@ -1810,45 +1823,50 @@ absl::string_view HttpClient::Response::Header() const {
 }
 
 void HttpClient::Response::Buffer(char** buf, int* buf_size) {
-  *buf_size = buffer_.size() - len_;
-  if (HasHeader() && content_length_ != string::npos) {
-    if (buffer_.size() < body_offset_ + content_length_) {
-      buffer_.resize(body_offset_ + content_length_);
+  if (!body_) {
+    *buf_size = buffer_.size() - len_;
+    if (*buf_size < kNetworkBufSize / 2) {
+      buffer_.resize(buffer_.size() + kNetworkBufSize);
     }
-  } else if (*buf_size < kNetworkBufSize / 2) {
-    buffer_.resize(buffer_.size() + kNetworkBufSize);
+    *buf = &buffer_[len_];
+    *buf_size = buffer_.size() - len_;
+  } else {
+    body_->Next(buf, buf_size);
   }
-  *buf = &buffer_[len_];
-  *buf_size = buffer_.size() - len_;
   CHECK_GT(*buf_size, 0)
       << " response len=" << len_
       << " size=" << buffer_.size()
-      << " body_offset=" << body_offset_
-      << " content_length=" << content_length_
-      << " is_chunked=" << is_chunked_;
+      << " body_offset=" << body_offset_;
 }
 
 bool HttpClient::Response::Recv(int r) {
-  bool has_header = HasHeader();
+  if (body_) {
+    return BodyRecv(r);
+  }
+  // header
+  if (r == 0) {  // EOF
+    LOG(WARNING) << trace_id_ <<
+        " not received a header but connection closed by a peer.";
+    err_message_ = "connection closed before receiving a header.";
+    result_ = FAIL;
+    body_offset_ = len_;
+    return true;
+  }
   len_ += r;
   absl::string_view resp(buffer_.data(), len_);
-  if (!has_header && !ParseHttpResponse(resp, &status_code_, &body_offset_,
-                                        &content_length_,
-                                        &is_chunked_)) {
+  size_t content_length = string::npos;
+  bool is_chunked = false;
+  if (!ParseHttpResponse(resp, &status_code_, &body_offset_,
+                         &content_length,
+                         &is_chunked)) {
     // still reading header.
-    if (r == 0) {
-      LOG(WARNING) << trace_id_ <<
-        " not received a header but connection closed by a peer.";
-      err_message_ = "connection closed before receiving a header.";
-      result_ = FAIL;
-      body_offset_ = len_;
-      return true;
-    }
     return false;
   }
   VLOG(2) << "header ready " << status_code_
           << " offset=" << body_offset_
-          << " content_length=" << content_length_;
+          << " content_length=" << content_length
+          << " is_chunked=" << is_chunked
+          << " len=" << len_;
   // Apiary returns 204 No Content for SaveLog.
   if (status_code_ == 204 && body_offset_ == len_) {
     // Go to next step quickly since Status 204 has nothing to parse.
@@ -1867,106 +1885,68 @@ bool HttpClient::Response::Recv(int r) {
     result_ = FAIL;
     return true;
   }
-  if (!is_chunked_ && content_length_ == string::npos) {
-    // no content-length
-    VLOG(3) << trace_id_ << " no content-length."
-            << " We should read until EOF."
-            << " r=" << r;
-    if (r == 0) {
-      VLOG(2) << trace_id_ << " ok r == 0, can finish.";
-      chunks_.clear();
-      chunks_.push_back(absl::string_view(buffer_.data() + body_offset_,
-                                          len_ - body_offset_));
-      return true;
-    }
-    return false;
+  if (body_offset_ == len_ && content_length == 0) {
+    // nothing to parse for body.
+    result_ = OK;
+    return true;
   }
-  DCHECK_GT(body_offset_, 0U);
-  if (is_chunked_) {
-    if (!ParseChunkedBody(resp, body_offset_,
-                          &remaining_,
-                          &chunks_)) {
-      // not fully received yet.
-      VLOG(2) << "at least remaining " << remaining_;
+  EncodingType encoding = GetContentEncoding(Header());
+  body_ = NewBody(content_length, is_chunked, encoding);
+  if (body_offset_ < len_) {
+    // header buffer_ has head of body.
+    absl::string_view body(buffer_.data(), len_);
+    body.remove_prefix(body_offset_);
+    VLOG(3) << trace_id_ << " body " << body.size() << " after header";
+    do {
+      char* buf = nullptr;
+      int buf_size = 0;
+      body_->Next(&buf, &buf_size);
+      if (body.size() <= buf_size) {
+        buf_size = body.size();
+      }
+      memcpy(buf, body.data(), buf_size);
+      body.remove_prefix(buf_size);
+      if (BodyRecv(buf_size)) {
+        return true;
+      }
+    } while (!body.empty());
+  }
+  return false;
+}
+
+bool HttpClient::Response::BodyRecv(int r) {
+  VLOG(3) << trace_id_ << " body receive=" << r;
+  switch (body_->Process(r)) {
+    case Body::State::Error:
       if (r == 0) {
         LOG(WARNING) << trace_id_ <<
-                     " connection closed before receiving all chunks.";
-        err_message_ = "connection closed before receiving all chunks.";
+            " connection closed before receiving all data.";
+        err_message_ = "connection closed before receiving all data.";
         result_ = FAIL;
         return true;
       }
+      LOG(WARNING) << trace_id_
+                   << " body receive failed @" << body_->ByteCount()
+                   << " size=" << r;
+      err_message_ = "body receive failed";
+      result_ = FAIL;
+      return true;
+
+    case Body::State::Ok:
+      CHECK_GE(r, 0);
+      VLOG(3) << trace_id_ << " received full content";
+      return true;
+
+    case Body::State::Incomplete:
+      CHECK_GT(r, 0);
+      VLOG(3) << trace_id_ << " need more data";
       return false;
-    }
-    if (remaining_ != 0) {
-      LOG(WARNING) << trace_id_ << " broken chunk tranfer coding";
-      err_message_ = "broken chunk tranfer coding";
-      result_ = FAIL;
-      return true;
-    }
-    return true;
   }
-
-  DCHECK_NE(content_length_, string::npos);
-  if (len_ < body_offset_ + content_length_) {
-    // not fully received yet.
-    remaining_ = (body_offset_ + content_length_ - len_);
-    VLOG(2) << "remaining " << remaining_;
-    if (r == 0) {
-      LOG(WARNING) << trace_id_ <<
-        " connection closed before receiving all data.";
-      err_message_ = "connection closed before receiving all data.";
-      result_ = FAIL;
-      return true;
-    }
-    return false;
-  }
-
-  LOG_IF(ERROR, r == 0) << trace_id_
-                        << " not expect to see r==0 for this."
-                        << " r=" << r
-                        << " len=" << len_
-                        << " body_offset_=" << body_offset_
-                        << " content_length_=" << content_length_;
-  chunks_.clear();
-  chunks_.push_back(
-      absl::string_view(buffer_.data() + body_offset_, content_length_));
-  return true;
 }
 
 bool HttpClient::Response::HasConnectionClose() const {
   return Header().find("Connection: close\r\n") != absl::string_view::npos;
 }
-
-class ChunkedInputStream {
- public:
-  explicit ChunkedInputStream(const std::vector<absl::string_view>& chunks)
-      : size_(0) {
-    for (const auto& chunk : chunks) {
-      inputs_.push_back(
-          new google::protobuf::io::ArrayInputStream(
-              chunk.data(), chunk.size()));
-      size_ += chunk.size();
-    }
-  }
-  ~ChunkedInputStream() {
-    for (size_t i = 0; i < inputs_.size(); ++i) {
-      delete inputs_[i];
-    }
-  }
-
-  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> stream() const {
-    return std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>(
-        new google::protobuf::io::ConcatenatingInputStream(
-            &inputs_[0], inputs_.size()));
-  }
-
-  size_t size() const { return size_; }
-
- private:
-  std::vector<google::protobuf::io::ZeroCopyInputStream*> inputs_;
-  size_t size_;
-  DISALLOW_COPY_AND_ASSIGN(ChunkedInputStream);
-};
 
 void HttpClient::Response::Parse() {
   if (result_ == OK) {
@@ -1975,27 +1955,120 @@ void HttpClient::Response::Parse() {
   if (!err_message_.empty()) {
     return;
   }
-
-  ChunkedInputStream chunk_stream(chunks_);
-  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> input(
-      chunk_stream.stream());
-  EncodingType encoding = GetContentEncoding(Header());
-  if (encoding == ENCODING_DEFLATE) {
-    input = absl::make_unique<InflateInputStream>(std::move(input));
-  } else if (encoding == ENCODING_LZMA2) {
-#ifdef ENABLE_LZMA
-    input = absl::make_unique<LZMAInputStream>(std::move(input));
-#else
-    LOG(ERROR) << trace_id_ << " lzma is not supported";
-#endif
-  }
-  if (input.get() == nullptr) {
-    LOG(WARNING) << trace_id_ << "Decode response failed";
-    err_message_ = "Decode response failed";
-    result_ = FAIL;
+  if (!body_) {
     return;
   }
-  ParseBody(input.get());
+  ParseBody();
+}
+
+HttpResponse::Body::Body(size_t content_length,
+                         bool is_chunked,
+                         EncodingType encoding_type)
+    : content_length_(content_length),
+      encoding_type_(encoding_type) {
+  if (is_chunked) {
+    chunk_parser_ = absl::make_unique<HttpChunkParser>();
+  }
+}
+
+void HttpResponse::Body::Next(char** buf, int* buf_size) {
+  size_t allocated = buffer_.size() * kNetworkBufSize;
+  if (len_ == allocated) {
+    VLOG(3) << "allocate resp body buffer len=" << len_;
+    buffer_.emplace_back(absl::make_unique<char[]>(kNetworkBufSize));
+    allocated += kNetworkBufSize;
+  }
+  *buf_size = allocated - len_;
+  *buf = buffer_.back().get() + len_ % kNetworkBufSize;
+  CHECK_GT(*buf_size, 0)
+      << " body len=" << len_
+      << " allocated=" << allocated;
+}
+
+HttpClient::Response::Body::State
+HttpResponse::Body::Process(int data_size) {
+  VLOG(3) << "body process " << data_size
+          << " len=" << len_
+          << " content_length=" << content_length_
+          << " is_chunked=" << (chunk_parser_ ? true : false);
+  if (data_size < 0) {
+    return State::Error;
+  }
+  if (data_size == 0) {  // EOF
+    if (!chunk_parser_) {
+      if (content_length_ == string::npos) {
+        VLOG(3) << "content finished with EOF";
+        return State::Ok;
+      }
+      if (content_length_ == len_) {
+        // empty body's case
+        VLOG(3) << "empty content";
+        return State::Ok;
+      }
+    }
+    VLOG(3) << "unexpected EOF at " << len_;
+    return State::Error;
+  }
+  DCHECK_LE(data_size, kNetworkBufSize);
+  CHECK_LE(len_ + data_size, buffer_.size() * kNetworkBufSize);
+  absl::string_view data(buffer_.back().get() + len_ % kNetworkBufSize,
+                         data_size);
+  len_ += data_size;
+  if (chunk_parser_) {
+    if (!chunk_parser_->Parse(data, &chunks_)) {
+      VLOG(3) << "failed to parse chunk";
+      return State::Error;
+    }
+    if (!chunk_parser_->done()) {
+      VLOG(3) << "chunk not fully received yet";
+      return State::Incomplete;
+    }
+    VLOG(3) << "all chunk finished";
+    return State::Ok;
+  }
+  chunks_.emplace_back(data);
+  if (content_length_ == string::npos) {
+    // read until EOF.
+    return State::Incomplete;
+  }
+  if (len_ > content_length_) {
+    LOG(WARNING) << "received extra data?? len=" << len_
+                 << " content_length=" << content_length_;
+    return State::Error;
+  }
+  if (len_ == content_length_) {
+      VLOG(3) << "content finished at " << content_length_;
+    return State::Ok;
+  }
+  return State::Incomplete;
+}
+
+std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>
+HttpResponse::Body::ParsedStream() const {
+  std::vector<std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>>
+      chunk_streams;
+  for (const auto& chunk : chunks_) {
+    chunk_streams.push_back(
+        absl::make_unique<google::protobuf::io::ArrayInputStream>(
+            chunk.data(), chunk.size()));
+  }
+  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> input
+      = absl::make_unique<ChainedInputStream>(std::move(chunk_streams));
+
+  switch (encoding_type_) {
+    case ENCODING_DEFLATE:
+      return absl::make_unique<InflateInputStream>(std::move(input));
+    case ENCODING_LZMA2:
+#ifdef ENABLE_LZMA
+      return absl::make_unique<LZMAInputStream>(std::move(input));
+#else
+      return nullptr;
+#endif
+    default:
+      VLOG(1) << "encoding: not specified";
+      break;
+  }
+  return input;
 }
 
 HttpResponse::HttpResponse() {
@@ -2004,7 +2077,21 @@ HttpResponse::HttpResponse() {
 HttpResponse::~HttpResponse() {
 }
 
-void HttpResponse::ParseBody(google::protobuf::io::ZeroCopyInputStream* input) {
+HttpClient::Response::Body* HttpResponse::NewBody(
+    size_t content_length, bool is_chunked, EncodingType encoding_type) {
+  response_body_ =
+      absl::make_unique<Body>(content_length, is_chunked, encoding_type);
+  return response_body_.get();
+}
+
+void HttpResponse::ParseBody() {
+  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> input =
+      response_body_->ParsedStream();
+  if (input == nullptr) {
+    err_message_ = "failed to create parsed stream";
+    result_ = FAIL;
+    return;
+  }
   std::ostringstream ss;
   const void* buffer;
   int size;
@@ -2013,10 +2100,6 @@ void HttpResponse::ParseBody(google::protobuf::io::ZeroCopyInputStream* input) {
   }
   parsed_body_ = ss.str();
   result_ = OK;
-}
-
-const string& HttpResponse::Body() const {
-  return parsed_body_;
 }
 
 bool HttpClient::NetworkErrorStatus::OnNetworkErrorDetected(
@@ -2046,6 +2129,25 @@ bool HttpClient::NetworkErrorStatus::OnNetworkRecovered(
   error_started_time_ = 0;
   error_until_ = 0;
   return true;
+}
+
+StringInputStream::StringInputStream(string data)
+    : data_(std::move(data)),
+      stream_(absl::make_unique<google::protobuf::io::ArrayInputStream>(
+          data_.data(), data_.size())) {
+}
+
+ChainedInputStream::ChainedInputStream(
+    std::vector<std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>>
+    streams)
+    : streams_(std::move(streams)) {
+  streams_array_.reserve(streams_.size());
+  for (const auto& s : streams_) {
+    streams_array_.push_back(s.get());
+  }
+  stream_ = absl::make_unique<
+    google::protobuf::io::ConcatenatingInputStream>(
+        streams_array_.data(), streams_array_.size());
 }
 
 }  // namespace devtools_goma

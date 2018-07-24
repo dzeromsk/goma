@@ -44,7 +44,7 @@ bool DescriptorPollerBase::PollEvents(
   }
   lock->Release();
   if (*statp != nullptr) {
-    (*statp)->UpdateWaitTime(timer.GetInNanoSeconds());
+    (*statp)->UpdateWaitTime(timer.GetInNanoseconds());
     timer.Start();
   }
   VLOG(3) << "poll on " << num_descriptors << " fds";
@@ -52,7 +52,7 @@ bool DescriptorPollerBase::PollEvents(
   VLOG(3) << "poll -> " << r;
   lock->Acquire();
   if (*statp != nullptr) {
-    (*statp)->UpdateHoldTime(timer.GetInNanoSeconds());
+    (*statp)->UpdateHoldTime(timer.GetInNanoseconds());
   }
   if (r == 0) {
     // timed-out

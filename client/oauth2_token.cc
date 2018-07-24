@@ -12,6 +12,9 @@
 #include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
+#include "absl/types/optional.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_specific.h"
@@ -38,10 +41,10 @@ const char kgRPCType[] = "authorized_user";
 
 // If something error happens during the refresh, the refresh task retries
 // refresh for this time period.
-static const int kRefreshTimeoutSec = 10;
+constexpr absl::Duration kRefreshTimeout = absl::Seconds(10);
 // If something error happens in the refresh of access token, the refresh task
 // will not fetch access token again for this period.
-static const int kErrorRefreshPendingSec = 60;
+constexpr absl::Duration kErrorRefreshPendingTimeout = absl::Seconds(60);
 
 class AuthRefreshConfig {
  public:
@@ -56,7 +59,7 @@ class AuthRefreshConfig {
   virtual bool ParseResponseBody(const string& resp_body,
                                  string* token_type,
                                  string* access_token,
-                                 int* expires_in) const = 0;
+                                 absl::Duration* expires_in) const = 0;
 };
 
 class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
@@ -128,7 +131,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
       string err;
       Json::Reader reader;
       Json::Value root;
-      if (reader.parse(resp.Body(), root, false)) {
+      if (reader.parse(resp.parsed_body(), root, false)) {
         if (!GetNonEmptyStringFromJson(root, "email", &email, &err)) {
           LOG(WARNING) << "parse tokeninfo: " << err;
         }
@@ -154,7 +157,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
       return false;
     }
     AUTOLOCK(lock, &mu_);
-    token_expires_at_ = time(nullptr);
+    token_expiration_time_ = absl::Now();
     token_type_.clear();
     access_token_.clear();
     account_email_.clear();
@@ -162,39 +165,39 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
   }
 
   string GetAuthorization() const override LOCKS_EXCLUDED(mu_) {
-    time_t now = time(nullptr);
     AUTOLOCK(lock, &mu_);
-    if (now < token_expires_at_ &&
-        !token_type_.empty() && !access_token_.empty()) {
+    if (absl::Now() < token_expiration_time_ && !token_type_.empty() &&
+        !access_token_.empty()) {
       return token_type_ + " " + access_token_;
     }
     return "";
   }
 
   bool ShouldRefresh() const override LOCKS_EXCLUDED(mu_) {
-    time_t now = time(nullptr);
+    const absl::Time now = absl::Now();
     AUTOLOCK(lock, &mu_);
     if (!config_->CanRefresh()) {
       return false;
     }
-    if (last_network_error_ > 0 &&
-        now < last_network_error_ + kErrorRefreshPendingSec) {
+    if (last_network_error_time_ &&
+        *last_network_error_time_ > absl::Time() &&
+        now < *last_network_error_time_ + kErrorRefreshPendingTimeout) {
       LOG(WARNING)
           << "prohibit to refresh OAuth2 access token for certain duration."
-          << " last_network_error=" << last_network_error_
-          << " pending=" << kErrorRefreshPendingSec;
+          << " last_network_error=" << *last_network_error_time_
+          << " pending=" << kErrorRefreshPendingTimeout;
       return false;
     }
-    return now >= token_expires_at_ ||
-        token_type_.empty() || access_token_.empty();
+    return now >= token_expiration_time_ || token_type_.empty() ||
+           access_token_.empty();
   }
 
   void RunAfterRefresh(WorkerThreadManager::ThreadId thread_id,
                        OneshotClosure* closure) override LOCKS_EXCLUDED(mu_) {
-    time_t now = time(nullptr);
+    const absl::Time now = absl::Now();
     {
       AUTOLOCK(lock, &mu_);
-      if (now < token_expires_at_ || shutting_down_) {
+      if (now < token_expiration_time_ || shutting_down_) {
         DCHECK(shutting_down_ || !access_token_.empty());
         // access token is valid or oauth2 not available, go ahead.
         wm_->RunClosureInThread(FROM_HERE,
@@ -202,11 +205,12 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
                                 WorkerThreadManager::PRIORITY_MED);
         return;
       }
-      if (last_network_error_ > 0 &&
-          now < last_network_error_ + kErrorRefreshPendingSec) {
+      if (last_network_error_time_ &&
+          *last_network_error_time_ > absl::Time() &&
+          now < *last_network_error_time_ + kErrorRefreshPendingTimeout) {
         LOG(WARNING) << "will not refresh token."
-                     << " last_network_error=" << last_network_error_
-                     << " pending=" << kErrorRefreshPendingSec;
+                     << " last_network_error=" << *last_network_error_time_
+                     << " pending=" << kErrorRefreshPendingTimeout;
         wm_->RunClosureInThread(FROM_HERE,
                                 thread_id, closure,
                                 WorkerThreadManager::PRIORITY_MED);
@@ -217,8 +221,9 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
       switch (state_) {
         case NOT_STARTED: // first run.
           state_ = RUN;
-          refresh_deadline_ = now + kRefreshTimeoutSec;
-          refresh_backoff_ms_ = client_->options().min_retry_backoff_ms;
+          refresh_deadline_ = now + kRefreshTimeout;
+          refresh_backoff_duration_ =
+              absl::Milliseconds(client_->options().min_retry_backoff_ms);
           break;
         case RUN:
           return;
@@ -306,41 +311,37 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     }
   }
 
-  void ParseOAuth2AccessTokenUnlocked(int* next_update_in)
+  void ParseOAuth2AccessTokenUnlocked(absl::Duration* next_update_in)
       EXCLUSIVE_LOCKS_REQUIRED(mu_) {
-    static const int kOAuthExpireTimeMarginInSec = 60;
+    constexpr auto kOAuthExpireTimeMargin = absl::Seconds(60);
     if (status_->err != OK) {
       LOG(ERROR) << "HTTP communication failed to refresh OAuth2 access token."
                  << " err_message=" << status_->err_message;
       return;
     }
-    int expires_in = 0;
-    if (!config_->ParseResponseBody(resp_.Body(),
-                                    &token_type_,
-                                    &access_token_,
-                                    &expires_in)) {
+    absl::Duration expires_in;
+    if (!config_->ParseResponseBody(resp_.parsed_body(), &token_type_,
+                                    &access_token_, &expires_in)) {
       LOG(ERROR) << "Failed to parse OAuth2 access token:"
-                 << resp_.Body();
+                 << resp_.parsed_body();
       token_type_.clear();
       access_token_.clear();
       account_email_.clear();
       return;
     }
-    time_t now = time(nullptr);
-    token_expires_at_ = now + expires_in - kOAuthExpireTimeMarginInSec;
+    const absl::Time now = absl::Now();
+    token_expiration_time_ = now + expires_in - kOAuthExpireTimeMargin;
     LOG(INFO) << "Got new OAuth2 access token."
-              << " now=" << now
-              << " expires_in=" << expires_in
-              << " token_expires_at=" << token_expires_at_;
+              << " now=" << now << " expires_in=" << expires_in
+              << " token_expiration_time=" << token_expiration_time_;
     VLOG(1) << "access_token=" << access_token_;
     // expires_in is usually large enough. e.g. 3600.
     // If it is small, auto update of access token will not work.
-    *next_update_in = expires_in - kOAuthExpireTimeMarginInSec * 2;
-    LOG_IF(WARNING, *next_update_in <= 0)
+    *next_update_in = expires_in - kOAuthExpireTimeMargin * 2;
+    LOG_IF(WARNING, *next_update_in <= absl::ZeroDuration())
         << "expires_in is too small.  auto update will not work."
-        << " next_update_in=" << *next_update_in
-        << " expires_in=" << expires_in
-        << " kOAuthExpireTimeMarginInSec=" << kOAuthExpireTimeMarginInSec;
+        << " next_update_in=" << *next_update_in << " expires_in=" << expires_in
+        << " kOAuthExpireTimeMargin=" << kOAuthExpireTimeMargin;
   }
 
   void Done() LOCKS_EXCLUDED(mu_) {
@@ -350,36 +351,40 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     if (status_->err != OK &&
         (status_->http_return_code == 0 ||
          status_->http_return_code / 100 == 5)) {
-      time_t now = time(nullptr);
+      const absl::Time now = absl::Now();
       http_ok = false;
       {
-        if (now < refresh_deadline_) {
+        if (refresh_deadline_ && now < *refresh_deadline_) {
           LOG(WARNING) << "refresh failed http=" << status_->http_return_code
-                       << " retry until deadline=" << refresh_deadline_
-                       << " refresh_backoff_ms_=" << refresh_backoff_ms_;
+                       << " retry until deadline=" << *refresh_deadline_
+                       << " refresh_backoff_duration_="
+                       << refresh_backoff_duration_;
 
-          refresh_backoff_ms_ = HttpClient::BackoffMsec(
-              client_->options(), refresh_backoff_ms_, true);
+          auto refresh_backoff_ms =
+              absl::ToInt64Milliseconds(refresh_backoff_duration_);
+          refresh_backoff_duration_ =
+              absl::Milliseconds(HttpClient::BackoffMsec(
+                  client_->options(), refresh_backoff_ms, true));
           LOG(INFO) << "backoff"
-                    << " refresh_backoff_ms=" << refresh_backoff_ms_;
+                    << " refresh_backoff_duration="
+                    << refresh_backoff_duration_;
           CHECK(cancel_refresh_ == nullptr)
               << "Somebody else seems to run refresh task and failing?";
           cancel_refresh_ = wm_->RunDelayedClosureInThread(
-              FROM_HERE,
-              wm_->GetCurrentThreadId(),
-              refresh_backoff_ms_,
-              NewCallback(
-                  this, &GoogleOAuth2AccessTokenRefreshTask::RunRefresh));
+              FROM_HERE, wm_->GetCurrentThreadId(),
+              absl::ToInt64Milliseconds(refresh_backoff_duration_),
+              NewCallback(this,
+                          &GoogleOAuth2AccessTokenRefreshTask::RunRefresh));
           return;
         }
         LOG(WARNING) << "refresh failed http=" << status_->http_return_code
                      << " deadline_exceeded now=" << now
-                     << " deadline=" << refresh_deadline_;
+                     << " deadline=" << *refresh_deadline_;
 
-        // If last_network_error_ is set, ShouldRefresh() starts returning
+        // If last_network_error_time_ is set, ShouldRefresh() starts returning
         // false to make task local fallback.  Let me make it postponed
         // until refresh attempts reaches refresh_deadline_.
-        last_network_error_ = now;
+        last_network_error_time_ = now;
       }
     }
     LOG_IF(ERROR, status_->err != OK)
@@ -390,15 +395,15 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     VLOG(1) << "Get access token done.";
     std::vector<std::pair<WorkerThreadManager::ThreadId,
                           OneshotClosure*>> callbacks;
-    int next_update_in = 0;
+    absl::Duration next_update_in;
     {
       DCHECK_EQ(state_, RUN);
       state_ = NOT_STARTED;
-      refresh_deadline_ = 0;
+      refresh_deadline_.reset();
       ParseOAuth2AccessTokenUnlocked(&next_update_in);
       if (http_ok && !access_token_.empty()) {
-        last_network_error_ = 0;
-        refresh_backoff_ms_ = 0;
+        last_network_error_time_.reset();
+        refresh_backoff_duration_ = absl::ZeroDuration();
       }
       callbacks.swap(pending_tasks_);
     }
@@ -407,7 +412,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
                               callback.first, callback.second,
                               WorkerThreadManager::PRIORITY_MED);
     }
-    if (next_update_in > 0) {
+    if (next_update_in > absl::ZeroDuration()) {
       {
         if (shutting_down_) {
           return;
@@ -423,9 +428,9 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
         DCHECK(THREAD_ID_IS_SELF(refresh_task_thread_id_));
         cancel_refresh_now_ = wm_->RunDelayedClosureInThread(
             FROM_HERE, refresh_task_thread_id_,
-            next_update_in * 1000,
-            NewCallback(
-                this, &GoogleOAuth2AccessTokenRefreshTask::RunRefreshNow));
+            absl::ToInt64Milliseconds(next_update_in),
+            NewCallback(this,
+                        &GoogleOAuth2AccessTokenRefreshTask::RunRefreshNow));
       }
       LOG(INFO) << "Registered the OAuth2 refresh task to be executed later."
                 << " next_update_in=" << next_update_in;
@@ -481,8 +486,9 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     switch (state_) {
       case NOT_STARTED: // first run.
         state_ = RUN;
-        refresh_deadline_ = time(nullptr) + kRefreshTimeoutSec;
-        refresh_backoff_ms_ = client_->options().min_retry_backoff_ms;
+        refresh_deadline_ = absl::Now() + kRefreshTimeout;
+        refresh_backoff_duration_ =
+            absl::Milliseconds(client_->options().min_retry_backoff_ms);
         break;
       case RUN:
         return;
@@ -518,13 +524,13 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
   ConditionVariable cond_;
   std::unique_ptr<HttpClient::Status> status_ GUARDED_BY(mu_);
   State state_ GUARDED_BY(mu_) = NOT_STARTED;
-  time_t refresh_deadline_ GUARDED_BY(mu_) = 0;
+  absl::optional<absl::Time> refresh_deadline_ GUARDED_BY(mu_);
   string token_type_ GUARDED_BY(mu_);
   string access_token_ GUARDED_BY(mu_);
   string account_email_ GUARDED_BY(mu_);
-  time_t token_expires_at_ GUARDED_BY(mu_) = 0;
-  time_t last_network_error_ GUARDED_BY(mu_) = 0;
-  int refresh_backoff_ms_ GUARDED_BY(mu_) = 0;
+  absl::Time token_expiration_time_ GUARDED_BY(mu_);
+  absl::optional<absl::Time> last_network_error_time_ GUARDED_BY(mu_);
+  absl::Duration refresh_backoff_duration_ GUARDED_BY(mu_);
   std::vector<std::pair<WorkerThreadManager::ThreadId, OneshotClosure*>>
       pending_tasks_ GUARDED_BY(mu_);
 
@@ -593,7 +599,7 @@ class OAuth2RefreshConfig : public AuthRefreshConfig {
   bool ParseResponseBody(const string& resp_body,
                          string* token_type,
                          string* access_token,
-                         int* expires_in) const override {
+                         absl::Duration* expires_in) const override {
     return ParseOAuth2AccessToken(
         resp_body, token_type, access_token, expires_in);
   }
@@ -747,9 +753,8 @@ class ServiceAccountRefreshConfig : public OAuth2RefreshConfig {
       LOG(INFO) << "additional scope:" << config_.scope;
       cs.scopes.emplace_back(config_.scope);
     }
-    cs.expires_in_sec = 3600;
     JsonWebToken jwt(cs);
-    string assertion = jwt.Token(*key, time(nullptr));
+    string assertion = jwt.Token(*key);
     const string req_body = absl::StrCat(
         "grant_type=", JsonWebToken::kGrantTypeEncoded,
         "&assertion=", assertion);
@@ -903,7 +908,7 @@ class LuciAuthRefreshConfig : public AuthRefreshConfig {
   bool ParseResponseBody(const string& resp_body,
                          string* token_type,
                          string* access_token,
-                         int* expires_in) const override {
+                         absl::Duration* expires_in) const override {
     static const char kTokenType[] = "Bearer";
     LuciOAuthTokenResponse resp;
     if (!ParseLuciOAuthTokenResponse(resp_body, &resp)) {
@@ -911,10 +916,9 @@ class LuciAuthRefreshConfig : public AuthRefreshConfig {
                    << " body=" << resp_body;
       return false;
     }
-    time_t now = time(nullptr);
     *token_type = kTokenType;
     *access_token = resp.access_token;
-    *expires_in = resp.expiry - now;
+    *expires_in = absl::FromTimeT(resp.expiry) - absl::Now();
     return true;
   }
 
@@ -1001,7 +1005,7 @@ string ExchangeOAuth2RefreshToken(
     string err;
     Json::Reader reader;
     Json::Value root;
-    if (reader.parse(string(resp.Body()), root, false)) {
+    if (reader.parse(string(resp.parsed_body()), root, false)) {
       if (!GetNonEmptyStringFromJson(root, "refresh_token", &token, &err)) {
         LOG(WARNING) << "parse exchange result: " << err;
       }

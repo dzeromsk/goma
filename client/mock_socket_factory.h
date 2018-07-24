@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "absl/time/time.h"
 #include "basictypes.h"
 #include "scoped_fd.h"
 #include "socket_factory.h"
@@ -117,10 +118,14 @@ class MockSocketServer {
   // Test server will close the sock.
   void ServerClose(int sock);
 
+  // Test server will wait wihtout doing read/write to cause client timeout.
+  void ServerWait(absl::Duration wait_time);
+
  private:
   void DoServerRead(int sock, string* buf);
   void DoServerWrite(int sock, string buf);
   void DoServerClose(int sock);
+  void DoServerWait(absl::Duration wait_time);
 
   WorkerThreadManager* wm_;
   int pool_;

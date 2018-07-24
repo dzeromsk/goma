@@ -89,6 +89,12 @@ void InitLogging(const char* argv0) {
 #ifdef ADDRESS_SANITIZER
   LOG(ERROR) << "WARNING: ASAN BINARY -- Performance may suffer";
 #endif
+#ifdef THREAD_SANITIZER
+  LOG(ERROR) << "WARNING: TSAN BINARY -- Performance may suffer";
+#endif
+#ifdef MEMORY_SANITIZER
+  LOG(ERROR) << "WARNING: MSAN BINARY -- Performance may suffer";
+#endif
   {
     std::ostringstream ss;
     DumpEnvFlag(&ss);

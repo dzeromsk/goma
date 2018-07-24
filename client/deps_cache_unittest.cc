@@ -19,7 +19,6 @@
 #include "compiler_info.h"
 #include "cxx/cxx_compiler_info.h"
 #include "cxx/include_processor/include_cache.h"
-#include "file.h"
 #include "file_helper.h"
 #include "gcc_flags.h"
 #include "java/java_compiler_info.h"

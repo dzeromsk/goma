@@ -10,6 +10,8 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "lockhelper.h"
 #include "platform_thread.h"
 using std::string;
@@ -99,7 +101,7 @@ class SocketPairTestThread : public PlatformThread::Delegate {
   void set_state(State state) {
     // Block set_state until |signal_| is not set.
     while (::WaitForSingleObjectEx(signal_, 0, TRUE) != WAIT_TIMEOUT) {
-      PlatformThread::Sleep(100);
+      absl::SleepFor(absl::Milliseconds(100));
     }
     AutoLock lock(&lock_);
     state_ = state;

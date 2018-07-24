@@ -33,6 +33,8 @@
 #include "absl/memory/memory.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "client_util.h"
 #include "compiler_flags.h"
 #include "compiler_flags_parser.h"
@@ -346,7 +348,7 @@ bool StartCompilerProxy() {
                 << "Something might go wrong." << std::endl;
     }
     // Wait 100ms.
-    PlatformThread::Sleep(100);
+    absl::SleepFor(absl::Milliseconds(100));
   }
 
   return true;
@@ -550,7 +552,7 @@ GomaClient::Result GomaClient::WaitIPC() {
   }
 
   if (FLAGS_DUMP_TIME) {
-    resp_write_time_ = timer.Get();
+    resp_write_time_ = timer.GetInSeconds();
   }
   // TODO: check output files are written?
 

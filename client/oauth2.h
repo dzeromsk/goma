@@ -8,6 +8,7 @@
 #include <string>
 
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
 
 namespace devtools_goma {
 
@@ -68,7 +69,7 @@ struct ServiceAccountConfig {
 bool ParseOAuth2AccessToken(const std::string& json,
                             std::string* token_type,
                             std::string* access_token,
-                            int* expires_in);
+                            absl::Duration* expires_in);
 
 // Returns default OAuth2 config.
 void DefaultOAuth2Config(OAuth2Config* config);

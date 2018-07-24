@@ -15,7 +15,7 @@ void SimpleTimer::Start() {
   clock_gettime(CLOCK_MONOTONIC, &start_time_);
 }
 
-long long SimpleTimer::GetInNanoSeconds() const {
+long long SimpleTimer::GetInNanoseconds() const {
   struct timespec end_time;
   clock_gettime(CLOCK_MONOTONIC, &end_time);
 

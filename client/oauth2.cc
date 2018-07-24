@@ -19,7 +19,7 @@ namespace devtools_goma {
 bool ParseOAuth2AccessToken(const string& json,
                             string* token_type,
                             string* access_token,
-                            int* expires_in) {
+                            absl::Duration* expires_in) {
   static const char kAccessToken[] = "access_token";
   static const char kTokenType[] = "token_type";
   static const char kExpiresIn[] = "expires_in";
@@ -40,14 +40,16 @@ bool ParseOAuth2AccessToken(const string& json,
     LOG(WARNING) << err;
     return false;
   }
-  if (!GetIntFromJson(root, kExpiresIn, expires_in, &err)) {
+  int expires_in_sec = 0;
+  if (!GetIntFromJson(root, kExpiresIn, &expires_in_sec, &err)) {
     LOG(WARNING) << err;
     return false;
   }
 
-  if (*expires_in == 0) {
+  if (expires_in_sec == 0) {
     return false;
   }
+  *expires_in = absl::Seconds(expires_in_sec);
 
   return true;
 }

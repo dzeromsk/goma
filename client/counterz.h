@@ -92,7 +92,7 @@ class ScopedCounter {
 
   ~ScopedCounter() {
     if (counter_info_ != nullptr) {
-      counter_info_->Inc(timer_.GetInNanoSeconds());
+      counter_info_->Inc(timer_.GetInNanoseconds());
     }
   }
 

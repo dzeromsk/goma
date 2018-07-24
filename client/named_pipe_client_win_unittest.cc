@@ -9,8 +9,10 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include "named_pipe_win.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "named_pipe_server_win.h"
+#include "named_pipe_win.h"
 #include "worker_thread_manager.h"
 
 namespace devtools_goma {
@@ -30,7 +32,7 @@ class NamedPipeClientTest : public ::testing::Test {
     void HandleIncoming(NamedPipeServer::Request* req) override {
       LOG(INFO) << "Handle incoming: msg=" << req->request_message();
       EXPECT_EQ(expect_request_, req->request_message());
-      PlatformThread::Sleep(wait_sec_ * 1000);
+      absl::SleepFor(absl::Seconds(wait_sec_));
       LOG(INFO) << "reply response: msg=" << reply_;
       req->SendReply(reply_);
     }
@@ -264,7 +266,7 @@ TEST(NamedPipeClientTest, Timeout) {
     }
     if (num_read == ERR_TIMEOUT) {
       LOG(INFO) << "error timeout";
-      PlatformThread::Sleep(2 * 1000);
+      absl::SleepFor(absl::Seconds(2));
       continue;
     }
     EXPECT_GT(num_read, 0)

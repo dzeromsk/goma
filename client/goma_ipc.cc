@@ -99,11 +99,11 @@ std::unique_ptr<IOChannel> GomaIPC::CallAsync(
   if (err < 0) {
     std::ostringstream ss;
     ss << "Failed to send err=" << err
-       << " duration=" << req_send_timer.GetInMs() << "ms";
+       << " duration=" << req_send_timer.GetInMilliseconds() << "ms";
     SetError(err, ss.str(), status);
     return nullptr;
   }
-  status->req_send_time = req_send_timer.Get();
+  status->req_send_time = req_send_timer.GetInSeconds();
   return chan;
 }
 
@@ -128,7 +128,7 @@ int GomaIPC::Wait(std::unique_ptr<IOChannel> chan,
   if (err < 0) {
     std::ostringstream ss;
     ss << "Failed to read response err=" << err
-       << " duration=" << resp_recv_timer.GetInMs() << "ms";
+       << " duration=" << resp_recv_timer.GetInMilliseconds() << "ms";
     SetError(err, ss.str(), status);
     return err;
   }
@@ -146,7 +146,7 @@ int GomaIPC::Wait(std::unique_ptr<IOChannel> chan,
     return FAIL;
   }
 
-  status->resp_recv_time = resp_recv_timer.Get();
+  status->resp_recv_time = resp_recv_timer.GetInSeconds();
   status->resp_size = body.size();
 
   if (!resp->ParseFromString(body)) {
@@ -324,7 +324,7 @@ int GomaIPC::CheckHealthz(Status* status) {
   if (len <= 0) {
     std::ostringstream ss;
     ss << "Error /healthz err=" << len
-       << " duration=" << timer.GetInMs() << "ms"
+       << " duration=" << timer.GetInMilliseconds() << "ms"
        << " in pid:" << pid
        << " error=" << healthz_chan->GetLastErrorMessage();
     LOG(ERROR) << "GOMA: " << ss.str();

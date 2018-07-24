@@ -12,6 +12,8 @@
 #include "config_win.h"
 #endif
 
+#include <fstream>
+
 #include "file_dir.h"
 #include "glog/logging.h"
 #include "path.h"
@@ -96,6 +98,56 @@ namespace file {
   }
 #endif
   return ::util::Status(true);
+}
+
+::util::Status Copy(absl::string_view from,
+                    absl::string_view to,
+                    const Options& options) {
+  string cfrom(from);
+  string cto(to);
+
+#ifdef _WIN32
+  if (!CopyFileA(cfrom.c_str(), cto.c_str(), !options.overwrite())) {
+    DWORD err = GetLastError();
+    LOG_SYSRESULT(err);
+    LOG(WARNING) << "failed to copy file:"
+                 << " from=" << from << " to=" << to;
+    return ::util::Status(false);
+  }
+
+  return ::util::Status(true);
+#else
+  std::ifstream ifs(cfrom, std::ifstream::binary);
+  if (!ifs) {
+    LOG(WARNING) << "Input file not found: " << from;
+    return ::util::Status(false);
+  }
+
+  struct stat stat_buf;
+  if (!options.overwrite() && (0 == stat(cto.c_str(), &stat_buf))) {
+    LOG(ERROR) << "File " << to << " exists and overwrite is disabled";
+    return ::util::Status(false);
+  }
+
+  std::ofstream ofs(cto, std::ofstream::binary);
+  if (!ofs) {
+    LOG(WARNING) << "Cannot open output file: " << to;
+    return ::util::Status(false);
+  }
+
+  ::util::Status status(true);
+  while (!ifs.eof()) {
+    char buf[4096];
+    ifs.read(buf, sizeof(buf));
+    if (ifs.fail() && !ifs.eof()) {
+      LOG(WARNING) << "Failed to read file from: " << from;
+      return ::util::Status(false);
+    }
+    ofs.write(buf, ifs.gcount());
+  }
+
+  return ::util::Status(true);
+#endif
 }
 
 }  // namespace file

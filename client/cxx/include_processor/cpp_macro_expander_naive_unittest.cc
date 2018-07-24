@@ -177,4 +177,25 @@ TEST(CppMacroExpanderNaiveTest, GetMacroArgumentsUnterminatedParen) {
   }
 }
 
+TEST(CppMacroExpanderNaiveTest, GetVaOptArgument) {
+  const string s = "( 1, F(1, 2) ) X";
+  ArrayTokenList tokens;
+  ASSERT_TRUE(CppTokenizer::TokenizeAll(s, false, &tokens));
+
+  // [(][ ][1][,][ ][F][(][1][,][ ][2][)][ ][)][ ][X]
+  //  0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15
+
+  ASSERT_EQ(16, tokens.size());
+
+  ArrayTokenList::const_iterator argument_begin;
+  ArrayTokenList::const_iterator argument_end;
+  ArrayTokenList::const_iterator right_paren_pos;
+  EXPECT_TRUE(CppMacroExpanderNaive::GetVaOptArgument(
+      tokens.begin(), tokens.end(), &argument_begin, &argument_end,
+      &right_paren_pos));
+  EXPECT_EQ(2, argument_begin - tokens.begin());
+  EXPECT_EQ(12, argument_end - tokens.begin());
+  EXPECT_EQ(13, right_paren_pos - tokens.begin());
+}
+
 }  // namespace devtools_goma

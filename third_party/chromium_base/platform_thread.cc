@@ -58,11 +58,6 @@ void PlatformThread::Join(PlatformThreadHandle thread_handle) {
   CloseHandle(thread_handle);
 }
 
-// static
-void PlatformThread::Sleep(int32_t duration_ms) {
-  ::Sleep(duration_ms);
-}
-
 #else
 
 void* ThreadFunc(void* params) {
@@ -94,21 +89,6 @@ bool PlatformThread::Create(Delegate* delegate,
 void PlatformThread::Join(PlatformThreadHandle thread_handle) {
   CHECK(thread_handle);
   pthread_join(thread_handle, nullptr);
-}
-
-// static
-void PlatformThread::Sleep(int32_t duration_ms) {
-  struct timespec sleep_time, remaining;
-
-  // Contains the portion of duration_ms >= 1 sec.
-  sleep_time.tv_sec = duration_ms / 1000;
-  duration_ms -= sleep_time.tv_sec * 1000;
-
-  // Contains the portion of duration_ms < 1 sec.
-  sleep_time.tv_nsec = duration_ms * 1000 * 1000;  // nanoseconds.
-
-  while (nanosleep(&sleep_time, &remaining) == -1 && errno == EINTR)
-    sleep_time = remaining;
 }
 
 #endif  // _WIN32

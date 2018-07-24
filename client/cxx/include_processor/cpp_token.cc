@@ -116,4 +116,10 @@ string CppToken::GetCanonicalString() const {
   return v.char_value.c2;
 }
 
+#ifdef MEMORY_SANITIZER
+bool CppToken::IsPuncChar(int c) const {
+  return ((type == PUNCTUATOR || type >= OP_BEGIN) && v.int_value == c);
+}
+#endif  // MEMORY_SANITIZER
+
 }  // namespace devtools_goma

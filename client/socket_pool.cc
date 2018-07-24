@@ -22,6 +22,8 @@
 #include <sstream>
 #include <unordered_map>
 
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "autolock_timer.h"
 #include "basictypes.h"
 #include "fileflag.h"
@@ -36,25 +38,28 @@ namespace devtools_goma {
 // Do not use socket that is older than this, for HTTP Keep-Alive. It
 // can be longer, but be on the safer side and do not bother with long
 // timeouts.
+// TODO: Convert to absl::Duration.
 const long long kIdleSocketTimeoutNanoseconds = 5LL * 1000 * 1000 * 1000;
 
 // Do not use the address that we got error for this period.
 // Note if we have keep-alive socket to that address, it will be used.
 // if we got success after error from the addresss, we'll clear error status.
-const int kErrorAddressTimeoutSecs = 60;
+constexpr absl::Duration kErrorAddressTimeout = absl::Seconds(60);
 
 // Retry creation of socket pool for this period (milliseconds).
-const int kSocketPoolSetupTimeoutInMs = 10 * 1000;
-// Wait connection success for this period (milliseconds).
-const int kConnTimeoutInMs = 3 * 1000;
+// TODO: Convert to absl::Duration.
+const int64_t kSocketPoolSetupTimeoutInMs = 10 * 1000;
+
+// Wait connection success for this period.
+constexpr absl::Duration kConnTimeout = absl::Seconds(3);
 
 SocketPool::SocketPool(const string& host_name, int port)
     : host_name_(host_name),
       port_(port),
       current_addr_(nullptr) {
   SimpleTimer timer;
-  int32_t retry_backoff_ms = 50;
-  while (timer.GetInMs() < kSocketPoolSetupTimeoutInMs) {
+  absl::Duration retry_backoff = absl::Milliseconds(50);
+  while (timer.GetInMilliseconds() < kSocketPoolSetupTimeoutInMs) {
     Errno eno;
     {
       AUTOLOCK(lock, &mu_);
@@ -63,14 +68,14 @@ SocketPool::SocketPool(const string& host_name, int port)
         break;
     }
     if (eno == FAIL) {
-      PlatformThread::Sleep(retry_backoff_ms);
-      retry_backoff_ms *= 2;
-      if (retry_backoff_ms > kConnTimeoutInMs)
-        retry_backoff_ms = kConnTimeoutInMs;
+      absl::SleepFor(retry_backoff);
+      retry_backoff *= 2;
+      if (retry_backoff > kConnTimeout)
+        retry_backoff = kConnTimeout;
     }
   }
   LOG_IF(WARNING, !IsInitialized()) << "failed to initialize socket pool in "
-                                    << timer.GetInMs() << " msec."
+                                    << timer.GetInMilliseconds() << " msec."
                                     << " host_name=" << host_name
                                     << " port=" << port;
 }
@@ -94,7 +99,7 @@ ScopedSocket SocketPool::NewSocket() {
     AUTOLOCK(lock, &mu_);
     while (!socket_pool_.empty()) {
       // If the socket has been idle for less than X seconds, use it.
-      if (socket_pool_.front().second.GetInNanoSeconds() <
+      if (socket_pool_.front().second.GetInNanoseconds() <
           kIdleSocketTimeoutNanoseconds) {
         new_fd = socket_pool_.front().first;
         VLOG(1) << "Reusing socket: " << new_fd
@@ -127,7 +132,7 @@ ScopedSocket SocketPool::NewSocket() {
     addrs_size = static_cast<int>(addrs_.size());
   }
   new_fd = -1;
-  time_t error_time = 0;
+  absl::optional<absl::Time> error_time;
   for (int retry = 0; retry < std::max(1, addrs_size); ++retry) {
     AddrData addr;
     {
@@ -135,7 +140,7 @@ ScopedSocket SocketPool::NewSocket() {
       if (new_fd >= 0) {
         SetErrorTimestampUnlocked(new_fd, error_time);
       }
-      if (current_addr_ == nullptr || current_addr_->error_timestamp > 0) {
+      if (current_addr_ == nullptr || current_addr_->error_timestamp) {
         LOG(INFO) << "need to retry with other address for " << host_name_;
         if (InitializeUnlocked() != OK) {
           DCHECK(current_addr_ == nullptr);
@@ -143,7 +148,7 @@ ScopedSocket SocketPool::NewSocket() {
           return ScopedSocket();
         }
         DCHECK(!socket_pool_.empty());
-        DCHECK_LT(socket_pool_.front().second.GetInNanoSeconds(),
+        DCHECK_LT(socket_pool_.front().second.GetInNanoseconds(),
                   kIdleSocketTimeoutNanoseconds);
         new_fd = socket_pool_.front().first;
         socket_pool_.pop_front();
@@ -184,7 +189,7 @@ ScopedSocket SocketPool::NewSocket() {
     }
     if (r < 0) {
       new_fd = socket_fd.get();
-      error_time = time(nullptr);
+      error_time = absl::Now();
       continue;  // try other address.
     }
     if (!socket_fd.SetCloseOnExec()) {
@@ -210,7 +215,7 @@ void SocketPool::ReleaseSocket(ScopedSocket&& sock) {
   VLOG(1) << "pushing socket for recycling " << sock.get();
   int sock_fd = sock.get();
   socket_pool_.emplace_back(sock.release(), SimpleTimer());
-  SetErrorTimestampUnlocked(sock_fd, 0);
+  SetErrorTimestampUnlocked(sock_fd, absl::nullopt);
 }
 
 void SocketPool::CloseSocket(ScopedSocket&& sock, bool err) {
@@ -221,11 +226,16 @@ void SocketPool::CloseSocket(ScopedSocket&& sock, bool err) {
   AUTOLOCK(lock, &mu_);
   int sock_fd = sock.get();
   sock.Close();
-  SetErrorTimestampUnlocked(sock_fd, (err ? time(nullptr) : 0));
+  absl::optional<absl::Time> error_time;
+  if (err) {
+    error_time = absl::Now();
+  }
+  SetErrorTimestampUnlocked(sock_fd, error_time);
   fd_addrs_.erase(sock_fd);
 }
 
-void SocketPool::SetErrorTimestampUnlocked(int sock, time_t t) {
+void SocketPool::SetErrorTimestampUnlocked(int sock,
+                                           absl::optional<absl::Time> time) {
   auto p = fd_addrs_.find(sock);
   if (p == fd_addrs_.end()) {
     LOG(ERROR) << "sock " << sock << " not found in fd_addrs";
@@ -234,24 +244,20 @@ void SocketPool::SetErrorTimestampUnlocked(int sock, time_t t) {
   const string& addr_name = p->second;
   // fast path. most case, current_addr_ is the addr for the sock.
   if (current_addr_ != nullptr && current_addr_->name == addr_name) {
-    current_addr_->error_timestamp = t;
+    current_addr_->error_timestamp = time;
     return;
   }
   // slow path.
   for (auto& addr : addrs_) {
     if (addr.name == addr_name) {
-      addr.error_timestamp = t;
+      addr.error_timestamp = time;
       return;
     }
   }
   LOG(WARNING) << "sock " << sock << " addr:" << addr_name << " not found";
 }
 
-SocketPool::AddrData::AddrData()
-    : len(0),
-      ai_socktype(0),
-      ai_protocol(0),
-      error_timestamp(0) {
+SocketPool::AddrData::AddrData() : len(0), ai_socktype(0), ai_protocol(0) {
   memset(&storage, 0, sizeof storage);
 }
 
@@ -383,38 +389,40 @@ class SocketPool::ScopedSocketList {
   ScopedSocket Connect(int* nfds, AddrData** addr) {
     *nfds = 0;
     *addr = nullptr;
-    time_t now = time(nullptr);
-    time_t min_error_timestamp = now;
+    absl::Time now = absl::Now();
+    absl::Time min_error_timestamp = now;
     for (const auto& address : *addrs_) {
-      if (address.error_timestamp < min_error_timestamp) {
-        min_error_timestamp = address.error_timestamp;
+      if (address.error_timestamp &&
+          *address.error_timestamp < min_error_timestamp) {
+        min_error_timestamp = *address.error_timestamp;
       }
     }
 
     for (size_t i = 0; i < addrs_->size(); ++i) {
-      if ((*addrs_)[i].error_timestamp == min_error_timestamp) {
-        // Use this addr even if it marked as error recently.
-        // Most case, min_error_timestamp is 0 (some ip wasn't marked as error).
-        // or this addr had error most long time ago in addrs.
-        // Note that if len(addrs_)==1, the addr is used regardless of
-        // error_timestamp to avoid "no other address available" by just
-        // one error on the addr.
-        // The addr, however, mignt not be used if connect fails.
-        LOG_IF(WARNING, min_error_timestamp > 0)
-            << "addrs[" << i << "] " << (*addrs_)[i].name
-            << " min_error_timestamp=" << min_error_timestamp;
-      } else {
-        CHECK_GT((*addrs_)[i].error_timestamp, min_error_timestamp);
-        if (now < (*addrs_)[i].error_timestamp + kErrorAddressTimeoutSecs) {
-          LOG(WARNING) << "addrs[" << i << "] " << (*addrs_)[i].name
-                       << " don't use until "
-                       << ((*addrs_)[i].error_timestamp
-                           + kErrorAddressTimeoutSecs)
-                       << " error_timestamp=" << (*addrs_)[i].error_timestamp
-                       << " now=" << now;
-          continue;
+      const auto& current_addr = (*addrs_)[i];
+      if (current_addr.error_timestamp) {
+        if (*current_addr.error_timestamp == min_error_timestamp) {
+          // Use this addr even if it marked as error recently.
+          // Most case, min_error_timestamp is 0 (some ip wasn't marked as
+          // error). or this addr had error most long time ago in addrs. Note
+          // that if len(addrs_)==1, the addr is used regardless of
+          // error_timestamp to avoid "no other address available" by just
+          // one error on the addr.
+          // The addr, however, mignt not be used if connect fails.
+          LOG(WARNING) << "addrs[" << i << "] " << current_addr.name
+                       << " min_error_timestamp=" << min_error_timestamp;
+        } else {
+          CHECK_GT(*current_addr.error_timestamp, min_error_timestamp);
+          if (now < *current_addr.error_timestamp + kErrorAddressTimeout) {
+            LOG(WARNING) << "addrs[" << i << "] " << current_addr.name
+                         << " don't use until "
+                         << *current_addr.error_timestamp + kErrorAddressTimeout
+                         << " error_timestamp=" << *current_addr.error_timestamp
+                         << " now=" << now;
+            continue;
+          }
+          // else error happened long time ago, so try again.
         }
-        // else error happened long time ago, so try again.
       }
 
       socks_[i] = ScopedSocket(
@@ -598,10 +606,10 @@ ScopedSocket SocketPool::ScopedSocketList::Poll(
 Errno SocketPool::InitializeUnlocked() {
   // lock held.
   current_addr_ = nullptr;
-  std::map<string, time_t> last_errors;
+  std::map<string, absl::Time> last_errors;
   for (const auto& addr : addrs_) {
-    if (addr.error_timestamp > 0) {
-      last_errors.insert(std::make_pair(addr.name, addr.error_timestamp));
+    if (addr.error_timestamp) {
+      last_errors.insert(std::make_pair(addr.name, *addr.error_timestamp));
     }
   }
   addrs_.clear();
@@ -610,15 +618,17 @@ Errno SocketPool::InitializeUnlocked() {
   // again?
   ResolveAddress(host_name_, port_, &addrs_);
   for (auto& addr : addrs_) {
-    const std::map<string, time_t>::const_iterator found =
-        last_errors.find(addr.name);
+    const auto found = last_errors.find(addr.name);
     if (found != last_errors.end()) {
       addr.error_timestamp = found->second;
     }
+    auto error_timestamp_string = addr.error_timestamp
+                                      ? absl::FormatTime(*addr.error_timestamp)
+                                      : "(none)";
     LOG(INFO) << host_name_ << " resolved as " << addr.name
-              << " error_timestamp:" << addr.error_timestamp;
+              << " error_timestamp:" << error_timestamp_string;
   }
-  int resolve_ms = timer.GetInMs();
+  int resolve_ms = timer.GetInIntMilliseconds();
   if (resolve_ms > 1000) {
     LOG(ERROR) << "SLOW resolve " << host_name_ << " " << addrs_.size()
                << " in " << resolve_ms << " msec";
@@ -635,7 +645,7 @@ Errno SocketPool::InitializeUnlocked() {
   if (s.valid()) {
     DCHECK(current_addr_ != nullptr);
     DCHECK(current_addr_->IsValid());
-    int connect_ms = timer.GetInMs();
+    int connect_ms = timer.GetInIntMilliseconds();
     if (connect_ms > 1000) {
       LOG(ERROR) << "SLOW connected"
                  << ": use addr:" << current_addr_->name
@@ -658,7 +668,9 @@ Errno SocketPool::InitializeUnlocked() {
     return FAIL;
   }
   int remaining;
-  while ((remaining = kConnTimeoutInMs - timer.GetInMs()) > 0) {
+  // TODO: convert SimpleTimer to absl/time.
+  while ((remaining = absl::ToInt64Milliseconds(kConnTimeout) -
+                      timer.GetInIntMilliseconds()) > 0) {
     s = socks.Poll(remaining, &nfds, &current_addr_);
     if (s.valid()) {
       break;
@@ -667,7 +679,7 @@ Errno SocketPool::InitializeUnlocked() {
       break;
     }
   }
-  LOG(INFO) << "connect done in " << timer.GetInMs() << " msec";
+  LOG(INFO) << "connect done in " << timer.GetInMilliseconds() << " msec";
   if (!s.valid()) {
     DCHECK(current_addr_ == nullptr);
     LOG(ERROR) << "Server at "

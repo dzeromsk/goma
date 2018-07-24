@@ -47,8 +47,6 @@ a. the data used for compiling
 - command line arguments and environment variables necessary for a compile,
   system include paths, current working directory.
 
-Google keeps collected data for 30 days.
-
 b. the data used for authentication
 - OAuth2 access token to use service, and email address gotten from access
   token.
@@ -56,7 +54,6 @@ b. the data used for authentication
 Google may use data for logging and tracking (including abuse detection).
 Google keeps identifier of each compile (goma client start time, goma client
 id that changes when compiler_proxy starts, sequential compile id)
-Google keeps log for 30 days.
 
 2. What data will be shared?
 

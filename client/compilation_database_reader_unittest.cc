@@ -10,7 +10,6 @@
 #include <json/json.h>
 
 #include "compilation_database_reader.h"
-#include "file.h"
 #include "file_dir.h"
 #include "file_helper.h"
 #include "path.h"

@@ -122,7 +122,7 @@ TEST_F(ElfParserTest, UsrLib) {
     EXPECT_TRUE(parser->valid()) << fullname;
     parser->UseProgramHeader(true);
     EXPECT_TRUE(parser->ReadDynamicNeeded(&p_needed)) << fullname;
-    elf_parser_p_time += timer.Get();
+    elf_parser_p_time += timer.GetInSeconds();
 
     std::vector<string> s_needed;
     timer.Start();
@@ -131,12 +131,12 @@ TEST_F(ElfParserTest, UsrLib) {
     EXPECT_TRUE(parser->valid()) << fullname;
     parser->UseProgramHeader(false);
     EXPECT_TRUE(parser->ReadDynamicNeeded(&s_needed)) << fullname;
-    elf_parser_s_time += timer.Get();
+    elf_parser_s_time += timer.GetInSeconds();
 
     std::vector<string> expected_needed;
     timer.Start();
     GetObjdumpOutput(fullname, &expected_needed);
-    objdump_time += timer.Get();
+    objdump_time += timer.GetInSeconds();
 
     EXPECT_EQ(expected_needed, p_needed) << fullname;
     EXPECT_EQ(expected_needed, s_needed) << fullname;

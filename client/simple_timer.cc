@@ -4,23 +4,23 @@
 
 #include "simple_timer.h"
 
-// SimpleTimer::Start() and SimpleTimer::GetInNanoSeconds() are
+// SimpleTimer::Start() and SimpleTimer::GetInNanoseconds() are
 // platform specific. See simple_timer_*.cc.
 
 namespace devtools_goma {
 
 // Return elapsed time in seconds.
-double SimpleTimer::Get() const {
-  return GetInNanoSeconds() / 1000000000.0;
+int SimpleTimer::GetInIntMilliseconds() const {
+  return static_cast<int>(GetInMilliseconds());
+}
+
+double SimpleTimer::GetInSeconds() const {
+  return GetInNanoseconds() / 1000000000.0;
 }
 
 // Return elapsed time in milliseconds.
-int SimpleTimer::GetInMs() const {
-  return static_cast<int>(GetInMilliSeconds());
-}
-
-long long SimpleTimer::GetInMilliSeconds() const {
-  return GetInNanoSeconds() / 1000000;
+long long SimpleTimer::GetInMilliseconds() const {
+  return GetInNanoseconds() / 1000000;
 }
 
 }  // namespace devtools_goma

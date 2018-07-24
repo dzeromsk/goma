@@ -19,7 +19,6 @@
 #include "client_util.h"
 #include "cmdline_parser.h"
 #include "compiler_specific.h"
-#include "file.h"
 #include "file_dir.h"
 #include "filesystem.h"
 #include "glog/logging.h"

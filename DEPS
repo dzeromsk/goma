@@ -44,7 +44,7 @@ deps = {
 
      # chrome's deps/third_party/boringssl
      "client/third_party/boringssl/src":
-     "https://boringssl.googlesource.com/boringssl@82639e6f5341a3129b7cb62a5a2dd9b65f3c91ef",
+     "https://boringssl.googlesource.com/boringssl@20b6a4e2a18e6a2c961ae0cd9945b69ad42dc64e",
 
      # google-breakpad
      "client/third_party/breakpad/breakpad":
@@ -78,7 +78,7 @@ deps = {
 
      # abseil
      "client/third_party/abseil/src":
-     "https://github.com/abseil/abseil-cpp.git@f88b4e9cd876905ee694cee1720095330e0bd20f",
+     "https://github.com/abseil/abseil-cpp.git@8f612ebb152fb7e05643a2bcf78cb89a8c0641ad",
 
      # google benchmark v1.3.0
      "client/third_party/benchmark/src":

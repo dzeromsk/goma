@@ -7,7 +7,6 @@
 
 #include <limits.h>
 #include <stdio.h>
-#include <time.h>
 
 #include <algorithm>
 #include <iostream>
@@ -21,6 +20,8 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "compiler_info.h"
 #include "compiler_specific.h"
 #include "content.h"
@@ -79,18 +80,9 @@ CppParser::CppParser()
       skipped_files_(0),
       total_files_(0),
       owner_thread_id_(GetCurrentThreadId()) {
-  char buf[26];
-  time_t tm;
-  time(&tm);
-#ifndef _WIN32
-  ctime_r(&tm, buf);
-#else
-  // All Windows CRT functions are thread-safe if use /MT or /MD in compile
-  // options.
-  ctime_s(buf, 26, &tm);
-#endif
-  current_time_ = string(&buf[11], 8);
-  current_date_ = string(&buf[4], 7) + string(&buf[20], 4);
+  const absl::Time now = absl::Now();
+  current_time_ = absl::FormatTime("%H:%M:%S", now, absl::LocalTimeZone());
+  current_date_ = absl::FormatTime("%b %d %Y", now, absl::LocalTimeZone());
   EnsureInitialize();
 
   // Push empty input as a sentinel.

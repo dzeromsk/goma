@@ -11,8 +11,8 @@
 // for the same objects. ArFileReader normalize it during reading.
 // The class is thread-unsafe.
 
-#ifndef DEVTOOLS_GOMA_CLIENT_ARFILE_READER_H_
-#define DEVTOOLS_GOMA_CLIENT_ARFILE_READER_H_
+#ifndef DEVTOOLS_GOMA_CLIENT_LINKER_LINKER_INPUT_PROCESSOR_ARFILE_READER_H_
+#define DEVTOOLS_GOMA_CLIENT_LINKER_LINKER_INPUT_PROCESSOR_ARFILE_READER_H_
 
 #include <memory>
 #include <string>
@@ -128,4 +128,4 @@ class FatArFileReader : public FileReader {
 
 }  // namespace devtools_goma
 
-#endif  // DEVTOOLS_GOMA_CLIENT_ARFILE_READER_H_
+#endif  // DEVTOOLS_GOMA_CLIENT_LINKER_LINKER_INPUT_PROCESSOR_ARFILE_READER_H_

@@ -21,6 +21,11 @@ namespace file {
 // creation mode of options will be ignored on Windows.
 ::util::Status CreateDir(absl::string_view path, const Options& options);
 
+// Copy file
+::util::Status Copy(absl::string_view from,
+                    absl::string_view to,
+                    const Options& options);
+
 }  // namespace file
 
 #endif  // DEVTOOLS_GOMA_BASE_FILESYSTEM_H_

@@ -13,12 +13,12 @@ TEST(SimpleTimer, smoke) {
   SimpleTimer st(SimpleTimer::START);
 
   for (int i = 0; i < 1000; ++i) {
-    EXPECT_GE(st.GetInNanoSeconds(), 0);
-    EXPECT_GE(st.Get(), 0.0);
+    EXPECT_GE(st.GetInNanoseconds(), 0);
+    EXPECT_GE(st.GetInSeconds(), 0.0);
 
     // The second call should have a larger time.
-    long long t1 = st.GetInNanoSeconds();
-    long long t2 = st.GetInNanoSeconds();
+    long long t1 = st.GetInNanoseconds();
+    long long t2 = st.GetInNanoseconds();
     EXPECT_GE(t2, t1);
   }
 }

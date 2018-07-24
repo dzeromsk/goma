@@ -235,6 +235,110 @@ TEST(CppMacroExpanderTest, ExpandFunctionLikeMacroVariadic) {
               "1,1,2,2,1,1,2,2");
 }
 
+TEST(CppMacroExpanderTest, ExpandVaOpt) {
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define f(a, ...) g(a __VA_OPT__(,) __VA_ARGS__)\n", "f(1)",
+              "g(1)");
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define f(a, ...) g(a __VA_OPT__(,) __VA_ARGS__)\n", "f(1, 2)",
+              "g(1, 2)");
+
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define f(a, ...) g(a __VA_OPT__(# __VA_ARGS__))\n", "f(1, 2)",
+              "g(1 \"2\")");
+
+  // F(1, 2) --> G(1, 100, 200) --> X=1 Y=100 Z=200
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define G(x, y, z) X=x Y=y Z=z\n"
+              "#define F(x, ...) G(1, __VA_OPT__(100, 200))\n",
+              "F(1, 2)", "X=1 Y=100 Z=200");
+
+  // F(1, 2) --> G(1, H(100, 200)) --> argument number mismatch
+  // H is not expanded here.
+  CheckExpand(CheckFlag::kError,
+              "#define H(x, y) x, y\n"
+              "#define G(x, y, z) X=x Y=y Z=z\n"
+              "#define F(x, ...) G(1, __VA_OPT__(H(100, 200)))\n",
+              "F(1, 2)", "");
+
+  CheckExpand(CheckFlag::kPassNaive, "#define F(...) #__VA_OPT__(G(1, 2)) X\n",
+              "F()", "\"\" X");
+
+  CheckExpand(CheckFlag::kPassNaive, "#define F(...) #__VA_OPT__(G(1, 2)) X\n",
+              "F(1)", "\"G(1, 2)\" X");
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define F(...) #__VA_OPT__  (  G(1, 2)  ) X\n", "F(1)",
+              "\"G(1, 2)\" X");
+
+  // error: '#' is not followed by a macro parameter
+  CheckExpand(CheckFlag::kError, "#define f(a, b, ...) g(a __VA_OPT__(#) b)\n",
+              "f(1, 2, 3)", "");
+  CheckExpand(CheckFlag::kError,
+              "#define f(a, b, ...) g(a __VA_OPT__(  #  ) b)\n", "f(1, 2, 3)",
+              "");
+  CheckExpand(CheckFlag::kError,
+              "#define f(a, b, ...) g(a __VA_OPT__  (  #  ) b)\n", "f(1, 2, 3)",
+              "");
+
+  // __VA_OPT__ with ##
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define F(A, ...) A ## __VA_OPT__(__VA_ARGS__) B", "F()", "B");
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define F(A, ...) A ## __VA_OPT__(__VA_ARGS__) B", "F(a)",
+              "a B");
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define F(A, ...) A ## __VA_OPT__(__VA_ARGS__) B", "F(a, b)",
+              "ab B");
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define F(A, ...) A ## __VA_OPT__(__VA_ARGS__) B", "F(a, b, c)",
+              "ab, c B");
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define F(A, ...) A ## __VA_OPT__  (  __VA_ARGS__  ) B",
+              "F(a, b, c)", "ab, c B");
+
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define F(A, B, ...) A ## __VA_OPT__(B ## __VA_ARGS__) B",
+              "F(a, b)", "a b");
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define F(A, B, ...) A ## __VA_OPT__(B ## __VA_ARGS__) B",
+              "F(a, b, c)", "abc b");
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define F(A, B, ...) A ## __VA_OPT__  (  B ## __VA_ARGS__  ) B",
+              "F(a, b, c)", "abc b");
+
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define F(A, B, ...) __VA_OPT__(B ## __VA_ARGS__) ## A",
+              "F(a, b)", "a");
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define F(A, B, ...) __VA_OPT__(B ## __VA_ARGS__) ## A",
+              "F(a, b, c)", "bca");
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define F(A, B, ...) __VA_OPT__  (  B ## __VA_ARGS__  ) ## A",
+              "F(a, b, c)", "bca");
+
+  // paren is missing
+  CheckExpand(CheckFlag::kError, "#define f(a, b, ...) __VA_OPT__\n",
+              "f(1, 2, 3)", "");
+
+  CheckExpand(CheckFlag::kError, "#define f(a, b, ...) __VA_OPT__(\n",
+              "f(1, 2, 3)", "");
+  CheckExpand(CheckFlag::kError, "#define f(a, b, ...) __VA_OPT__(()\n",
+              "f(1, 2, 3)", "");
+
+  // __VA_OPT__ in no variadic function. It continues with warning.
+  CheckExpand(CheckFlag::kPassNaive, "#define f(a, b) __VA_OPT__(foo) a b",
+              "f(1, 2)", "1 2");
+  // Interestingly, clang prevers __VA_OPT__ if argument size is 0.
+  // (In this case, CBV version passes since __VA_OPT__ is not considered as a
+  // special form)
+  CheckExpand(CheckFlag::kPassAll, "#define f() __VA_OPT__(foo) a b", "f()",
+              "__VA_OPT__(foo) a b");
+  // __VA_OPT__ in no variadic function. It continues with warning.
+  // __VA_OPT__ is preserved.
+  CheckExpand(CheckFlag::kPassAll, "#define f __VA_OPT__(foo) a b", "f",
+              "__VA_OPT__(foo) a b");
+}
+
 // These expander should fail due to argument number mismatch
 TEST(CppMacroExpanderTest, ExpandFunctionLikeMacroError) {
   CheckExpand(CheckFlag::kError,

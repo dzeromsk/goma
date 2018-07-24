@@ -1390,7 +1390,7 @@ void CompileService::GetCompilerInfoInternal(
               << " FillFromCompilerOutputs"
               << " state=" << param->state.get()
               << " found=" << param->state.get()->info().found()
-              << " in " << timer.GetInMilliSeconds() << "[ms]";
+              << " in " << timer.GetInMilliseconds() << "[ms]";
   }
   param->state.get()->Use(param->key.local_compiler_path, *param->flags);
   std::unique_ptr<CompilerInfoWaiterList> waiters;

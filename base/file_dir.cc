@@ -15,7 +15,6 @@
 #include "config_win.h"
 #endif
 
-#include "file.h"
 #include "filesystem.h"
 #include "options.h"
 #include "path.h"
