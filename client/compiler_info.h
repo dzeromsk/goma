@@ -9,6 +9,8 @@
 #include <ostream>
 #include <string>
 
+#include "absl/time/time.h"
+#include "absl/types/optional.h"
 #include "compiler_specific.h"
 #include "file_stat.h"
 #include "lockhelper.h"
@@ -140,10 +142,15 @@ class CompilerInfo {
     return resource_;
   }
 
-  time_t failed_at() const { return data_->failed_at(); }
+  absl::optional<absl::Time> failed_at() const {
+    if (data_->failed_at() == 0) {
+      return absl::nullopt;
+    }
+    return absl::FromTimeT(data_->failed_at());
+  }
 
-  time_t last_used_at() const;
-  void set_last_used_at(time_t t);
+  absl::Time last_used_at() const;
+  void set_last_used_at(absl::Time t);
 
   bool found() const { return data_->found(); }
 

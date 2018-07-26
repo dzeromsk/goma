@@ -8,12 +8,14 @@
 
 #include "compiler_flags.h"
 #include "compiler_flags_parser.h"
-#include "compiler_info_builder_facade.h"
 #include "cxx/cxx_compiler_info.h"
+#include "cxx/gcc_compiler_info_builder.h"
 #include "gcc_flags.h"
 #include "glog/logging.h"
 #include "mypath.h"
 #include "prototmp/goma_data.pb.h"
+
+using devtools_goma::GCCCompilerInfoBuilder;
 
 int main(int argc, char* argv[], const char** envp) {
   google::InitGoogleLogging(argv[0]);
@@ -39,9 +41,8 @@ int main(int argc, char* argv[], const char** envp) {
       static_cast<const devtools_goma::GCCFlags&>(*flags);
   std::vector<string> compiler_info_envs;
   flags->GetClientImportantEnvs(envp, &compiler_info_envs);
-  devtools_goma::CompilerInfoBuilderFacade cib;
   std::unique_ptr<devtools_goma::CompilerInfoData> compiler_info_data(
-      cib.FillFromCompilerOutputs(
+      GCCCompilerInfoBuilder().FillFromCompilerOutputs(
           gcc_flags, local_compiler_path, compiler_info_envs));
   devtools_goma::CxxCompilerInfo compiler_info(std::move(compiler_info_data));
   if (compiler_info.HasError()) {

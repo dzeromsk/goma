@@ -17,6 +17,7 @@ It starts/stops compiler_proxy.exe or compiler_proxy like goma_ctl.sh.
 import collections
 import copy
 import glob
+import gzip
 import hashlib
 import json
 import os
@@ -862,22 +863,6 @@ class GomaDriver(object):
     else:
       print status
 
-  def _FindLatestInfoFile(self, command_name):
-    """Finds latest *.INFO.* file.
-
-    Args:
-      command_name: command name of *.INFO.* file. e.g. compiler_proxy.
-
-    Returns:
-      The latest *.INFO.* file path. None if not found.
-    """
-
-    info_pattern = os.path.join(_GetLogDirectory(), command_name +'.*.INFO.*')
-    candidates = glob.glob(info_pattern)
-    if candidates:
-      return sorted(candidates, reverse=True)[0]
-    return None
-
   def _CopyLatestInfoFile(self, command_name, dst):
     """Copies latest *.INFO.* file to destination.
 
@@ -887,7 +872,7 @@ class GomaDriver(object):
       dst: destination directory name.
     """
 
-    infolog_path = self._FindLatestInfoFile(command_name)
+    infolog_path = self._env.FindLatestLogFile(command_name, 'INFO')
     if infolog_path:
       self._env.CopyFile(infolog_path,
                          os.path.join(dst, os.path.basename(infolog_path)))
@@ -903,7 +888,7 @@ class GomaDriver(object):
       build directory if inferred. None otherwise.
     """
 
-    infolog_path = self._FindLatestInfoFile('compiler_proxy')
+    infolog_path = self._env.FindLatestLogFile('compiler_proxy', 'INFO')
     if not infolog_path:
       print 'compiler_proxy log was not found'
       return None
@@ -911,6 +896,7 @@ class GomaDriver(object):
     build_re = re.compile('.*Task:.*Start.* build_dir=(.*)')
 
     # List build_dir from compiler_proxy, and take only last 10 build dirs.
+    # TODO: move this code to GomaEnv to write tests.
     build_dirs = collections.deque()
     with open(infolog_path) as f:
       for line in f.readlines():
@@ -1440,6 +1426,24 @@ class GomaEnv(object):
     """
     crash_dir = self.GetCrashDumpDirectory()
     return glob.glob(os.path.join(crash_dir, '*' + _DUMP_FILE_SUFFIX))
+
+  @staticmethod
+  def FindLatestLogFile(command_name, log_type):
+    """Finds latest *.|log_type|.* file.
+
+    Args:
+      command_name: command name of *.|log_type|.* file. e.g. compiler_proxy.
+
+    Returns:
+      The latest *.|log_type|.* file path. None if not found.
+    """
+
+    info_pattern = os.path.join(_GetLogDirectory(),
+                                '%s.*.%s.*' % (command_name, log_type))
+    candidates = glob.glob(info_pattern)
+    if candidates:
+      return sorted(candidates, reverse=True)[0]
+    return None
 
 
   def WriteFile(self, filename, content):

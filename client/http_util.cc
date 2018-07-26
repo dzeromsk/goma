@@ -183,6 +183,7 @@ ABSL_CONST_INIT const absl::string_view kAuthorization = "Authorization";
 ABSL_CONST_INIT const absl::string_view kContentEncoding = "Content-Encoding";
 ABSL_CONST_INIT const absl::string_view kContentLength = "Content-Length";
 ABSL_CONST_INIT const absl::string_view kContentType = "Content-Type";
+ABSL_CONST_INIT const absl::string_view kConnection = "Connection";
 ABSL_CONST_INIT const absl::string_view kCookie = "Cookie";
 ABSL_CONST_INIT const absl::string_view kHost = "Host";
 ABSL_CONST_INIT const absl::string_view kUserAgent = "User-Agent";
@@ -197,7 +198,8 @@ absl::string_view ExtractHeaderField(
     if (crlf == absl::string_view::npos) {
       // no end-of-header?
       LOG(ERROR) << "no end-of-header CRLFCRLF? "
-                 << absl::CEscape(header);
+                 << "finding " << field_name
+                 << " remain=" << absl::CEscape(header);
       break;
     }
     // field name is case insensitive.
@@ -229,7 +231,8 @@ absl::string_view ExtractHeaderField(
       if (crlf == absl::string_view::npos) {
         // no end-of-header?
         LOG(ERROR) << "no end-of-header CRLFCRLF? "
-                   << absl::CEscape(header);
+                   << "finding " << field_name
+                   << " remain=" << absl::CEscape(header);
         return absl::string_view();
       }
       eof += crlf + 2;
@@ -247,16 +250,10 @@ absl::string_view ExtractHeaderField(
 // Parse HTTP request and response headers and return offset into body
 // and content-length. Content-Length may be missing, and in that case
 // content_length will be set to string::npos.
-// TODO: to be more conformant to the http standard
 bool FindContentLengthAndBodyOffset(
     absl::string_view data, size_t *content_length, size_t *body_offset,
     bool *is_chunked) {
-  const char kChunked[] = "chunked";
-  const char kCrlf[] = "\r\n";
-  const absl::string_view::size_type content_length_pos =
-      data.find(absl::StrCat(kContentLength, ": "));
-  const absl::string_view::size_type transfer_encoding_pos =
-      data.find(absl::StrCat(kTransferEncoding, ": "));
+  constexpr absl::string_view kChunked = "chunked";
   const absl::string_view::size_type response_body = data.find("\r\n\r\n");
 
   if (response_body == absl::string_view::npos) {
@@ -264,45 +261,28 @@ bool FindContentLengthAndBodyOffset(
     return false;
   }
   *body_offset = response_body + 4;
+  absl::string_view header = data.substr(0, *body_offset);
 
-  if (content_length_pos == absl::string_view::npos) {
+  absl::string_view content_length_value =
+      ExtractHeaderField(header, kContentLength);
+  if (content_length_value.empty()) {
     // Content-Length does not exist for GET requests. This might be
     // such request. If so, assume the header is short and return here.
     *content_length = string::npos;
-  } else  if (content_length_pos >= response_body) {
-    // The content_length string is not in the header, but in the
-    // payload. That means we don't have Content-Length, and we don't
-    // know how much further we should read.
-    *content_length = string::npos;
   } else {
-    absl::string_view lenstr =
-        data.substr(content_length_pos +
-                    kContentLength.size() +  2);
-    *content_length = atoi(string(lenstr).c_str());
+    *content_length = atoi(string(content_length_value).c_str());
   }
 
   if (is_chunked != nullptr) {
-    if (transfer_encoding_pos == absl::string_view::npos) {
+    absl::string_view transfer_encoding_value =
+        ExtractHeaderField(header, kTransferEncoding);
+    if (transfer_encoding_value.empty()) {
       // Transfer-Encoding does not exist for GET requests.
-      *is_chunked = false;
-    } else if (transfer_encoding_pos >= response_body) {
-      // The Transfer-Encoding string is not in the header.
       *is_chunked = false;
     } else {
       // The Transfer-Encoding string is in the header.
       // We should check its value is "chunked" or not.
-      absl::string_view transfer_encoding_value = data.substr(
-          transfer_encoding_pos +
-          kTransferEncoding.size() + 2);
-      absl::string_view::size_type value_end =
-          transfer_encoding_value.find(kCrlf);
-      transfer_encoding_value = StringStrip(
-          transfer_encoding_value.substr(0, value_end));
-      if (transfer_encoding_value == kChunked) {
-        *is_chunked = true;
-      } else {
-        *is_chunked = false;
-      }
+      *is_chunked = (transfer_encoding_value == kChunked);
     }
   }
 
@@ -324,18 +304,23 @@ bool ParseHttpResponse(absl::string_view response,
     *is_chunked = false;
 
   // Check the return code from server. It should be "HTTP/1.? 200 OK\r\n"
-  const char kHttpHeader[] = "HTTP/1.";
+  constexpr absl::string_view kHttpHeader = "HTTP/1.";
   // + 2 for the minor version and + 4 for status code.
-  if (response.size() < strlen(kHttpHeader) + 2 + 4)
+  if (response.size() < kHttpHeader.size() + 2 + 4)
     return false;
 
-  if (strncmp(response.data(), kHttpHeader, strlen(kHttpHeader)) != 0) {
+  if (!absl::StartsWith(response, kHttpHeader)) {
     LOG(ERROR) << kHttpHeader << " expected, but got "
-               << string(response.data(), strlen(kHttpHeader));
+               << absl::CEscape(response.substr(0, kHttpHeader.size()));
     return true;
   }
 
-  absl::string_view codestr = response.substr(strlen(kHttpHeader) + 2);
+  if (response[kHttpHeader.size() + 1] != ' ') {
+    LOG(ERROR) << "no space after http version "
+               << absl::CEscape(response.substr(0, kHttpHeader.size() + 2 + 4));
+    return true;
+  }
+  absl::string_view codestr = response.substr(kHttpHeader.size() + 2);
   *http_status_code = atoi(string(codestr).c_str());
   if (*http_status_code != 200 && *http_status_code != 204)
     return true;

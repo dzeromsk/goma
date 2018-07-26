@@ -17,6 +17,17 @@ static_library("cxx_compiler_info_lib") {
   ]
 }
 
+static_library("cxx_compiler_type_specific_lib") {
+  sources = [
+    "cxx_compiler_type_specific.cc",
+    "cxx_compiler_type_specific.h",
+  ]
+
+  public_deps = [
+    "//client:compiler_type_specific_lib",
+  ]
+}
+
 static_library("clang_compiler_info_builder_helper_lib") {
   sources = [
     "clang_compiler_info_builder_helper.cc",
@@ -84,6 +95,18 @@ static_library("gcc_compiler_info_builder_lib") {
   public_configs = [ "//client:client_config" ]
 }
 
+static_library("gcc_compiler_type_specific") {
+  sources = [
+    "gcc_compiler_type_specific.cc",
+    "gcc_compiler_type_specific.h",
+  ]
+
+  public_deps = [
+    ":cxx_compiler_type_specific_lib",
+    ":gcc_compiler_info_builder_lib",
+  ]
+}
+
 static_library("vc_compiler_info_builder_lib") {
   sources = [
     "vc_compiler_info_builder.cc",
@@ -106,6 +129,18 @@ static_library("vc_compiler_info_builder_lib") {
   ]
 
   public_configs = [ "//client:client_config" ]
+}
+
+static_library("vc_compiler_type_specific") {
+  sources = [
+    "vc_compiler_type_specific.cc",
+    "vc_compiler_type_specific.h",
+  ]
+
+  public_deps = [
+    ":cxx_compiler_type_specific_lib",
+    ":vc_compiler_info_builder_lib",
+  ]
 }
 
 executable("cxx_compiler_info_builder_unittest") {

@@ -34,12 +34,13 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
 #include "compiler_flags.h"
 #include "compiler_flags_parser.h"
 #include "compiler_info.h"
-#include "compiler_info_builder_facade.h"
 #include "compiler_info_cache.h"
 #include "compiler_info_state.h"
+#include "compiler_type_specific_collection.h"
 #include "cpp_include_processor.h"
 #include "cxx/cxx_compiler_info.h"
 #include "file_helper.h"
@@ -126,8 +127,9 @@ class CppIncludeProcessorTest : public testing::Test {
       const CompilerFlags& flags,
       const string& bare_gcc,
       const std::vector<string>& compiler_envs) {
-    CompilerInfoBuilderFacade cib;
-    return cib.FillFromCompilerOutputs(flags, bare_gcc, compiler_envs);
+    return CompilerTypeSpecificCollection()
+        .Get(flags.type())
+        ->BuildCompilerInfoData(flags, bare_gcc, compiler_envs);
   }
 
   ScopedCompilerInfoState GetCompilerInfoFromCacheOrCreate(
@@ -513,7 +515,7 @@ class CppIncludeProcessorTest : public testing::Test {
  protected:
   static void SetUpTestCase() {
     // Does not load cache from file.
-    CompilerInfoCache::Init("", "", 3600);
+    CompilerInfoCache::Init("", "", absl::Hours(1));
     IncludeCache::Init(5, true);
   };
 

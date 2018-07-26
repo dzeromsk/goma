@@ -380,9 +380,9 @@ void HttpRPC::DisableCompression() {
 
 void HttpRPC::EnableCompression(absl::string_view header) {
   AUTOLOCK(lock, &mu_);
-  absl::string_view::size_type accept_encoding =
-      header.find(absl::StrCat(kAcceptEncoding, ": deflate"));
-  if (accept_encoding != absl::string_view::npos) {
+  absl::string_view accept_encoding =
+      ExtractHeaderField(header, kAcceptEncoding);
+  if (accept_encoding == "deflate") {
     if (!compression_enabled_)
       LOG(INFO) << "Compression enabled";
     compression_enabled_ = true;

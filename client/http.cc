@@ -712,6 +712,26 @@ class HttpClient::Task {
   DISALLOW_COPY_AND_ASSIGN(Task);
 };
 
+/* static */
+absl::string_view HttpClient::Status::StateName(State state) {
+  switch (state) {
+    case INIT:
+      return "INIT";
+    case PENDING:
+      return "PENDING";
+    case SENDING_REQUEST:
+      return "SENDING_REQUEST";
+    case REQUEST_SENT:
+      return "REQUEST_SENT";
+    case RECEIVING_RESPONSE:
+      return "RECEIVING_RESPONSE";
+    case RESPONSE_RECEIVED:
+      return "RESPONSE_RECEIVED";
+    default:
+      return "invalid HttpClient::Status::State";
+  }
+}
+
 HttpClient::Status::Status()
     : state(Status::INIT),
       timeout_should_be_http_error(true),
@@ -1765,21 +1785,9 @@ HttpRequest::NewStream() const {
 // GetConentEncoding reports EncodingType specified in header.
 // not http_util because it depends lib/compress_util EncodingType.
 static EncodingType GetContentEncoding(absl::string_view header) {
-  // TODO: Might be better to migrate to lib/compress_util
-  absl::string_view::size_type content_encoding_header =
-      header.find(absl::StrCat(kContentEncoding, ": deflate\r\n"));
-  if (content_encoding_header != absl::string_view::npos) {
-    return ENCODING_DEFLATE;
-  } else {
-#ifdef ENABLE_LZMA
-    content_encoding_header =
-        header.find(absl::StrCat(kContentEncoding, ": lzma2\r\n"));
-    if (content_encoding_header != absl::string_view::npos) {
-      return ENCODING_LZMA2;
-    }
-#endif
-  }
-  return NO_ENCODING;
+  absl::string_view content_encoding =
+      ExtractHeaderField(header, kContentEncoding);
+  return GetEncodingFromHeader(content_encoding);
 }
 
 HttpClient::Response::Response()
@@ -1812,8 +1820,8 @@ bool HttpClient::Response::HasHeader() const {
 }
 
 absl::string_view HttpClient::Response::Header() const {
-  if (body_offset_ > 4) {
-    return absl::string_view(buffer_.data(), body_offset_ - 4);
+  if (body_offset_ > 0) {
+    return absl::string_view(buffer_.data(), body_offset_);
   }
   absl::string_view::size_type header_size = buffer_.find("\r\n\r\n");
   if (header_size == string::npos) {
@@ -1919,8 +1927,9 @@ bool HttpClient::Response::BodyRecv(int r) {
   switch (body_->Process(r)) {
     case Body::State::Error:
       if (r == 0) {
-        LOG(WARNING) << trace_id_ <<
-            " connection closed before receiving all data.";
+        LOG(WARNING) << trace_id_
+                     << " connection closed before receiving all data at "
+                     << body_->ByteCount();
         err_message_ = "connection closed before receiving all data.";
         result_ = FAIL;
         return true;
@@ -1945,7 +1954,7 @@ bool HttpClient::Response::BodyRecv(int r) {
 }
 
 bool HttpClient::Response::HasConnectionClose() const {
-  return Header().find("Connection: close\r\n") != absl::string_view::npos;
+  return ExtractHeaderField(Header(), kConnection) == "close";
 }
 
 void HttpClient::Response::Parse() {
@@ -2062,6 +2071,7 @@ HttpResponse::Body::ParsedStream() const {
 #ifdef ENABLE_LZMA
       return absl::make_unique<LZMAInputStream>(std::move(input));
 #else
+      LOG(WARNING) << "unsuported encoding: lzma2.  need ENABLE_LZMA";
       return nullptr;
 #endif
     default:

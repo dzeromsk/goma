@@ -10,6 +10,10 @@ declare_args() {
   is_tsan = false
   is_msan = false
 
+  # msan_track_origins:
+  # 0 = no tracking, 1 = only initial allocation, 2 track the chain of stores.
+  msan_track_origins = 2
+
   # Enables incremental link. Currently effective only on Win.
   use_incremental_link = false
 

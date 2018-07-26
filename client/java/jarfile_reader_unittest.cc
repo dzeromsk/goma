@@ -151,12 +151,13 @@ TEST_F(JarFileReaderTest, ConfirmItNormalizedComplicated) {
 }
 
 #if GTEST_HAS_DEATH_TEST && DCHECK_IS_ON()
-
 TEST_F(JarFileReaderTest, ShouldDieIfLocalFileComesAfterCentralDirectory) {
   const std::string jar_broken = CopyArchiveIntoTestDir("Broken", "broken.jar");
 
   EXPECT_DEATH(ReadFile(jar_broken), "");
 }
+
+#endif // GTEST_HAS_DEATH_TEST && DCHECK_IS_ON()
 
 TEST_F(JarFileReaderTest, CanHandle) {
   EXPECT_TRUE(CanHandle("/home/foo/test.jar"));
@@ -185,7 +186,5 @@ TEST_F(JarFileReaderTest, DetectedZipNormalizedTime) {
   EXPECT_FALSE(DetectedZipNormalizedTime(jar_original));
   EXPECT_TRUE(DetectedZipNormalizedTime(jar_ziptime));
 }
-
-#endif  // GTEST_HAS_DEATH_TEST && DCHECK_IS_ON()
 
 }  // namespace devtools_goma

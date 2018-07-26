@@ -32,6 +32,7 @@ int OpenSocketPairForTest(int socks[2]) {
   int af = AF_UNIX;
 #endif
   int r = socketpair(af, SOCK_STREAM, 0, socks);
+  PLOG_IF(ERROR, r != 0) << "socketpair";
   LOG(INFO) << "socketpair r=" << r << " 0=" << socks[0] << " 1=" << socks[1];
   return r;
 }

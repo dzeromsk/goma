@@ -19,7 +19,7 @@ import urlparse
 import webbrowser
 import random
 
-
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 GOOGLE_AUTH_URI = 'https://accounts.google.com/o/oauth2/auth'
 OAUTH_SCOPES = 'https://www.googleapis.com/auth/userinfo.email'
 OAUTH_TOKEN_ENDPOINT = 'https://www.googleapis.com/oauth2/v3/token'
@@ -29,6 +29,12 @@ OOB_CALLBACK_URN = 'urn:ietf:wg:oauth:2.0:oob'
 DEFAULT_GOMA_OAUTH2_CONFIG_FILE_NAME = '.goma_oauth2_config'
 
 OAUTH_STATE_LENGTH = 64
+
+if os.name == 'nt':
+  GOMA_FETCH = os.path.join(SCRIPT_DIR, 'goma_fetch.exe')
+else:
+  GOMA_FETCH = os.path.join(SCRIPT_DIR, 'goma_fetch')
+
 
 
 def ConfirmUserAgreedToS():
@@ -123,24 +129,18 @@ class GomaOAuth2Config(dict):
 def HttpGetRequest(url):
   """Proceed an HTTP GET request, and returns an HTTP response body.
 
-  Note: using curl instead of urllib2.urlopen because python < 2.7.9 does
-  not verify certificates. See http://lwn.net/Articles/611243/
-
   Args:
     url: a URL string of an HTTP server.
 
   Returns:
     a response from the server.
   """
-  cmd = ['curl', url, '--silent', '-o', '-']
+  cmd = [GOMA_FETCH, '--no-auth', url]
   return subprocess.check_output(cmd)
 
 
 def HttpPostRequest(url, post_dict):
   """Proceed an HTTP POST request, and returns an HTTP response body.
-
-  Note: using curl instead of urllib2.urlopen because python < 2.7.9 does
-  not verify certificates. See http://lwn.net/Articles/611243/
 
   Args:
     url: a URL string of an HTTP server.
@@ -150,7 +150,7 @@ def HttpPostRequest(url, post_dict):
     a response from the server.
   """
   body = urllib.urlencode(post_dict)
-  cmd = ['curl', '-d', body, url, '--silent', '-o', '-']
+  cmd = [GOMA_FETCH, '--no-auth', '--post', url, '--data', body]
   return subprocess.check_output(cmd)
 
 

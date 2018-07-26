@@ -11,11 +11,12 @@
 #include <unordered_set>
 
 #include "absl/base/thread_annotations.h"
+#include "absl/time/time.h"
+#include "absl/types/optional.h"
 #include "atomic_stats_counter.h"
 #include "basictypes.h"
 #include "file_stat.h"
 #include "lockhelper.h"
-#include "timestamp.h"
 
 using std::string;
 
@@ -36,7 +37,7 @@ class FileHashCache {
   //             but hash key might be H1 (not modified at X.yy)
   //             or might not be H1 (modified at X.yy)
   // If |filename| exists and |missed_timestamp_ms| is not 0, cache_key will
-  // be valid if |missed_timestamp_ms| <= |last_uploaded_timestamp_ms|.
+  // be valid if |missed_timestamp| <= |last_uploaded_timestamp|.
   // cache_key will be invalidated if |missed_timestamp_ms| >
   // |last_uploaded_timestamp_ms|.
   // FileStat for |filename| is |file_stat|.
@@ -45,7 +46,7 @@ class FileHashCache {
   // Returns false and *cache_key is empty if it doesn't know cache key of the
   // file at all.
   bool GetFileCacheKey(const string& filename,
-                       millitime_t missed_timestamp_ms,
+                       absl::optional<absl::Time> missed_timestamp,
                        const FileStat& file_stat,
                        string* cache_key);
 
@@ -53,7 +54,7 @@ class FileHashCache {
   // |upload_timestamp_ms| is upload time or download time of the file
   // in milliseconds.
   // Please set 0LL if you do not upload or download the file. It preserves
-  // last_uploaded_timestamp_ms.
+  // last_uploaded_timestamp.
   // |file_stat| is a FileStat of |filename|.
   // If |file_stat| is invalid, it clears the cache_key of the filename,
   // and returns false.
@@ -61,7 +62,7 @@ class FileHashCache {
   // Returns false if the cache_key was used before or |file_stat| is invalid.
   bool StoreFileCacheKey(const string& filename,
                          const string& cache_key,
-                         millitime_t upload_timestamp_ms,
+                         absl::optional<absl::Time> upload_timestamp,
                          const FileStat& file_stat);
 
   bool IsKnownCacheKey(const string& cache_key);
@@ -79,9 +80,9 @@ class FileHashCache {
     // time when file content was uploaded to backend, or downloaded from
     // backend.
     // we could assume the file has been in remote cache and use hash_key
-    // at time t if last_uploaded_timestamp_ms != 0 &&
-    // t > last_uploaded_timestamp_ms.
-    millitime_t last_uploaded_timestamp_ms;
+    // at time t if !last_uploaded_timestamp.has_value() &&
+    // t > last_uploaded_timestamp.
+    absl::optional<absl::Time> last_uploaded_timestamp;
   };
 
   // A map from filename to file cache info.

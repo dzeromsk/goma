@@ -104,7 +104,7 @@ if (os != "win") {
       "//client:compiler_info_lib",
       "//client:compiler_proxy_lib",
       "//client:ioutil_lib",
-      "//client/cxx:cxx_compiler_info_builder_lib",
+      "//client/cxx:gcc_compiler_info_builder_lib",
       "//client/cxx/include_processor:cpp_parser_lib",
       "//lib:compiler_flag_type_specific",
     ]

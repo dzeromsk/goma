@@ -122,6 +122,7 @@ class HttpClient {
       RECEIVING_RESPONSE,
       RESPONSE_RECEIVED,
     };
+    static absl::string_view StateName(State state);
     Status();
 
     // HACK: to provide copy constructor of std::atomic<bool>.

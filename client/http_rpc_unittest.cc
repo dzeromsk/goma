@@ -180,7 +180,7 @@ TEST_F(HttpRPCTest, PingFail) {
 
 TEST_F(HttpRPCTest, PingRejected) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"
@@ -229,7 +229,7 @@ TEST_F(HttpRPCTest, PingRejected) {
 
 TEST_F(HttpRPCTest, PingOk) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"
@@ -276,7 +276,7 @@ TEST_F(HttpRPCTest, PingOk) {
 
 TEST_F(HttpRPCTest, CallLookupFile) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   LookupFileReq req;
   string serialized_req;
   req.SerializeToString(&serialized_req);
@@ -342,7 +342,7 @@ TEST_F(HttpRPCTest, CallLookupFile) {
 
 TEST_F(HttpRPCTest, CallAsyncLookupFile) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   LookupFileReq req;
   string serialized_req;
   req.SerializeToString(&serialized_req);
@@ -447,7 +447,7 @@ TEST_F(HttpRPCTest, TLSEnginePingFail) {
 
 TEST_F(HttpRPCTest, TLSEnginePingRejected) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"
@@ -501,7 +501,7 @@ TEST_F(HttpRPCTest, TLSEnginePingRejected) {
 
 TEST_F(HttpRPCTest, TLSEnginePingOk) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"
@@ -552,7 +552,7 @@ TEST_F(HttpRPCTest, TLSEnginePingOk) {
 
 TEST_F(HttpRPCTest, TLSEngineCallLookupFile) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   LookupFileReq req;
   string serialized_req;
   req.SerializeToString(&serialized_req);
@@ -622,7 +622,7 @@ TEST_F(HttpRPCTest, TLSEngineCallLookupFile) {
 
 TEST_F(HttpRPCTest, TLSEngineCallLookupFileDeflate) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   const int kCompressionLevel = 3;
   LookupFileReq req;
   string serialized_req;
@@ -701,7 +701,7 @@ TEST_F(HttpRPCTest, TLSEngineCallLookupFileDeflate) {
 
 TEST_F(HttpRPCTest, TLSEngineCallAsyncLookupFile) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   LookupFileReq req;
   string serialized_req;
   req.SerializeToString(&serialized_req);
@@ -786,7 +786,7 @@ TEST_F(HttpRPCTest, TLSEngineCallAsyncLookupFile) {
 
 TEST_F(HttpRPCTest, TLSEngineFailWithTLSErrorAtSetData) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"
@@ -841,7 +841,7 @@ TEST_F(HttpRPCTest, TLSEngineFailWithTLSErrorAtSetData) {
 
 TEST_F(HttpRPCTest, TLSEngineFailWithTLSErrorAtRead) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"
@@ -889,7 +889,7 @@ TEST_F(HttpRPCTest, TLSEngineFailWithTLSErrorAtRead) {
 
 TEST_F(HttpRPCTest, TLSEngineFailWithTLSErrorAtWrite) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   string req_buf;
   mock_server_->ServerRead(socks[0], &req_buf);
 
@@ -930,7 +930,7 @@ TEST_F(HttpRPCTest, TLSEngineFailWithTLSErrorAtWrite) {
 
 TEST_F(HttpRPCTest, TLSEngineServerTimeoutSendingHeaderShouldBeError) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"
@@ -980,7 +980,7 @@ TEST_F(HttpRPCTest, TLSEngineServerTimeoutSendingHeaderShouldBeError) {
 
 TEST_F(HttpRPCTest, TLSEngineServerCloseWithoutContentLengthShouldBeOk) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"
@@ -1032,7 +1032,7 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseWithoutContentLengthShouldBeOk) {
 
 TEST_F(HttpRPCTest, TLSEngineServerCloseBeforeSendingHeaderShouldBeError) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"
@@ -1081,7 +1081,7 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseBeforeSendingHeaderShouldBeError) {
 
 TEST_F(HttpRPCTest, TLSEngineServerCloseBeforeReadingAnythingShouldBeError) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   mock_server_->ServerClose(socks[0]);
 
   MockSocketFactory::SocketStatus socket_status;
@@ -1116,7 +1116,7 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseBeforeReadingAnythingShouldBeError) {
 
 TEST_F(HttpRPCTest, TLSEngineServerCloseBeforeSendingEnoughDataShouldBeError) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"
@@ -1168,7 +1168,7 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseBeforeSendingEnoughDataShouldBeError) {
 
 TEST_F(HttpRPCTest, TLSEngineServerCloseWithoutContentLengthShouldNotHangUp) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"
@@ -1220,7 +1220,7 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseWithoutContentLengthShouldNotHangUp) {
 
 TEST_F(HttpRPCTest, TLSEngineServerCloseWithoutEndOfChunkShouldNotHangUp) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"
@@ -1274,7 +1274,7 @@ TEST_F(HttpRPCTest, TLSEngineServerCloseWithoutEndOfChunkShouldNotHangUp) {
 
 TEST_F(HttpRPCTest, TLSEngineServerCloseWithoutAllChunksShouldNotHangUp) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::ostringstream req_ss;
   req_ss << "POST /pingz HTTP/1.1\r\n"
          << "Host: clients5.google.com\r\n"

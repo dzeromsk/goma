@@ -17,13 +17,16 @@
 #include <unordered_set>
 #include <vector>
 
+#include "absl/time/time.h"
+#include "absl/types/optional.h"
 #include "atomic_stats_counter.h"
 #include "basictypes.h"
 #include "compiler_info.h"
 #include "compiler_info_builder.h"
-#include "compiler_info_builder_facade.h"
 #include "compiler_info_cache.h"
 #include "compiler_info_state.h"
+#include "compiler_type_specific.h"
+#include "compiler_type_specific_collection.h"
 #include "lockhelper.h"
 #include "subprocess_option_setter.h"
 #include "threadpool_http_server.h"
@@ -192,6 +195,10 @@ class CompileService {
 
   WorkerThreadManager* wm() { return wm_; }
 
+  CompilerTypeSpecificCollection* compiler_type_specific_collection() {
+    return compiler_type_specific_collection_.get();
+  }
+
   // Configurations.
   void SetActiveTaskThrottle(int max_active_tasks);
   void SetCompileTaskHistorySize(int max_finished_tasks,
@@ -201,7 +208,7 @@ class CompileService {
   const string& username() const { return username_; }
 
   const string& nodename() const { return nodename_; }
-  time_t start_time() const { return start_time_; }
+  absl::Time start_time() const { return start_time_; }
   const string& compiler_proxy_id_prefix() const {
     return compiler_proxy_id_prefix_;
   }
@@ -313,10 +320,10 @@ class CompileService {
   bool local_run_for_failed_input() const {
     return local_run_for_failed_input_;
   }
-  void SetLocalRunDelayMsec(int local_run_delay_msec) {
-    local_run_delay_msec_ = local_run_delay_msec;
+  void SetLocalRunDelay(absl::Duration local_run_delay) {
+    local_run_delay_ = local_run_delay;
   }
-  int local_run_delay_msec() const { return local_run_delay_msec_; }
+  absl::Duration local_run_delay() const { return local_run_delay_; }
   void SetStoreLocalRunOutput(bool store_local_run_output) {
     store_local_run_output_ = store_local_run_output;
   }
@@ -336,26 +343,28 @@ class CompileService {
   void SetTmpDir(const string& tmp_dir) { tmp_dir_ = tmp_dir; }
   const string& tmp_dir() const { return tmp_dir_; }
 
-  void SetTimeoutSecs(const std::vector<int>& timeout_secs);
-  const std::vector<int>& timeout_secs() const { return timeout_secs_; }
+  void SetTimeouts(const std::vector<absl::Duration>& timeouts) {
+    timeouts_ = timeouts;
+  }
+  const std::vector<absl::Duration>& timeouts() const { return timeouts_; }
 
   // Allow to send info. when this function is called.
   // All method that use username() and nodename() should check the flag first.
   void AllowToSendUserInfo() { can_send_user_info_ = true; }
   bool CanSendUserInfo() const { return can_send_user_info_; }
 
-  void SetAllowedNetworkErrorDuration(int seconds) {
-    allowed_network_error_duration_in_sec_ = seconds;
+  void SetAllowedNetworkErrorDuration(absl::Duration duration) {
+    allowed_network_error_duration_ = duration;
   }
-  int AllowedNetworkErrorDuration() const {
-    return allowed_network_error_duration_in_sec_;
+  absl::optional<absl::Duration> AllowedNetworkErrorDuration() const {
+    return allowed_network_error_duration_;
   }
 
   void SetMaxActiveFailFallbackTasks(int num) {
     max_active_fail_fallback_tasks_ = num;
   }
-  void SetAllowedMaxActiveFailFallbackDuration(int duration) {
-    allowed_max_active_fail_fallback_duration_in_sec_ = duration;
+  void SetAllowedMaxActiveFailFallbackDuration(absl::Duration duration) {
+    allowed_max_active_fail_fallback_duration_ = duration;
   }
 
   void SetMaxCompilerDisabledTasks(int num) {
@@ -381,7 +390,7 @@ class CompileService {
   bool DumpTask(int task_id, string* out);
   bool DumpTaskRequest(int task_id);
   // Dump the tasks whose state is active or frozen time stamp is after |after|.
-  void DumpToJson(Json::Value* json, long long after);
+  void DumpToJson(Json::Value* json, absl::Time after);
   void DumpStats(std::ostringstream* ss);
   void DumpStatsToFile(const string& filename);
   // Dump stats in json form (converted from GomaStatzStats).
@@ -450,8 +459,8 @@ class CompileService {
   // Records output file is renamed or not.
   void RecordOutputRename(bool rename);
 
-  // Returns in msec to delay subprocess setup.
-  int GetEstimatedSubprocessDelayTime();
+  // Returns duration to delay subprocess setup.
+  absl::Duration GetEstimatedSubprocessDelayTime();
 
   void DumpErrorStatus(std::ostringstream* ss);
 
@@ -523,7 +532,7 @@ class CompileService {
 
   string username_;
   string nodename_;
-  time_t start_time_;
+  absl::Time start_time_;
   string compiler_proxy_id_prefix_;
 
   std::unique_ptr<SubProcessOptionSetter> subprocess_option_setter_;
@@ -534,7 +543,8 @@ class CompileService {
   std::unique_ptr<MultiFileStore> multi_file_store_;
   std::unique_ptr<FileServiceBlobClient> blob_client_;
 
-  std::unique_ptr<CompilerInfoBuilderFacade> compiler_info_builder_facade_;
+  std::unique_ptr<CompilerTypeSpecificCollection>
+      compiler_type_specific_collection_;
 
   int compiler_info_pool_;
 
@@ -556,7 +566,7 @@ class CompileService {
 
   bool need_to_send_content_;
   int new_file_threshold_;
-  std::vector<int> timeout_secs_;
+  std::vector<absl::Duration> timeouts_;
   bool enable_gch_hack_;
   bool use_relative_paths_in_argv_;
   string command_check_level_;
@@ -572,7 +582,7 @@ class CompileService {
   int max_subprocs_pending_;
   int local_run_preference_;
   bool local_run_for_failed_input_;
-  int local_run_delay_msec_;
+  absl::Duration local_run_delay_;
   bool store_local_run_output_;
   bool enable_remote_link_;
   bool should_fail_for_unsupported_compiler_flag_;
@@ -636,12 +646,12 @@ class CompileService {
   size_t peak_req_sum_output_size_ GUARDED_BY(buf_mu_);
 
   bool can_send_user_info_;
-  int allowed_network_error_duration_in_sec_;
+  absl::optional<absl::Duration> allowed_network_error_duration_;
 
   int num_active_fail_fallback_tasks_;
   int max_active_fail_fallback_tasks_;
-  int allowed_max_active_fail_fallback_duration_in_sec_;
-  time_t reached_max_active_fail_fallback_time_;
+  absl::optional<absl::Duration> allowed_max_active_fail_fallback_duration_;
+  absl::optional<absl::Time> reached_max_active_fail_fallback_time_;
 
   int num_forced_fallback_in_setup_[kNumForcedFallbackReasonInSetup];
   int max_compiler_disabled_tasks_;

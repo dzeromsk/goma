@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,7 @@
 #endif
 
 #include "absl/strings/ascii.h"
+#include "absl/types/optional.h"
 
 using std::string;
 
@@ -158,6 +160,19 @@ std::vector<string> ToVector(SplitResult split_result) {
     result.push_back(string(s));
   }
   return result;
+}
+
+// Used for printing absl::optional<T>. T must be compatible with the <<
+// operator to pass it to a stringstream.
+template <typename T>
+std::string OptionalToString(const absl::optional<T>& opt_value) {
+  std::stringstream ss;
+  if (opt_value.has_value()) {
+    ss << *opt_value;
+  } else {
+    ss << "(none)";
+  }
+  return ss.str();
 }
 
 #endif  // DEVTOOLS_GOMA_CLIENT_UTIL_H_

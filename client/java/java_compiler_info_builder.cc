@@ -4,6 +4,7 @@
 
 #include "java/java_compiler_info_builder.h"
 
+#include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "counterz.h"
 #include "glog/logging.h"
@@ -33,7 +34,7 @@ void JavacCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
 // static
 bool JavacCompilerInfoBuilder::ParseJavacVersion(const string& version_info,
                                                  string* version) {
-  version->assign(string(StringRstrip(version_info)));
+  version->assign(string(absl::StripTrailingAsciiWhitespace(version_info)));
   static const char kJavac[] = "javac ";
   static const size_t kJavacLength = sizeof(kJavac) - 1;  // Removed '\0'.
   if (!absl::StartsWith(*version, kJavac)) {

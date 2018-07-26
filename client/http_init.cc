@@ -4,6 +4,7 @@
 
 #include "http_init.h"
 
+#include "absl/strings/ascii.h"
 #include "file_helper.h"
 #include "glog/logging.h"
 #include "http.h"
@@ -120,7 +121,7 @@ void InitHttpClientOptions(HttpClient::Options* http_options) {
         << " : you need http Authorization header in "
         << FLAGS_HTTP_AUTHORIZATION_FILE
         << " or unset GOMA_HTTP_AUTHORIZATION_FILE";
-    auth_header = string(StringRstrip(auth_header));
+    auth_header = string(absl::StripTrailingAsciiWhitespace(auth_header));
     http_options->authorization = auth_header;
 
     LOG_IF(WARNING, !FLAGS_OAUTH2_CONFIG_FILE.empty())

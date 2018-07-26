@@ -75,7 +75,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
         config_(std::move(config)),
         client_(std::move(client)),
         req_(std::move(req)) {
-    LOG_IF(ERROR, !config_->enabled() || !config_->valid())
+    LOG_IF(WARNING, !config_->enabled() || !config_->valid())
         << "config enabled=" << config_->enabled()
         << " valid=" << config_->valid();
   }

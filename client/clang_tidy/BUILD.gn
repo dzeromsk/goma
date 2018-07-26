@@ -26,6 +26,18 @@ static_library("clang_tidy_compiler_info_builder_lib") {
   public_configs = [ "//client:client_config" ]
 }
 
+static_library("clang_tidy_compiler_type_specific") {
+  sources = [
+    "clang_tidy_compiler_type_specific.cc",
+    "clang_tidy_compiler_type_specific.h",
+  ]
+
+  public_deps = [
+    ":clang_tidy_compiler_info_builder_lib",
+    "//client/cxx:cxx_compiler_type_specific_lib",
+  ]
+}
+
 executable("clang_tidy_compiler_info_builder_unittest") {
   testonly = true
   sources = [

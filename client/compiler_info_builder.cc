@@ -4,6 +4,7 @@
 
 #include "compiler_info_builder.h"
 
+#include "absl/time/clock.h"
 #include "compiler_flag_type_specific.h"
 #include "compiler_info.h"
 #include "counterz.h"
@@ -117,7 +118,7 @@ string CompilerInfoBuilder::GetCompilerName(
 void CompilerInfoBuilder::AddErrorMessage(const std::string& message,
                                           CompilerInfoData* compiler_info) {
   if (compiler_info->failed_at() == 0)
-    compiler_info->set_failed_at(time(nullptr));
+    compiler_info->set_failed_at(absl::ToTimeT(absl::Now()));
 
   if (compiler_info->has_error_message()) {
     compiler_info->set_error_message(compiler_info->error_message() + "\n");
@@ -127,12 +128,14 @@ void CompilerInfoBuilder::AddErrorMessage(const std::string& message,
 
 /* static */
 void CompilerInfoBuilder::OverrideError(const std::string& message,
-                                        time_t failed_at,
+                                        absl::optional<absl::Time> failed_at,
                                         CompilerInfoData* compiler_info) {
-  DCHECK((message.empty() && failed_at == 0) ||
-         (!message.empty() && failed_at > 0));
+  DCHECK((message.empty() && !failed_at.has_value()) ||
+         (!message.empty() && failed_at.has_value()));
   compiler_info->set_error_message(message);
-  compiler_info->set_failed_at(failed_at);
+  if (failed_at.has_value()) {
+    compiler_info->set_failed_at(absl::ToTimeT(*failed_at));
+  }
 }
 
 /* static */

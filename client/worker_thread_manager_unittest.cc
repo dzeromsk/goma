@@ -519,7 +519,7 @@ TEST_F(WorkerThreadManagerTest, PeriodicClosure) {
 TEST_F(WorkerThreadManagerTest, DescriptorReadable) {
   wm_->Start(1);
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   TestReadContext tc(socks[0], 0.0);
   ScopedSocket s(socks[1]);
   wm_->RunClosure(FROM_HERE, NewTestDescriptorRead(&tc),
@@ -551,7 +551,7 @@ TEST_F(WorkerThreadManagerTest, DescriptorReadable) {
 TEST_F(WorkerThreadManagerTest, DescriptorWritable) {
   wm_->Start(1);
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   const int kTotalWrite = 8192;
   TestWriteContext tc(socks[1], kTotalWrite);
   ScopedSocket s0(socks[0]);
@@ -592,7 +592,7 @@ TEST_F(WorkerThreadManagerTest, DescriptorWritable) {
 TEST_F(WorkerThreadManagerTest, DescriptorTimeout) {
   wm_->Start(1);
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   TestReadContext tc(socks[0], 0.5);
   ScopedSocket s(socks[1]);
   wm_->RunClosure(FROM_HERE, NewTestDescriptorRead(&tc),

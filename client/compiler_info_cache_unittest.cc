@@ -14,10 +14,11 @@
 #include <vector>
 
 #include "absl/memory/memory.h"
+#include "absl/time/clock.h"
 #include "compiler_flags.h"
 #include "compiler_flags_parser.h"
-#include "compiler_info_builder_facade.h"
 #include "compiler_info_state.h"
+#include "cxx/gcc_compiler_info_builder.h"
 #include "path.h"
 #include "subprocess.h"
 #include "unittest_util.h"
@@ -26,7 +27,7 @@
 using std::string;
 
 namespace {
-const int kCacheHoldingTimeSec = 60 * 60 * 24 * 30;  // 30 days
+constexpr absl::Duration kCacheHoldingTime = absl::Hours(24 * 30);  // 30 days
 }
 
 namespace devtools_goma {
@@ -82,7 +83,7 @@ class HashCheckingCompilerInfoValidator
 class CompilerInfoCacheTest : public testing::Test {
  public:
   CompilerInfoCacheTest()
-      : cache_(new CompilerInfoCache("", kCacheHoldingTimeSec)),
+      : cache_(new CompilerInfoCache("", kCacheHoldingTime)),
         validator_(new TestCompilerInfoValidator) {
     cache_->SetValidator(validator_);
   }
@@ -104,7 +105,7 @@ class CompilerInfoCacheTest : public testing::Test {
     cache_->UpdateOlderCompilerInfo();
   }
 
-  void SetFailedAt(CompilerInfoState* state, time_t failed_at) {
+  void SetFailedAt(CompilerInfoState* state, absl::Time failed_at) {
     // TODO: in prod code, CompilerInfo would never be updated like this.
     // error message has been changed only if new CompilerInfo data is stored.
     CompilerInfoBuilder::OverrideError(
@@ -236,10 +237,10 @@ TEST_F(CompilerInfoCacheTest, DupStore) {
   ScopedCompilerInfoState cis(cache_->Lookup(key));
   EXPECT_TRUE(cis.get() == nullptr);
 
-  time_t now = time(nullptr);
+  const absl::Time now = absl::Now();
   // get valid compiler info.
   std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
-  cid->set_last_used_at(now);
+  cid->set_last_used_at(absl::ToTimeT(now));
   cid->set_found(true);
   cid->mutable_cxx();
 
@@ -279,7 +280,7 @@ TEST_F(CompilerInfoCacheTest, DupStore) {
 
   // get valid compiler info, which is the same as before.
   cid = absl::make_unique<CompilerInfoData>();
-  cid->set_last_used_at(now);
+  cid->set_last_used_at(absl::ToTimeT(now));
   cid->set_found(true);
   cid->mutable_cxx();
 
@@ -295,7 +296,7 @@ TEST_F(CompilerInfoCacheTest, DupStore) {
 
   // update with different data.
   cid = absl::make_unique<CompilerInfoData>();
-  cid->set_last_used_at(now);
+  cid->set_last_used_at(absl::ToTimeT(now));
   cid->set_name("gcc");
   cid->set_found(true);
   cid->mutable_cxx();
@@ -345,7 +346,7 @@ TEST_F(CompilerInfoCacheTest, NegativeCache) {
   EXPECT_EQ(2, cis.get()->refcnt());  // caller & in cache
   EXPECT_TRUE(cis.get()->info().found());
   EXPECT_TRUE(cis.get()->info().HasError());
-  EXPECT_GT(cis.get()->info().failed_at(), 0);
+  EXPECT_TRUE(cis.get()->info().failed_at().has_value());
 
   // will get negatively cached CompilerInfo.
   ScopedCompilerInfoState cis2(cache_->Lookup(key));
@@ -358,8 +359,7 @@ TEST_F(CompilerInfoCacheTest, NegativeCache) {
   EXPECT_EQ(2, cis.get()->refcnt());  // cis & in cache
 
   // Sets old failed_at time.
-  time_t now = time(nullptr);
-  SetFailedAt(cis.get(), now - 3600);
+  SetFailedAt(cis.get(), absl::Now() - absl::Hours(1));
 
   // Since the negative cache is expired, we will get no CompilerInfo,
   // and will need to retry to make CompilerInfo again.
@@ -406,7 +406,7 @@ TEST_F(CompilerInfoCacheTest, MissingCompilerCache) {
   EXPECT_EQ(1, cache_->NumMiss());
   EXPECT_TRUE(cis.get()->info().HasError());
   EXPECT_FALSE(cis.get()->info().found());
-  EXPECT_GT(cis.get()->info().failed_at(), 0);
+  EXPECT_TRUE(cis.get()->info().failed_at().has_value());
 
   // will get negatively cached CompilerInfo.
   ScopedCompilerInfoState cis2(cache_->Lookup(key));
@@ -416,14 +416,13 @@ TEST_F(CompilerInfoCacheTest, MissingCompilerCache) {
   EXPECT_EQ(1, cache_->NumMiss());
   EXPECT_TRUE(cis2.get()->info().HasError());
   EXPECT_FALSE(cis2.get()->info().found());
-  EXPECT_GT(cis2.get()->info().failed_at(), 0);
+  EXPECT_TRUE(cis2.get()->info().failed_at().has_value());
 
   cis2.reset(nullptr);
   EXPECT_EQ(2, cis.get()->refcnt());  // cis & in cache
 
   // Sets old failed_at time.
-  time_t now = time(nullptr);
-  SetFailedAt(cis.get(), now - 3600);
+  SetFailedAt(cis.get(), absl::Now() - absl::Hours(1));
 
   // Since the negative cache is expired, we will retry to make
   // CompilerInfo again.
@@ -443,8 +442,7 @@ TEST_F(CompilerInfoCacheTest, MissingCompilerCache) {
   EXPECT_EQ(2, cache_->NumMiss());
   EXPECT_TRUE(cis2.get()->info().HasError());
   EXPECT_FALSE(cis2.get()->info().found());
-  EXPECT_GT(cis2.get()->info().failed_at(), 0);
-
+  EXPECT_TRUE(cis2.get()->info().failed_at().has_value());
 }
 
 TEST_F(CompilerInfoCacheTest, Marshal) {
@@ -658,7 +656,7 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
   // Set valid compiler info.
   {
     std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
-    cid->set_last_used_at(time(nullptr));
+    cid->set_last_used_at(absl::ToTimeT(absl::Now()));
     cid->set_found(true);
     cid->mutable_local_compiler_stat()->set_mtime(valid_filestat.mtime);
     cid->mutable_local_compiler_stat()->set_size(valid_filestat.size);
@@ -674,7 +672,7 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
   {
     std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
     // created 31 days ago
-    cid->set_last_used_at(time(nullptr) - 60 * 60 * 24 * 31);
+    cid->set_last_used_at(absl::ToTimeT(absl::Now() - absl::Hours(24 * 31)));
     cid->set_found(true);
     cid->mutable_local_compiler_stat()->set_mtime(valid_filestat.mtime);
     cid->mutable_local_compiler_stat()->set_size(valid_filestat.size);
@@ -789,8 +787,8 @@ TEST_F(CompilerInfoCacheTest, RelativePathCompiler) {
 
   static const char kCompilerInfoCache[] = "compiler_info_cache";
 
-  CompilerInfoCache::Init(tmpdir_util.tmpdir(), kCompilerInfoCache, 3600);
-  CompilerInfoBuilderFacade cib;
+  CompilerInfoCache::Init(tmpdir_util.tmpdir(), kCompilerInfoCache,
+                          absl::Hours(1));
   const std::vector<string> empty_env;
   CompilerInfoCache::Key key1, key2, key3;
 
@@ -799,7 +797,8 @@ TEST_F(CompilerInfoCacheTest, RelativePathCompiler) {
     std::unique_ptr<CompilerFlags> flags(
         CompilerFlagsParser::MustNew(args, "/"));
     std::unique_ptr<CompilerInfoData> cid(
-        cib.FillFromCompilerOutputs(*flags, "usr/bin/gcc", empty_env));
+        GCCCompilerInfoBuilder().FillFromCompilerOutputs(*flags, "usr/bin/gcc",
+                                                         empty_env));
     EXPECT_NE(nullptr, cid);
     key1 = CompilerInfoCache::CreateKey(
         *flags, "usr/bin/gcc", empty_env);
@@ -813,7 +812,8 @@ TEST_F(CompilerInfoCacheTest, RelativePathCompiler) {
     std::unique_ptr<CompilerFlags> flags(
         CompilerFlagsParser::MustNew(args, "/bin"));
     std::unique_ptr<CompilerInfoData> cid(
-        cib.FillFromCompilerOutputs(*flags, "../usr/bin/gcc", empty_env));
+        GCCCompilerInfoBuilder().FillFromCompilerOutputs(
+            *flags, "../usr/bin/gcc", empty_env));
     EXPECT_NE(nullptr, cid);
     key2 = CompilerInfoCache::CreateKey(
         *flags, "../usr/bin/gcc", empty_env);
@@ -827,7 +827,8 @@ TEST_F(CompilerInfoCacheTest, RelativePathCompiler) {
     std::unique_ptr<CompilerFlags> flags(
         CompilerFlagsParser::MustNew(args, tmpdir_util.cwd()));
     std::unique_ptr<CompilerInfoData> cid(
-        cib.FillFromCompilerOutputs(*flags, "/usr/bin/gcc", empty_env));
+        GCCCompilerInfoBuilder().FillFromCompilerOutputs(*flags, "/usr/bin/gcc",
+                                                         empty_env));
     EXPECT_NE(nullptr, cid);
     key3 = CompilerInfoCache::CreateKey(
         *flags, "/usr/bin/gcc", empty_env);
@@ -842,7 +843,8 @@ TEST_F(CompilerInfoCacheTest, RelativePathCompiler) {
 
   ASSERT_TRUE(Chdir("/"));
 
-  CompilerInfoCache::Init(tmpdir_util.tmpdir(), kCompilerInfoCache, 3600);
+  CompilerInfoCache::Init(tmpdir_util.tmpdir(), kCompilerInfoCache,
+                          absl::Hours(1));
 
   EXPECT_NE(nullptr, CompilerInfoCache::instance()->Lookup(key1));
   EXPECT_NE(nullptr, CompilerInfoCache::instance()->Lookup(key2));

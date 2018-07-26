@@ -32,23 +32,22 @@
 #include "platform_thread.h"
 #include "scoped_fd.h"
 #include "simple_timer.h"
+#include "util.h"
 
 namespace devtools_goma {
 
 // Do not use socket that is older than this, for HTTP Keep-Alive. It
 // can be longer, but be on the safer side and do not bother with long
 // timeouts.
-// TODO: Convert to absl::Duration.
-const long long kIdleSocketTimeoutNanoseconds = 5LL * 1000 * 1000 * 1000;
+constexpr absl::Duration kIdleSocketTimeout = absl::Seconds(5);
 
 // Do not use the address that we got error for this period.
 // Note if we have keep-alive socket to that address, it will be used.
 // if we got success after error from the addresss, we'll clear error status.
 constexpr absl::Duration kErrorAddressTimeout = absl::Seconds(60);
 
-// Retry creation of socket pool for this period (milliseconds).
-// TODO: Convert to absl::Duration.
-const int64_t kSocketPoolSetupTimeoutInMs = 10 * 1000;
+// Retry creation of socket pool for this period.
+constexpr absl::Duration kSocketPoolSetupTimeout = absl::Seconds(10);
 
 // Wait connection success for this period.
 constexpr absl::Duration kConnTimeout = absl::Seconds(3);
@@ -59,7 +58,7 @@ SocketPool::SocketPool(const string& host_name, int port)
       current_addr_(nullptr) {
   SimpleTimer timer;
   absl::Duration retry_backoff = absl::Milliseconds(50);
-  while (timer.GetInMilliseconds() < kSocketPoolSetupTimeoutInMs) {
+  while (timer.GetDuration() < kSocketPoolSetupTimeout) {
     Errno eno;
     {
       AUTOLOCK(lock, &mu_);
@@ -75,7 +74,7 @@ SocketPool::SocketPool(const string& host_name, int port)
     }
   }
   LOG_IF(WARNING, !IsInitialized()) << "failed to initialize socket pool in "
-                                    << timer.GetInMilliseconds() << " msec."
+                                    << timer.GetDuration()
                                     << " host_name=" << host_name
                                     << " port=" << port;
 }
@@ -99,8 +98,7 @@ ScopedSocket SocketPool::NewSocket() {
     AUTOLOCK(lock, &mu_);
     while (!socket_pool_.empty()) {
       // If the socket has been idle for less than X seconds, use it.
-      if (socket_pool_.front().second.GetInNanoseconds() <
-          kIdleSocketTimeoutNanoseconds) {
+      if (socket_pool_.front().second.GetDuration() < kIdleSocketTimeout) {
         new_fd = socket_pool_.front().first;
         VLOG(1) << "Reusing socket: " << new_fd
                 << ", socket pool size: " << socket_pool_.size();
@@ -148,8 +146,8 @@ ScopedSocket SocketPool::NewSocket() {
           return ScopedSocket();
         }
         DCHECK(!socket_pool_.empty());
-        DCHECK_LT(socket_pool_.front().second.GetInNanoseconds(),
-                  kIdleSocketTimeoutNanoseconds);
+        DCHECK_LT(socket_pool_.front().second.GetDuration(),
+                  kIdleSocketTimeout);
         new_fd = socket_pool_.front().first;
         socket_pool_.pop_front();
         DCHECK_GE(new_fd, 0);
@@ -475,13 +473,13 @@ class SocketPool::ScopedSocketList {
     return ScopedSocket();
   }
 
-  // Poll nonblocking connect at most timeout_ms milliseconds.
+  // Poll nonblocking connect with timeout.
   // Returns a connected socket, if connection has been established,
   // Returns -1 if poll has not yet finished.
   // nfds will be number of socket that is connecting.
   // if *nfds <= 0, no need to call Poll again.
   // TODO: reuse DescriptorPoller?
-  ScopedSocket Poll(int timeout_ms, int* nfds, AddrData** addr);
+  ScopedSocket Poll(absl::Duration timeout, int* nfds, AddrData** addr);
 
  private:
   std::vector<AddrData>* addrs_;
@@ -495,9 +493,9 @@ class SocketPool::ScopedSocketList {
   DISALLOW_COPY_AND_ASSIGN(ScopedSocketList);
 };
 
-#ifdef WIN32
 ScopedSocket SocketPool::ScopedSocketList::Poll(
-    int timeout_ms, int* nfds, AddrData** addr) {
+    absl::Duration timeout, int* nfds, AddrData** addr) {
+#ifdef WIN32
   *nfds = 0;
   *addr = nullptr;
   fd_set exceptfds;
@@ -515,17 +513,16 @@ ScopedSocket SocketPool::ScopedSocketList::Poll(
   if (*nfds == 0) {
     return ScopedSocket();
   }
-  TIMEVAL timeout;
-  timeout.tv_sec = timeout_ms / 1000;
-  timeout.tv_usec = (timeout_ms % 1000) * 1000;
-  int r = select(*nfds, nullptr, &fdset_, &exceptfds, &timeout);
+
+  TIMEVAL timeout_tv = absl::ToTimeval(timeout);
+  int r = select(*nfds, nullptr, &fdset_, &exceptfds, &timeout_tv);
   if (r == SOCKET_ERROR) {
     LOG(ERROR) << "connect select error="
                << WSAGetLastError();
     return ScopedSocket();
   }
   if (r == 0) {
-    LOG(ERROR) << "connect timeout:" << timeout_ms << " msec";
+    LOG(ERROR) << "connect timeout:" << timeout;
     return ScopedSocket();
   }
   for (size_t i = 0; i < socks_.size(); ++i) {
@@ -559,11 +556,7 @@ ScopedSocket SocketPool::ScopedSocketList::Poll(
                  << " val=" << val;
     }
   }
-  return ScopedSocket();
-}
 #else
-ScopedSocket SocketPool::ScopedSocketList::Poll(
-    int timeout_ms, int* nfds, AddrData** addr) {
   *nfds = 0;
   *addr = nullptr;
   pfds_.resize(socks_.size());
@@ -577,13 +570,13 @@ ScopedSocket SocketPool::ScopedSocketList::Poll(
   if (*nfds == 0) {
     return ScopedSocket();
   }
-  int r = poll(&pfds_[0], *nfds, timeout_ms);
+  int r = poll(&pfds_[0], *nfds, absl::ToInt64Milliseconds(timeout));
   if (r == -1) {
     PLOG_IF(ERROR, errno != EINTR) << "connect poll error";
     return ScopedSocket();
   }
   if (r == 0) {
-    PLOG(ERROR) << "connect timeout:" << timeout_ms << " msec";
+    PLOG(ERROR) << "connect timeout:" << timeout;
     return ScopedSocket();
   }
   for (int i = 0; i < *nfds; ++i) {
@@ -599,9 +592,9 @@ ScopedSocket SocketPool::ScopedSocketList::Poll(
       }
     }
   }
+#endif  // defined(WIN32)
   return ScopedSocket();
 }
-#endif
 
 Errno SocketPool::InitializeUnlocked() {
   // lock held.
@@ -622,19 +615,16 @@ Errno SocketPool::InitializeUnlocked() {
     if (found != last_errors.end()) {
       addr.error_timestamp = found->second;
     }
-    auto error_timestamp_string = addr.error_timestamp
-                                      ? absl::FormatTime(*addr.error_timestamp)
-                                      : "(none)";
     LOG(INFO) << host_name_ << " resolved as " << addr.name
-              << " error_timestamp:" << error_timestamp_string;
+              << " error_timestamp:" << OptionalToString(addr.error_timestamp);
   }
-  int resolve_ms = timer.GetInIntMilliseconds();
-  if (resolve_ms > 1000) {
+  absl::Duration resolve_duration = timer.GetDuration();
+  if (resolve_duration > absl::Seconds(1)) {
     LOG(ERROR) << "SLOW resolve " << host_name_ << " " << addrs_.size()
-               << " in " << resolve_ms << " msec";
+               << " in " << resolve_duration;
   } else {
     LOG(INFO) << "resolve " << host_name_ << " " << addrs_.size()
-              << " in " << resolve_ms << " msec";
+              << " in " << resolve_duration;
   }
 
   timer.Start();
@@ -645,17 +635,17 @@ Errno SocketPool::InitializeUnlocked() {
   if (s.valid()) {
     DCHECK(current_addr_ != nullptr);
     DCHECK(current_addr_->IsValid());
-    int connect_ms = timer.GetInIntMilliseconds();
-    if (connect_ms > 1000) {
+    absl::Duration connect_duration = timer.GetDuration();
+    if (connect_duration > absl::Seconds(1)) {
       LOG(ERROR) << "SLOW connected"
                  << ": use addr:" << current_addr_->name
                  << " for " << host_name_
-                 << " in " << connect_ms << " msec";
+                 << " in " << connect_duration;
     } else {
       LOG(INFO) << "connected"
                 << ": use addr:" << current_addr_->name
                 << " for " << host_name_
-                << " in " << connect_ms << " msec";
+                << " in " << connect_duration;
     }
     fd_addrs_.insert(std::make_pair(s.get(), current_addr_->name));
     socket_pool_.emplace_back(s.release(), SimpleTimer());
@@ -667,11 +657,10 @@ Errno SocketPool::InitializeUnlocked() {
     DCHECK(current_addr_ == nullptr);
     return FAIL;
   }
-  int remaining;
-  // TODO: convert SimpleTimer to absl/time.
-  while ((remaining = absl::ToInt64Milliseconds(kConnTimeout) -
-                      timer.GetInIntMilliseconds()) > 0) {
-    s = socks.Poll(remaining, &nfds, &current_addr_);
+  absl::Duration remaining_timeout;
+  while ((remaining_timeout = kConnTimeout - timer.GetDuration()) >
+         absl::ZeroDuration()) {
+    s = socks.Poll(remaining_timeout, &nfds, &current_addr_);
     if (s.valid()) {
       break;
     }
@@ -679,12 +668,12 @@ Errno SocketPool::InitializeUnlocked() {
       break;
     }
   }
-  LOG(INFO) << "connect done in " << timer.GetInMilliseconds() << " msec";
+  LOG(INFO) << "connect done in " << timer.GetDuration();
   if (!s.valid()) {
     DCHECK(current_addr_ == nullptr);
     LOG(ERROR) << "Server at "
                << host_name_ << ":" << port_ << " not reachable.";
-    if (remaining <= 0)
+    if (remaining_timeout <= absl::ZeroDuration())
       return ERR_TIMEOUT;
     return FAIL;
   }

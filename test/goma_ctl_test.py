@@ -147,6 +147,10 @@ class FakeGomaEnv(object):
   def ExtractPackage(self, src, dst):
     return True
 
+  @staticmethod
+  def FindLatestLogFile(command_name, log_type):
+    return 'dummy_info'
+
   def GetCacheDirectory(self):
     return 'dummy_cache_dir'
 
@@ -918,12 +922,17 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.tgz_source_dir = None
         self.tgz_file = None
         self.written = False
+        self.find_latest_info_file = False
 
       def WriteFile(self, filename, content):
         self.output_files.append(filename)
 
       def CopyFile(self, from_file, to_file):
         self.output_files.append(to_file)
+
+      @staticmethod
+      def FindLatestLogFile(command_name, log_type):
+        return None
 
       def MakeTgzFromDirectory(self, dir_name, output_filename):
         self.tgz_source_dir = dir_name
@@ -971,6 +980,10 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
 
       def CopyFile(self, from_file, to_file):
         self.output_files.append(to_file)
+
+      @staticmethod
+      def FindLatestLogFile(command_name, log_type):
+        return None
 
       def MakeTgzFromDirectory(self, dir_name, output_filename):
         self.tgz_source_dir = dir_name
@@ -1020,6 +1033,10 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
 
       def CopyFile(self, from_file, to_file):
         self.output_files.append(to_file)
+
+      @staticmethod
+      def FindLatestLogFile(command_name, log_type):
+        return None
 
       def MakeTgzFromDirectory(self, dir_name, output_filename):
         self.tgz_source_dir = dir_name

@@ -30,6 +30,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_split.h"
 #include "basictypes.h"
@@ -40,30 +41,7 @@
 
 using std::string;
 
-namespace {
-
-// Come from Python 2.7 string.whitespace.
-static const char* kWhitespaces = "\t\n\x0b\x0c\r ";
-
-}  // namespace
-
 namespace devtools_goma {
-
-absl::string_view StringRstrip(absl::string_view str) {
-  size_t found = str.find_last_not_of(kWhitespaces);
-  if (found != string::npos)
-    return str.substr(0, found + 1);
-  return str.substr(str.size(), 0);  // empty string piece.
-}
-
-absl::string_view StringStrip(absl::string_view str) {
-  absl::string_view::size_type found = str.find_last_not_of(kWhitespaces);
-  if (found == absl::string_view::npos)
-    return str.substr(str.size(), 0);  // empty string piece.
-  str = str.substr(0, found + 1);
-  found = str.find_first_not_of(kWhitespaces);
-  return str.substr(found);
-}
 
 void WriteStringToFileOrDie(const string &data, const string &filename,
                             int permission) {

@@ -21,7 +21,6 @@
 #include "cpp_tokenizer.h"
 #include "cxx/cxx_compiler_info.h"
 #include "include_guard_detector.h"
-#include "timestamp.h"
 
 namespace devtools_goma {
 

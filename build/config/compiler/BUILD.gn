@@ -224,7 +224,7 @@ config("msan") {
   cflags = [
     "-fsanitize=memory",
     "-fsanitize-blacklist=$msan_blacklist_path",
-    "-fsanitize-memory-track-origins=2",
+    "-fsanitize-memory-track-origins=$msan_track_origins",
   ]
   ldflags = [ "-fsanitize=memory" ]
   defines = [ "MEMORY_SANITIZER" ]

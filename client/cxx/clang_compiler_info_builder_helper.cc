@@ -5,6 +5,7 @@
 #include "clang_compiler_info_builder_helper.h"
 
 #include "absl/memory/memory.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
@@ -1019,7 +1020,7 @@ bool ClangCompilerInfoBuilderHelper::SplitGccIncludeOutput(
     qpaths->clear();
     for (auto&& split_qpath : absl::StrSplit(
              gcc_v_qsearch_paths, absl::ByAnyChar("\r\n"), absl::SkipEmpty())) {
-      absl::string_view qpath = StringStrip(split_qpath);
+      absl::string_view qpath = absl::StripAsciiWhitespace(split_qpath);
       if (!qpath.empty()) {
         qpaths->emplace_back(string(qpath));
       }
@@ -1033,13 +1034,13 @@ bool ClangCompilerInfoBuilderHelper::SplitGccIncludeOutput(
   paths->clear();
   for (auto&& split_path : absl::StrSplit(
            gcc_v_search_paths, absl::ByAnyChar("\r\n"), absl::SkipEmpty())) {
-    absl::string_view path = StringStrip(split_path);
+    absl::string_view path = absl::StripAsciiWhitespace(split_path);
     if (!path.empty()) {
       static const char* kFrameworkMarker = "(framework directory)";
       if (absl::EndsWith(path, kFrameworkMarker)) {
         if (framework_paths) {
           path.remove_suffix(strlen(kFrameworkMarker));
-          path = StringStrip(path);
+          path = absl::StripAsciiWhitespace(path);
           framework_paths->emplace_back(path);
         }
       } else {

@@ -18,25 +18,25 @@
 
 #include "absl/base/call_once.h"
 #include "absl/base/thread_annotations.h"
+#include "absl/time/time.h"
 #include "basictypes.h"
 #include "compile_service.h"
 #include "compiler_info.h"
 #include "compiler_specific.h"
+#include "compiler_type_specific.h"
 #include "deps_cache.h"
 #include "file_stat.h"
 #include "file_stat_cache.h"
-MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
-#include "google/protobuf/repeated_field.h"
-MSVC_POP_WARNING()
 #include "http_rpc.h"
-MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
-#include "prototmp/goma_data.pb.h"
-#include "prototmp/subprocess.pb.h"
-MSVC_POP_WARNING()
 #include "simple_timer.h"
 #include "subprocess_task.h"
 #include "threadpool_http_server.h"
-#include "timestamp.h"
+
+MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
+#include "google/protobuf/repeated_field.h"
+#include "prototmp/goma_data.pb.h"
+#include "prototmp/subprocess.pb.h"
+MSVC_POP_WARNING()
 
 namespace devtools_goma {
 
@@ -104,11 +104,13 @@ class CompileTask {
   // DumpRequest is called on finished task.
   void DumpRequest() const;
 
-  void SetFrozenTimestampMs(millitime_t frozen_timestamp_ms) {
-    frozen_timestamp_ms_ = frozen_timestamp_ms;
+  void SetFrozenTimestamp(absl::Time frozen_timestamp) {
+    frozen_timestamp_ = frozen_timestamp;
   }
-  millitime_t GetFrozenTimestampMs() const { return frozen_timestamp_ms_; }
-  millitime_t GetLastReqTimestampMs() const { return last_req_timestamp_ms_; }
+  absl::optional<absl::Time> GetFrozenTimestamp() const {
+    return frozen_timestamp_;
+  }
+  absl::Time GetLastReqTimestamp() const { return last_req_timestamp_; }
 
  private:
   friend class CompileTaskTest;
@@ -131,8 +133,9 @@ class CompileTask {
   struct ContentOutputParam;
   struct RunCppIncludeProcessorParam;
   struct RunLinkerInputProcessorParam;
-  struct RunJarParserParam;
   struct ReadThinLTOImportsParam;
+  struct IncludeProcessorRequestParam;
+  struct IncludeProcessorResponseParam;
 
   ~CompileTask();
 
@@ -265,12 +268,15 @@ class CompileTask {
       std::unique_ptr<RunLinkerInputProcessorParam> param);
   void RunLinkerInputProcessorDone(
       std::unique_ptr<RunLinkerInputProcessorParam> param);
-  void GetJavaRequiredFiles();
-  void RunJarParser(std::unique_ptr<RunJarParserParam> param);
-  void RunJarParserDone(std::unique_ptr<RunJarParserParam> param);
   void GetThinLTOImports();
   void ReadThinLTOImports(std::unique_ptr<ReadThinLTOImportsParam> param);
   void ReadThinLTOImportsDone(std::unique_ptr<ReadThinLTOImportsParam> param);
+
+  void StartIncludeProcessor();
+  void RunIncludeProcessor(
+      std::unique_ptr<IncludeProcessorRequestParam> request_param);
+  void RunIncludeProcessorDone(
+      std::unique_ptr<IncludeProcessorResponseParam> response_param);
   void UpdateRequiredFilesDone(bool ok);
   void SetupRequestDone(bool ok);
 
@@ -356,6 +362,8 @@ class CompileTask {
   std::unique_ptr<CompilerFlags> flags_;
   bool linking_;
   bool precompiling_;
+
+  CompilerTypeSpecific* compiler_type_specific_;
 
   // gomacc_pid_:
   //   gomacc_pid_ == SubprocessState::kInvalidPid if gomacc not running.
@@ -469,10 +477,10 @@ class CompileTask {
   PlatformThreadId thread_id_;
 
   // Timestamp that this task transited to Finished or Failed.
-  millitime_t frozen_timestamp_ms_;
+  absl::optional<absl::Time> frozen_timestamp_;
 
   // Timestamp that this task transmitted the request to Goma.
-  millitime_t last_req_timestamp_ms_;
+  absl::Time last_req_timestamp_;
 
   static absl::once_flag init_once_;
 

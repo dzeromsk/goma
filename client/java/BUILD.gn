@@ -13,6 +13,20 @@ static_library("java_compiler_info_lib") {
   ]
 }
 
+static_library("java_compiler_type_specific") {
+  sources = [
+    "java_compiler_type_specific.cc",
+    "java_compiler_type_specific.h",
+  ]
+
+  public_deps = [
+    ":jar_parser_lib",
+    ":java_compiler_info_builder_lib",
+    "//client:compiler_type_specific_lib",
+    "//lib:java_specific",
+  ]
+}
+
 static_library("jarfile_reader_lib") {
   sources = [
     "jarfile_reader.cc",

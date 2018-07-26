@@ -29,7 +29,6 @@
 #include "mypath.h"
 #include "path.h"
 #include "platform_thread.h"
-#include "timestamp.h"
 
 namespace {
 
@@ -83,8 +82,8 @@ int SpawnerPosix::Run(const string& cmd, const std::vector<string>& args,
                       const std::vector<string>& envs, const string& cwd) {
   if (console_output_) {
     std::ostringstream filenamebuf;
-    filenamebuf << "goma_tmp." << rand() << "." << GetCurrentTimestampMs()
-                << ".out";
+    filenamebuf << "goma_tmp." << rand() << "."
+                << absl::ToUnixMillis(absl::Now()) << ".out";
     console_out_file_ = file::JoinPath(GetGomaTmpDir(), filenamebuf.str());
     stdout_filename_ = console_out_file_;
   }

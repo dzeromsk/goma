@@ -21,6 +21,7 @@
 
 #include "absl/strings/match.h"
 #include "absl/strings/str_join.h"
+#include "absl/time/clock.h"
 #include "absl/types/optional.h"
 #include "atomic_stats_counter.h"
 #include "auto_updater.h"
@@ -54,7 +55,6 @@
 #include "mypath.h"
 #include "path.h"
 #include "path_resolver.h"
-#include "timestamp.h"
 #include "util.h"
 #include "watchdog.h"
 #include "worker_thread_manager.h"
@@ -318,8 +318,9 @@ CompileService::CompileService(WorkerThreadManager* wm, int compiler_info_pool)
       max_long_tasks_(50),
       username_(GetUsername()),
       nodename_(GetNodename()),
-      start_time_(time(nullptr)),
-      compiler_info_builder_facade_(new CompilerInfoBuilderFacade),
+      start_time_(absl::Now()),
+      compiler_type_specific_collection_(
+          absl::make_unique<CompilerTypeSpecificCollection>()),
       compiler_info_pool_(wm_->StartPool(compiler_info_pool, "compiler_info")),
       file_hash_cache_(new FileHashCache),
       include_processor_pool_(WorkerThreadManager::kFreePool),
@@ -334,7 +335,7 @@ CompileService::CompileService(WorkerThreadManager* wm, int compiler_info_pool)
       max_subprocs_pending_(0),
       local_run_preference_(0),
       local_run_for_failed_input_(false),
-      local_run_delay_msec_(0),
+      local_run_delay_(absl::ZeroDuration()),
       store_local_run_output_(false),
       enable_remote_link_(false),
       num_exec_request_(0),
@@ -365,11 +366,8 @@ CompileService::CompileService(WorkerThreadManager* wm, int compiler_info_pool)
       req_sum_output_size_(0),
       peak_req_sum_output_size_(0),
       can_send_user_info_(false),
-      allowed_network_error_duration_in_sec_(-1),
       num_active_fail_fallback_tasks_(0),
       max_active_fail_fallback_tasks_(-1),
-      allowed_max_active_fail_fallback_duration_in_sec_(-1),
-      reached_max_active_fail_fallback_time_(0),
       num_forced_fallback_in_setup_{},
       max_compiler_disabled_tasks_(-1) {
   if (username_.empty() || username_ == "unknown") {
@@ -469,10 +467,6 @@ void CompileService::SetWatchdog(std::unique_ptr<Watchdog> watchdog,
   watchdog_->SetTarget(this, goma_ipc_env);
 }
 
-void CompileService::SetTimeoutSecs(const std::vector<int>& timeout_secs) {
-  copy(timeout_secs.begin(), timeout_secs.end(), back_inserter(timeout_secs_));
-}
-
 void CompileService::Exec(
     RpcController* rpc,
     const ExecReq* req, ExecResp* resp,
@@ -522,7 +516,7 @@ void CompileService::ExecDone(WorkerThreadManager::ThreadId thread_id,
 }
 
 void CompileService::CompileTaskDone(CompileTask* task) {
-  task->SetFrozenTimestampMs(GetCurrentTimestampMs());
+  task->SetFrozenTimestamp(absl::Now());
   histogram_->UpdateCompileStat(task->stats());
   if (log_service_client_.get())
     log_service_client_->SaveExecLog(task->stats());
@@ -603,9 +597,9 @@ void CompileService::CompileTaskDone(CompileTask* task) {
         DCHECK_GE(num_active_fail_fallback_tasks_, 0);
         if (num_active_fail_fallback_tasks_ <=
             max_active_fail_fallback_tasks_) {
-          LOG_IF(INFO, reached_max_active_fail_fallback_time_ != 0)
+          LOG_IF(INFO, reached_max_active_fail_fallback_time_.has_value())
               << "clearing reached_max_active_fail_fallback_time.";
-          reached_max_active_fail_fallback_time_ = 0;
+          reached_max_active_fail_fallback_time_.reset();
         }
       }
       if (task->stats().compiler_proxy_error())
@@ -741,10 +735,10 @@ bool CompileService::DumpTaskRequest(int task_id) {
   return true;
 }
 
-void CompileService::DumpToJson(Json::Value* json, long long after) {
+void CompileService::DumpToJson(Json::Value* json, absl::Time after) {
   AUTOLOCK(lock, &mu_);
 
-  long long last_update_ms = after;
+  absl::Time last_update_time = after;
 
   {
     Json::Value active(Json::arrayValue);
@@ -769,9 +763,11 @@ void CompileService::DumpToJson(Json::Value* json, long long after) {
   {
     Json::Value failed(Json::arrayValue);
     for (const auto* task : failed_tasks_) {
-      if (task->GetFrozenTimestampMs() <= after)
+      const absl::optional<absl::Time> frozen_timestamp =
+          task->GetFrozenTimestamp();
+      if (!frozen_timestamp.has_value() || *frozen_timestamp <= after)
         continue;
-      last_update_ms = std::max(last_update_ms, task->GetFrozenTimestampMs());
+      last_update_time = std::max(last_update_time, *frozen_timestamp);
       Json::Value json_task;
       task->DumpToJson(false, &json_task);
       failed.append(std::move(json_task));
@@ -854,7 +850,8 @@ void CompileService::DumpToJson(Json::Value* json, long long after) {
       (*json)["goma_version"] = std::move(goma_version);
     }
   }
-  (*json)["last_update_ms"] = last_update_ms;
+  (*json)["last_update_ms"] =
+      static_cast<long long>(absl::ToUnixMillis(last_update_time));
 }
 
 void CompileService::DumpStats(std::ostringstream* ss) {
@@ -1378,8 +1375,9 @@ void CompileService::GetCompilerInfoInternal(
     std::vector<string> env(param->run_envs);
     env.push_back("GOMA_WILL_FAIL_WITH_UKNOWN_FLAG=true");
     std::unique_ptr<CompilerInfoData> cid(
-        compiler_info_builder_facade_->FillFromCompilerOutputs(
-            *param->flags, param->key.local_compiler_path, env));
+        compiler_type_specific_collection_->Get(param->flags->type())
+            ->BuildCompilerInfoData(*param->flags,
+                                    param->key.local_compiler_path, env));
 
     param->state.reset(CompilerInfoCache::instance()->Store(
         param->key, std::move(cid)));
@@ -1584,32 +1582,35 @@ void CompileService::RecordOutputRename(bool rename) {
   }
 }
 
-int CompileService::GetEstimatedSubprocessDelayTime() {
+absl::Duration CompileService::GetEstimatedSubprocessDelayTime() {
   static int count = 0;
-  static int delay = 0;
+  static absl::Duration delay = absl::ZeroDuration();
   static const int kTimeUpdateCount = 20;
   {
     AUTOLOCK(lock, &mu_);
     if ((count % kTimeUpdateCount) == 0) {
-      int mean_include_fileload_time = histogram_->GetStatMean(
-          CompilerProxyHistogram::IncludeFileloadTime);
-      int mean_rpc_call_time = histogram_->GetStatMean(
-          CompilerProxyHistogram::RPCCallTime);
-      int mean_file_response_time = histogram_->GetStatMean(
-          CompilerProxyHistogram::FileResponseTime);
-      int mean_local_pending_time = histogram_->GetStatMean(
-          CompilerProxyHistogram::LocalPendingTime);
-      int mean_local_run_time = histogram_->GetStatMean(
-          CompilerProxyHistogram::LocalRunTime);
+      int mean_include_fileload_time_ms =
+          histogram_->GetStatMean(CompilerProxyHistogram::IncludeFileloadTime);
+      int mean_rpc_call_time_ms =
+          histogram_->GetStatMean(CompilerProxyHistogram::RPCCallTime);
+      int mean_file_response_time_ms =
+          histogram_->GetStatMean(CompilerProxyHistogram::FileResponseTime);
+      int mean_local_pending_time_ms =
+          histogram_->GetStatMean(CompilerProxyHistogram::LocalPendingTime);
+      int mean_local_run_time_ms =
+          histogram_->GetStatMean(CompilerProxyHistogram::LocalRunTime);
 
-      int mean_remote_time = mean_include_fileload_time
-          + mean_rpc_call_time
-          + mean_file_response_time;
-      int mean_local_time = mean_local_pending_time + mean_local_run_time;
+      absl::Duration mean_remote_time =
+          absl::Milliseconds(mean_include_fileload_time_ms +
+                             mean_rpc_call_time_ms +
+                             mean_file_response_time_ms);
+      absl::Duration mean_local_time =
+          absl::Milliseconds(mean_local_pending_time_ms +
+                             mean_local_run_time_ms);
 
       if (mean_remote_time >= mean_local_time) {
         // If local run is fast enough, it uses local as much as possible.
-        delay = 0;
+        delay = absl::ZeroDuration();
       } else {
         // Otherwise, local run is slower than remote call.
         // In this case, it would be better to use remote call as much as
@@ -1617,19 +1618,20 @@ int CompileService::GetEstimatedSubprocessDelayTime() {
         // call stall case (e.g. http shows no activity for long time).
         if (dont_kill_subprocess_) {
           // delay will be 99.7% of remote time.
-          double sd_include_fileload_time =
+          double sd_include_fileload_time_ms =
               histogram_->GetStatStandardDeviation(
                   CompilerProxyHistogram::IncludeFileloadTime);
-          double sd_rpc_call_time =
+          double sd_rpc_call_time_ms =
               histogram_->GetStatStandardDeviation(
                   CompilerProxyHistogram::RPCCallTime);
-          double sd_file_response_time =
+          double sd_file_response_time_ms =
               histogram_->GetStatStandardDeviation(
                   CompilerProxyHistogram::FileResponseTime);
-          delay = static_cast<int>(mean_remote_time
-                                   + 3 * sd_include_fileload_time
-                                   + 3 * sd_rpc_call_time
-                                   + 3 * sd_file_response_time);
+          delay = mean_remote_time +
+                  absl::Milliseconds(
+                      static_cast<int>(3 * sd_include_fileload_time_ms +
+                                       3 * sd_rpc_call_time_ms +
+                                       3 * sd_file_response_time_ms));
         } else {
           delay = mean_remote_time;
         }
@@ -1638,8 +1640,8 @@ int CompileService::GetEstimatedSubprocessDelayTime() {
               << " remote=" << mean_remote_time
               << " local=" << mean_local_time
               << " delay=" << delay;
-      DCHECK_GE(delay, 0);
-      delay += local_run_delay_msec_;
+      DCHECK_GE(delay, absl::ZeroDuration());
+      delay += local_run_delay_;
     }
     ++count;
   }
@@ -1647,8 +1649,7 @@ int CompileService::GetEstimatedSubprocessDelayTime() {
   if (!dont_kill_subprocess_) {
     // We assume that cache hit request is replied withing 5 seconds.
     // If Exec request took more than that, we want to use local resource.
-    static const int kMaxEstimatedSubprocessDelayTimeMs = 5 * 1000;
-    delay = std::min(delay, kMaxEstimatedSubprocessDelayTimeMs);
+    delay = std::min(delay, absl::Seconds(5));
   }
 
   return delay;
@@ -1792,7 +1793,8 @@ void CompileService::DumpCommonStatsUnlocked(GomaStats* stats) {
     outputs->set_peak_req(peak_req_sum_output_size_);
     stats->mutable_memory_stats()->set_consuming(
         GetConsumingMemoryOfCurrentProcess());
-    stats->mutable_time_stats()->set_uptime(time(nullptr) - start_time());
+    stats->mutable_time_stats()->set_uptime(
+        absl::ToInt64Seconds(absl::Now() - start_time()));
 
     {
       IncludeProcessorStats* processor =
@@ -1899,15 +1901,17 @@ bool CompileService::IncrementActiveFailFallbackTasks() {
       num_active_fail_fallback_tasks_ <= max_active_fail_fallback_tasks_)
     return true;
 
-  time_t now = time(nullptr);
-  if (reached_max_active_fail_fallback_time_ == 0) {
+  const absl::Time now = absl::Now();
+  if (!reached_max_active_fail_fallback_time_.has_value()) {
     reached_max_active_fail_fallback_time_ = now;
     LOG(INFO) << "reached max_active_fail_fallback_tasks."
               << " reached_max_active_fail_fallback_time="
-              << reached_max_active_fail_fallback_time_;
+              << *reached_max_active_fail_fallback_time_;
   }
-  if (now < reached_max_active_fail_fallback_time_ +
-            allowed_max_active_fail_fallback_duration_in_sec_) {
+  if (reached_max_active_fail_fallback_time_.has_value() &&
+      allowed_max_active_fail_fallback_duration_.has_value() &&
+      now < *reached_max_active_fail_fallback_time_ +
+            *allowed_max_active_fail_fallback_duration_) {
     LOG(INFO) << "reached max_active_fail_fallback_tasks but not reached "
               << "end of allowed duration."
               << " max_active_fail_fallback_tasks="
@@ -1915,7 +1919,7 @@ bool CompileService::IncrementActiveFailFallbackTasks() {
               << " num_active_fail_fallback_tasks="
               << num_active_fail_fallback_tasks_
               << " reached_max_active_fail_fallback_time="
-              << reached_max_active_fail_fallback_time_;
+              << *reached_max_active_fail_fallback_time_;
     return true;
   }
 
@@ -1925,7 +1929,7 @@ bool CompileService::IncrementActiveFailFallbackTasks() {
                << " num_active_fail_fallback_tasks="
                << num_active_fail_fallback_tasks_
                << " reached_max_active_fail_fallback_time="
-               << reached_max_active_fail_fallback_time_;
+               << *reached_max_active_fail_fallback_time_;
   return false;
 }
 

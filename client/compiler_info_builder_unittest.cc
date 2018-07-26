@@ -6,7 +6,7 @@
 
 #include "compiler_flags_parser.h"
 #include "compiler_info.h"
-#include "compiler_info_builder_facade.h"
+#include "compiler_type_specific_collection.h"
 #include "cxx/cxx_compiler_info.h"
 #include "gtest/gtest.h"
 #include "mypath.h"
@@ -39,6 +39,8 @@ class CompilerInfoBuilderTest : public testing::Test {
     const std::string top_dir = file::JoinPath(parent_dir, "..");
     return file::JoinPath(top_dir, "test");
   }
+
+  CompilerTypeSpecificCollection cts_collection_;
 };
 
 TEST_F(CompilerInfoBuilderTest, IsCwdRelative) {
@@ -87,9 +89,9 @@ TEST_F(CompilerInfoBuilderTest, FillFromCompilerOutputsShouldUseProperPath) {
   };
   envs.emplace_back("PATH=" + GetEnv("PATH"));
   std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(args, "."));
-  CompilerInfoBuilderFacade cib;
   std::unique_ptr<CompilerInfoData> data(
-      cib.FillFromCompilerOutputs(*flags, clang, envs));
+      cts_collection_.Get(flags->type())
+          ->BuildCompilerInfoData(*flags, clang, envs));
   EXPECT_TRUE(data.get());
   EXPECT_EQ(0, data->failed_at());
 }
@@ -149,12 +151,12 @@ TEST_F(CompilerInfoBuilderTest, GccSmoke) {
   };
   const std::vector<string> envs;
 
-  CompilerInfoBuilderFacade cib;
   for (const auto& args : testcases) {
     std::unique_ptr<CompilerFlags> flags(
         CompilerFlagsParser::MustNew(args, "."));
     CxxCompilerInfo compiler_info(
-        cib.FillFromCompilerOutputs(*flags, args[0], envs));
+        cts_collection_.Get(flags->type())
+            ->BuildCompilerInfoData(*flags, args[0], envs));
 
     EXPECT_FALSE(compiler_info.HasError());
   }
@@ -182,13 +184,13 @@ TEST_F(CompilerInfoBuilderTest, ClangSmoke) {
   const std::vector<std::vector<string>> testcases = {
       {clang_path}, {clang_path, "-xc"}, {clang_path, "-xc++"},
   };
-  CompilerInfoBuilderFacade cib;
 
   for (const auto& args : testcases) {
     std::unique_ptr<CompilerFlags> flags(
         CompilerFlagsParser::MustNew(args, "."));
     CxxCompilerInfo compiler_info(
-        cib.FillFromCompilerOutputs(*flags, args[0], envs));
+        cts_collection_.Get(flags->type())
+            ->BuildCompilerInfoData(*flags, args[0], envs));
 
     EXPECT_FALSE(compiler_info.HasError());
   }

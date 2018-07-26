@@ -6,7 +6,6 @@
 #define DEVTOOLS_GOMA_CLIENT_HTTP_UTIL_H_
 
 // Utilities for HTTP.
-// TODO: move http funcs from ioutil.
 
 #include <cstddef>
 #include <map>
@@ -24,6 +23,7 @@ extern const absl::string_view kAuthorization;
 extern const absl::string_view kContentEncoding;
 extern const absl::string_view kContentLength;
 extern const absl::string_view kContentType;
+extern const absl::string_view kConnection;
 extern const absl::string_view kCookie;
 extern const absl::string_view kHost;
 extern const absl::string_view kUserAgent;
@@ -32,7 +32,6 @@ extern const absl::string_view kTransferEncoding;
 // Extracts HTTP header field value.
 // field_name should not have leading and trailing space.
 // header should be HTTP message header, i.e. ends with CRLFCRLF.
-// TODO: use this instead of header.find("field:")
 absl::string_view ExtractHeaderField(
     absl::string_view header, absl::string_view field_name);
 

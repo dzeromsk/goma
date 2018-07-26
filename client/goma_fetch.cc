@@ -53,10 +53,12 @@ class Fetcher {
     int backoff_ms = client_->options().min_retry_backoff_ms;
 
     string err_messages;
+    req_.AddHeader("Connection", "close");
     for (int i = 0; i < FLAGS_FETCH_RETRY; ++i) {
       client_->InitHttpRequest(&req_, method_, "");
-      req_.AddHeader("Connection", "close");
       if (!body_.empty()) {
+        // TODO: make it flag?
+        req_.SetContentType("application/x-www-form-urlencoded");
         req_.SetBody(body_);
       }
       err_messages += status_.err_message + " ";
@@ -108,9 +110,10 @@ class Fetcher {
 };
 
 void usage(const char* prog) {
-  std::cerr << "usage: " << prog << "url" << std::endl;
-  std::cerr << "usage: " << prog << "--head url" << std::endl;
-  std::cerr << "usage: " << prog << "--post url [--data body]" << std::endl;
+  std::cerr << "usage: " << prog << "[--no-auth] url" << std::endl;
+  std::cerr << "usage: " << prog << "[--no-auth] --head url" << std::endl;
+  std::cerr << "usage: " << prog << "[--no-auth] --post url [--data body]"
+            << std::endl;
 }
 
 }  // anonymous namespace
@@ -125,36 +128,44 @@ int main(int argc, char* argv[], const char* envp[]) {
   srand(static_cast<unsigned int>(time(nullptr)));
   devtools_goma::InitLogging(argv[0]);
 
+  // TODO: use gflags?
+  bool use_goma_auth = true;
   absl::string_view method = "GET";
   absl::string_view url = argv[1];
   absl::string_view body = "";
-  if (strcmp(argv[1], "--head") == 0) {
+  int argi = 1;
+  if (strcmp(argv[argi], "--no-auth") == 0) {
+    argi++;
+    use_goma_auth = false;
+  }
+  if (argi >= argc) {
+    usage(argv[0]);
+    exit(1);
+  }
+  if (strcmp(argv[argi], "--head") == 0) {
+    argi++;
     method = "HEAD";
-    if (argc < 3) {
-      usage(argv[0]);
-      exit(1);
-    }
-    url = argv[2];
-  } else if (strcmp(argv[1], "--post") == 0) {
+  } else if (strcmp(argv[argi], "--post") == 0) {
+    argi++;
     method = "POST";
-    if (argc < 3) {
+  }
+  if (argi >= argc) {
+    usage(argv[0]);
+    exit(1);
+  }
+  url = argv[argi];
+  argi++;
+  if (method == "POST") {
+    if (argi == argc) {
+      // --post <url>
+    } else if (argi + 2 == argc && strcmp(argv[argi], "--data") == 0) {
+      // --post <url> --data <body>
+      argi++;
+      body = argv[argi];
+      argi++;
+    } else {
       usage(argv[0]);
       exit(1);
-    }
-    url = argv[2];
-    switch (argc) {
-      case 3:  // --post <url>
-        break;
-      case 5:  // --post <url> --data <body>
-        if (strcmp(argv[3], "--data") != 0) {
-          usage(argv[0]);
-          exit(1);
-        }
-        body = argv[4];
-        break;
-      default:
-        usage(argv[0]);
-        exit(1);
     }
   }
 
@@ -170,6 +181,16 @@ int main(int argc, char* argv[], const char* envp[]) {
   // clear extra params, like "?win".
   // request paths should be passed via argv[1].
   http_options.extra_params = "";
+
+  if (!use_goma_auth) {
+    LOG(INFO) << "disable goma auth";
+    http_options.authorization = "";
+    http_options.oauth2_config.clear();
+    http_options.gce_service_account = "";
+    http_options.service_account_json_filename = "";
+    http_options.luci_context_auth.clear();
+  }
+
   if (!http_options.InitFromURL(url)) {
     LOG(FATAL) << "Failed to initialize HttpClient::Options from URL:"
                << url;

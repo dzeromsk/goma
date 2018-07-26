@@ -10,6 +10,7 @@
 #include <unordered_set>
 
 #include "absl/memory/memory.h"
+#include "absl/time/clock.h"
 #include "absl/strings/str_join.h"
 #include "autolock_timer.h"
 #include "compiler_flags.h"
@@ -27,8 +28,8 @@ using std::string;
 
 namespace devtools_goma {
 
-const int kNegativeCacheDurationSec = 600;  // 10 minutes.
-const int kUpdateLastUsedAtDurationSec = 600;  // 10 minutes.
+constexpr absl::Duration kNegativeCacheDuration = absl::Minutes(10);
+constexpr absl::Duration kUpdateLastUsedAtDuration = absl::Minutes(10);
 
 CompilerInfoCache* CompilerInfoCache::instance_;
 
@@ -50,15 +51,15 @@ string CompilerInfoCache::Key::abs_local_compiler_path() const {
 /* static */
 void CompilerInfoCache::Init(const string& cache_dir,
                              const string& cache_filename,
-                             int cache_holding_time_sec) {
+                             absl::Duration cache_holding_time) {
   CHECK(instance_ == nullptr);
   if (cache_filename == "") {
-    instance_ = new CompilerInfoCache("", cache_holding_time_sec);
+    instance_ = new CompilerInfoCache("", cache_holding_time);
     return;
   }
   instance_ = new CompilerInfoCache(
       file::JoinPathRespectAbsolute(cache_dir, cache_filename),
-      cache_holding_time_sec);
+      cache_holding_time);
 }
 
 void CompilerInfoCache::Quit() {
@@ -67,9 +68,9 @@ void CompilerInfoCache::Quit() {
 }
 
 CompilerInfoCache::CompilerInfoCache(const string& cache_filename,
-                                     int cache_holding_time_sec)
+                                     absl::Duration cache_holding_time)
     : cache_file_(cache_filename),
-      cache_holding_time_sec_(cache_holding_time_sec),
+      cache_holding_time_(cache_holding_time),
       validator_(new CompilerInfoCache::CompilerInfoValidator),
       num_stores_(0),
       num_store_dups_(0),
@@ -134,8 +135,7 @@ CompilerInfoState* CompilerInfoCache::Lookup(const Key& key) {
 
   // Update last used timestamp of |state| having old timestamp.
   if (state != nullptr &&
-      time(nullptr) - state->info().last_used_at() >
-      kUpdateLastUsedAtDurationSec) {
+      absl::Now() - state->info().last_used_at() > kUpdateLastUsedAtDuration) {
     state->UpdateLastUsedAt();
   }
 
@@ -158,8 +158,7 @@ CompilerInfoState* CompilerInfoCache::LookupUnlocked(
       return info;
     }
 
-    time_t now = time(nullptr);
-    if (now < info->info().failed_at() + kNegativeCacheDurationSec) {
+    if (absl::Now() < *info->info().failed_at() + kNegativeCacheDuration) {
       return info;
     }
 
@@ -205,16 +204,16 @@ CompilerInfoState* CompilerInfoCache::Store(
   if (!state.get()->info().found()) {
     ++num_miss_;
     DCHECK(state.get()->info().HasError());
-    DCHECK_NE(state.get()->info().failed_at(), 0);
+    DCHECK(state.get()->info().failed_at().has_value());
   } else if (state.get()->info().HasError()) {
     ++num_fail_;
-    DCHECK_NE(state.get()->info().failed_at(), 0);
+    DCHECK(state.get()->info().failed_at().has_value());
   } else if (dup) {
     ++num_store_dups_;
-    DCHECK_EQ(state.get()->info().failed_at(), 0);
+    DCHECK(!state.get()->info().failed_at().has_value());
   } else {
     ++num_stores_;
-    DCHECK_EQ(state.get()->info().failed_at(), 0);
+    DCHECK(!state.get()->info().failed_at().has_value());
   }
 
   string old_hash;
@@ -469,7 +468,7 @@ void CompilerInfoCache::UpdateOlderCompilerInfoUnlocked() {
   // need more than 2 seconds to check.
   SHA256HashCache sha256_cache;
   std::vector<string> keys_to_remove;
-  time_t now = time(nullptr);
+  const absl::Time now = absl::Now();
   for (const auto& entry : compiler_info_) {
     const std::string& key = entry.first;
     CompilerInfoState* state = entry.second;
@@ -478,8 +477,8 @@ void CompilerInfoCache::UpdateOlderCompilerInfoUnlocked() {
         state->compiler_info_->abs_local_compiler_path();
 
     // if the cache is not used recently, we do not reuse it.
-    time_t time_diff = now - state->info().last_used_at();
-    if (time_diff > cache_holding_time_sec_) {
+    absl::Duration time_diff = now - state->info().last_used_at();
+    if (time_diff > cache_holding_time_) {
       LOG(INFO) << "evict old cache: " << abs_local_compiler_path
                 << " last used at: "
                 << time_diff / (60 * 60 * 24)

@@ -153,7 +153,7 @@ TEST_F(GomaIPCTest, ConnectFail) {
 
 TEST_F(GomaIPCTest, CallPortz) {
   int socks[2];
-  PCHECK(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   EmptyMessage req;
   string serialized_req;
   req.SerializeToString(&serialized_req);

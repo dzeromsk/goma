@@ -313,14 +313,14 @@ const string& CompilerInfo::request_compiler_hash() const {
   return data_->hash();
 }
 
-time_t CompilerInfo::last_used_at() const {
+absl::Time CompilerInfo::last_used_at() const {
   AUTO_SHARED_LOCK(lock, &last_used_at_mu_);
-  return data_->last_used_at();
+  return absl::FromTimeT(data_->last_used_at());
 }
 
-void CompilerInfo::set_last_used_at(time_t t) {
+void CompilerInfo::set_last_used_at(absl::Time time) {
   AUTO_EXCLUSIVE_LOCK(lock, &last_used_at_mu_);
-  data_->set_last_used_at(t);
+  data_->set_last_used_at(absl::ToTimeT(time));
 }
 
 }  // namespace devtools_goma

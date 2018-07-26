@@ -5,6 +5,7 @@
 #include "compiler_info_state.h"
 
 #include "absl/memory/memory.h"
+#include "absl/time/clock.h"
 #include "autolock_timer.h"
 #include "compiler_info_builder.h"
 #include "cxx/cxx_compiler_info.h"
@@ -134,7 +135,7 @@ int CompilerInfoState::used() const {
 }
 
 void CompilerInfoState::UpdateLastUsedAt() {
-  compiler_info_->set_last_used_at(time(nullptr));
+  compiler_info_->set_last_used_at(absl::Now());
 }
 
 ScopedCompilerInfoState::ScopedCompilerInfoState(CompilerInfoState* state)

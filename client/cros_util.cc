@@ -11,6 +11,7 @@
 
 #include <memory>
 
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
@@ -42,7 +43,7 @@ std::vector<string> ParseBlacklistContents(const string& contents) {
   for (auto&& line : absl::StrSplit(contents,
                                     absl::ByAnyChar("\r\n"),
                                     absl::SkipEmpty())) {
-    absl::string_view stripped_line = StringStrip(line);
+    absl::string_view stripped_line = absl::StripAsciiWhitespace(line);
     if (!stripped_line.empty()) {
       parsed.push_back(string(stripped_line));
     }

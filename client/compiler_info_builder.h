@@ -9,6 +9,8 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
+#include "absl/types/optional.h"
 #include "compiler_flags.h"
 #include "compiler_specific.h"
 #include "sha256_hash_cache.h"
@@ -61,9 +63,9 @@ class CompilerInfoBuilder {
   static void AddErrorMessage(const std::string& message,
                               CompilerInfoData* compiler_info);
   // Overrides the current error message.
-  // if |message| is not empty, |failed_at| must be non-zero positive.
+  // if |message| is not empty, |failed_at| must be valid.
   static void OverrideError(const std::string& message,
-                            time_t faile_at,
+                            absl::optional<absl::Time> failed_at,
                             CompilerInfoData* compiler_info);
 
   static bool ResourceInfoFromPath(const string& cwd,

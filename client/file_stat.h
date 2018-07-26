@@ -41,6 +41,9 @@ struct FileStat {
 
   bool operator!=(const FileStat& other) const { return !(*this == other); }
 
+  // For output during testing.
+  friend std::ostream& operator<<(std::ostream& os, const FileStat& stat);
+
   time_t mtime;
   off_t size;
   bool is_directory;
@@ -50,9 +53,6 @@ struct FileStat {
   void InitFromStat(const struct stat& stat_buf);
 #endif
 };
-
-// For output during testing.
-std::ostream& operator<<(std::ostream& os, const FileStat& stat);
 
 }  // namespace devtools_goma
 

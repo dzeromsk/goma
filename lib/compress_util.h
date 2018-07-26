@@ -44,7 +44,7 @@ const char* GetEncodingName(EncodingType type);
 
 // Gets encoding type from |header|. If multiple encodings are found,
 // this function returns the preferred one.
-EncodingType GetEncodingFromHeader(const char* header);
+EncodingType GetEncodingFromHeader(absl::string_view header);
 
 #ifdef ENABLE_LZMA
 class LZMAInputStream : public ZeroCopyInputStream {

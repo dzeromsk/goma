@@ -15,7 +15,7 @@
 #include "absl/strings/str_split.h"
 #include "compiler_flags.h"
 #include "compiler_flags_parser.h"
-#include "compiler_info_builder_facade.h"
+#include "compiler_type_specific_collection.h"
 #include "cxx/cxx_compiler_info.h"
 #include "file_helper.h"
 #include "glog/logging.h"
@@ -32,6 +32,9 @@
 #if HAVE_CPU_PROFILER
 #include <gperftools/profiler.h>
 #endif
+
+using devtools_goma::CompilerTypeSpecificCollection;
+using devtools_goma::GCCCompilerInfoBuilder;
 
 // TODO: share this code with include_processor_unittest.
 std::set<string> GetExpectedFiles(const std::vector<string>& args,
@@ -231,9 +234,11 @@ int main(int argc, char* argv[], const char** envp) {
   GetAdditionalEnv(envp, "TMP", &compiler_info_envs);
   GetAdditionalEnv(envp, "TEMP", &compiler_info_envs);
 
-  devtools_goma::CompilerInfoBuilderFacade cib;
   std::unique_ptr<devtools_goma::CompilerInfoData> cid(
-      cib.FillFromCompilerOutputs(*flags, args[0], compiler_info_envs));
+      CompilerTypeSpecificCollection()
+          .Get(flags->type())
+          ->BuildCompilerInfoData(*flags, args[0], compiler_info_envs));
+
   devtools_goma::CxxCompilerInfo compiler_info(std::move(cid));
   if (compiler_info.HasError()) {
     std::cerr << compiler_info.error_message() << std::endl;

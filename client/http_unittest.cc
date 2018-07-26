@@ -192,7 +192,7 @@ class HttpClientTest : public ::testing::Test {
 
 TEST_F(HttpClientTest, GetNoContentLengthConnectionClose) {
   int socks[2];
-  ASSERT_TRUE(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::string req_expected =
       absl::StrCat("GET / HTTP/1.1\r\n",
                    "Host: example.com\r\n",
@@ -268,7 +268,7 @@ TEST_F(HttpClientTest, GetNoContentLengthConnectionClose) {
 
 TEST_F(HttpClientTest, GetNoContentLengthConnectionCloseSlowBody) {
   int socks[2];
-  ASSERT_TRUE(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::string req_expected =
       absl::StrCat("GET / HTTP/1.1\r\n",
                    "Host: example.com\r\n",
@@ -346,7 +346,7 @@ TEST_F(HttpClientTest, GetNoContentLengthConnectionCloseSlowBody) {
 
 TEST_F(HttpClientTest, GetNoContentLengthConnectionCloseEmptyBody) {
   int socks[2];
-  ASSERT_TRUE(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::string req_expected =
       absl::StrCat("GET / HTTP/1.1\r\n",
                    "Host: example.com\r\n",
@@ -421,7 +421,7 @@ TEST_F(HttpClientTest, GetNoContentLengthConnectionCloseEmptyBody) {
 
 TEST_F(HttpClientTest, GetEmptyBody) {
   int socks[2];
-  ASSERT_TRUE(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::string req_expected =
       absl::StrCat("GET / HTTP/1.1\r\n",
                    "Host: example.com\r\n",
@@ -495,7 +495,7 @@ TEST_F(HttpClientTest, GetEmptyBody) {
 
 TEST_F(HttpClientTest, Get204) {
   int socks[2];
-  ASSERT_TRUE(OpenSocketPairForTest(socks) == 0);
+  ASSERT_EQ(0, OpenSocketPairForTest(socks));
   std::string req_expected =
       absl::StrCat("GET / HTTP/1.1\r\n",
                    "Host: example.com\r\n",

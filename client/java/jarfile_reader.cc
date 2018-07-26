@@ -129,6 +129,7 @@ ssize_t JarFileReader::ReadDataToBuffer(size_t size) {
 // See Also: https://en.wikipedia.org/wiki/Zip_(file_format)#File_headers
 // Note that header structure is the same between ZIP and ZIP64.
 void JarFileReader::NormalizeBuffer() {
+  // TODO: return error instead?
   DCHECK_LE(buffer_head_pos_, last_normalized_absolute_pos_)
       << "buffer_head_pos must be smaller than or equals to "
       << "last_normalized_absolute_pos_"

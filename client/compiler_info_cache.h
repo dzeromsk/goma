@@ -6,7 +6,6 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_COMPILER_INFO_CACHE_H_
 #define DEVTOOLS_GOMA_CLIENT_COMPILER_INFO_CACHE_H_
 
-#include <ctime>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -14,6 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "autolock_timer.h"
 #include "basictypes.h"
 #include "cache_file.h"
@@ -61,7 +61,7 @@ class CompilerInfoCache {
   // otherwise, it will try to load cached data from
   // JoinPathRespectAbsolute(cache_dir, cache_filename).
   static void Init(const string& cache_dir, const string& cache_filename,
-                   int cache_holding_time_sec);
+                   absl::Duration cache_holding_time);
   static CompilerInfoCache* instance() { return instance_; }
 
   // Saves CompilerInfoCache into cache file.
@@ -113,7 +113,8 @@ class CompilerInfoCache {
   }
 
  private:
-  CompilerInfoCache(const string& cache_filename, int cache_holding_time_sec);
+  CompilerInfoCache(const string& cache_filename,
+                    absl::Duration cache_holding_time);
 
   static string HashKey(const CompilerInfoData& data);
   bool Load() LOCKS_EXCLUDED(mu_);
@@ -140,7 +141,7 @@ class CompilerInfoCache {
   static CompilerInfoCache* instance_;
 
   const CacheFile cache_file_;
-  const int cache_holding_time_sec_;
+  const absl::Duration cache_holding_time_;
 
   std::unique_ptr<CompilerInfoValidator> validator_ GUARDED_BY(mu_);
 

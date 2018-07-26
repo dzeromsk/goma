@@ -23,12 +23,6 @@ const int kReadSelectTimeoutSec = 20;
 
 class ScopedSocket;
 
-// Removes tailing spaces from |str|.
-absl::string_view StringRstrip(absl::string_view str);
-
-// Removes leading and tailing spaces from |str|.
-absl::string_view StringStrip(absl::string_view str);
-
 void WriteStringToFileOrDie(const string &data, const string &filename,
                             int permission);
 

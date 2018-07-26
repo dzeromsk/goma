@@ -524,8 +524,9 @@ GOMA_DEFINE_bool(COMPILER_PROXY_ENABLE_CRASH_DUMP, false,
 // and it hangs to kill such process. b/5266411
 // jam@ confirmed the recent MacOSX does not affected by this bug.
 // https://code.google.com/p/chromium/issues/detail?id=387934
+// TODO: enable this again. (b/80404226, b/111241394#comment6)
 GOMA_DEFINE_bool(DONT_KILL_SUBPROCESS,
-                 false,
+                 true,
                  "Don't kill subprocess.");
 
 #ifdef _WIN32

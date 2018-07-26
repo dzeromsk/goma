@@ -49,8 +49,6 @@ static_library("common") {
     "simple_timer.cc",
     "simple_timer.h",
     "spawner.h",
-    "timestamp.cc",
-    "timestamp.h",
     "util.cc",
     "util.h",
   ]
@@ -70,8 +68,6 @@ static_library("common") {
     sources += [
       "filetime_win.cc",
       "filetime_win.h",
-      "gettimeofday_helper_win.cc",
-      "gettimeofday_helper_win.h",
       "mypath_helper_win.cc",
       "named_pipe_client_win.cc",
       "named_pipe_client_win.h",
@@ -344,14 +340,14 @@ static_library("compiler_proxy_lib") {
     "compile_task.h",
     "compiler_flags_util.cc",
     "compiler_flags_util.h",
-    "compiler_info_builder_facade.cc",
-    "compiler_info_builder_facade.h",
     "compiler_info_cache.cc",
     "compiler_info_cache.h",
     "compiler_info_state.cc",
     "compiler_info_state.h",
     "compiler_proxy_histogram.cc",
     "compiler_proxy_histogram.h",
+    "compiler_type_specific_collection.cc",
+    "compiler_type_specific_collection.h",
     "goma_blob.cc",
     "goma_blob.h",
     "goma_file_dump.cc",
@@ -429,6 +425,7 @@ static_library("compiler_proxy_lib") {
     ":client_util_lib",
     ":compiler_info_data_proto",
     ":compiler_info_lib",
+    ":compiler_type_specific_lib",
     ":content_lib",
     ":deps_cache_lib",
     ":error_notice",
@@ -447,15 +444,19 @@ static_library("compiler_proxy_lib") {
     ":subprocess_lib",
     ":subprocess_proto",
     "//client/clang_tidy:clang_tidy_compiler_info_builder_lib",
+    "//client/clang_tidy:clang_tidy_compiler_type_specific",
     "//client/cxx:cxx_compiler_info_lib",
     "//client/cxx:gcc_compiler_info_builder_lib",
+    "//client/cxx:gcc_compiler_type_specific",
     "//client/cxx:vc_compiler_info_builder_lib",
+    "//client/cxx:vc_compiler_type_specific",
     "//client/cxx/include_processor:cpp_include_processor_lib",
     "//client/cxx/include_processor:directive_filter_lib",
     "//client/cxx/include_processor:include_cache_lib",
     "//client/java:jar_parser_lib",
     "//client/java:java_compiler_info_builder_lib",
     "//client/java:java_compiler_info_lib",
+    "//client/java:java_compiler_type_specific",
     "//client/linker/linker_input_processor:arfile_reader_lib",
     "//client/linker/linker_input_processor:linker_input_processor_lib",
     "//client/linker/linker_input_processor:thinlto_import_processor_lib",
@@ -567,6 +568,20 @@ static_library("sha256_hash_cache_lib") {
   public_deps = [
     ":common",
     "//base",
+  ]
+}
+
+static_library("compiler_type_specific_lib") {
+  sources = [
+    "compiler_type_specific.cc",
+    "compiler_type_specific.h",
+  ]
+
+  public_deps = [
+    ":compiler_info_lib",
+    ":file_stat_cache_lib",
+    "//lib",
+    "//third_party/abseil",
   ]
 }
 
@@ -1218,7 +1233,7 @@ executable("compiler_info_builder_unittest") {
     ":goma_test_lib",
     ":subprocess_lib",
     "//build/config:exe_and_shlib_deps",
-    "//client/cxx:cxx_compiler_info_builder_lib",
+    "//client/cxx:gcc_compiler_info_builder_lib",
     "//client/cxx/include_processor:cpp_parser_lib",
     "//lib:compiler_flag_type_specific",
   ]
@@ -1234,7 +1249,7 @@ executable("compiler_info_cache_unittest") {
     ":goma_test_lib",
     ":subprocess_lib",
     "//build/config:exe_and_shlib_deps",
-    "//client/cxx:cxx_compiler_info_builder_lib",
+    "//client/cxx:gcc_compiler_info_builder_lib",
     "//client/cxx/include_processor:cpp_parser_lib",
     "//lib:compiler_flag_type_specific",
   ]

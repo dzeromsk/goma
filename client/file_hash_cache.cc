@@ -20,6 +20,7 @@
 #include "file_hash_cache.h"
 #include "glog/logging.h"
 #include "path.h"
+#include "util.h"
 
 using std::string;
 
@@ -27,7 +28,7 @@ namespace devtools_goma {
 
 // Returns cache ID if it was found in cache.
 bool FileHashCache::GetFileCacheKey(const string& filename,
-                                    millitime_t missed_timestamp_ms,
+                                    absl::optional<absl::Time> missed_timestamp,
                                     const FileStat& file_stat,
                                     string* cache_key) {
   DCHECK(file::IsAbsolutePath(filename)) << filename;
@@ -59,12 +60,13 @@ bool FileHashCache::GetFileCacheKey(const string& filename,
   if (file_stat == info.file_stat) {
     *cache_key = info.cache_key;
     bool valid = true;
-    if (missed_timestamp_ms != 0) {
-      valid = missed_timestamp_ms <= info.last_uploaded_timestamp_ms;
+    if (missed_timestamp.has_value()) {
+      valid = missed_timestamp <= info.last_uploaded_timestamp;
       VLOG_IF(2, valid) << "uploaded after missing input request? "
                         << filename
-                        << " missed=" << missed_timestamp_ms
-                        << " uploaded=" << info.last_uploaded_timestamp_ms;
+                        << " missed=" << *missed_timestamp
+                        << " uploaded="
+                        << OptionalToString(info.last_uploaded_timestamp);
     }
     if (valid && info.last_checked > info.file_stat.mtime) {
       // We are reasonably confident that this was the right
@@ -87,7 +89,8 @@ bool FileHashCache::GetFileCacheKey(const string& filename,
 // that later if it's a problem..
 bool FileHashCache::StoreFileCacheKey(const string& filename,
                                       const string& cache_key,
-                                      millitime_t upload_timestamp_ms,
+                                      absl::optional<absl::Time>
+                                          upload_timestamp,
                                       const FileStat& file_stat) {
   if (!file_stat.IsValid()) {
     LOG(WARNING) << "Try to store, but clear cache: failed taking FileStat: "
@@ -106,16 +109,15 @@ bool FileHashCache::StoreFileCacheKey(const string& filename,
     info.cache_key = cache_key;
     info.file_stat = file_stat;
     info.last_checked = time(nullptr);
-    info.last_uploaded_timestamp_ms = upload_timestamp_ms;
+    info.last_uploaded_timestamp = upload_timestamp;
 
     AUTO_EXCLUSIVE_LOCK(lock, &file_cache_mutex_);
 
     std::pair<std::unordered_map<string, struct FileInfo>::iterator, bool> p =
         file_cache_.insert(make_pair(filename, info));
     if (!p.second) {
-      if (info.last_uploaded_timestamp_ms == 0) {
-        info.last_uploaded_timestamp_ms =
-            p.first->second.last_uploaded_timestamp_ms;
+      if (!info.last_uploaded_timestamp.has_value()) {
+        info.last_uploaded_timestamp = p.first->second.last_uploaded_timestamp;
       }
       p.first->second = info;
     }

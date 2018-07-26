@@ -9,7 +9,6 @@
 // #define HAVE_CPU_PROFILER 1
 
 #include <stdio.h>
-#include <time.h>
 
 #ifndef _WIN32
 #include <errno.h>
@@ -338,7 +337,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
     service_.SetMaxSubProcsPending(FLAGS_MAX_SUBPROCS_PENDING);
     service_.SetLocalRunPreference(FLAGS_LOCAL_RUN_PREFERENCE);
     service_.SetLocalRunForFailedInput(FLAGS_LOCAL_RUN_FOR_FAILED_INPUT);
-    service_.SetLocalRunDelayMsec(FLAGS_LOCAL_RUN_DELAY_MSEC);
+    service_.SetLocalRunDelay(absl::Milliseconds(FLAGS_LOCAL_RUN_DELAY_MSEC));
     service_.SetMaxSumOutputSize(
         FLAGS_MAX_SUM_OUTPUT_SIZE_IN_MB * 1024 * 1024);
     service_.SetStoreLocalRunOutput(FLAGS_STORE_LOCAL_RUN_OUTPUT);
@@ -346,21 +345,26 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
     service_.SetShouldFailForUnsupportedCompilerFlag(
         FLAGS_FAIL_FOR_UNSUPPORTED_COMPILER_FLAGS);
     service_.SetTmpDir(tmpdir_);
-    service_.SetAllowedNetworkErrorDuration(
-        FLAGS_ALLOWED_NETWORK_ERROR_DURATION);
+    if (FLAGS_ALLOWED_NETWORK_ERROR_DURATION >= 0) {
+      service_.SetAllowedNetworkErrorDuration(
+          absl::Seconds(FLAGS_ALLOWED_NETWORK_ERROR_DURATION));
+    }
     service_.SetMaxActiveFailFallbackTasks(
         FLAGS_MAX_ACTIVE_FAIL_FALLBACK_TASKS);
-    service_.SetAllowedMaxActiveFailFallbackDuration(
-        FLAGS_ALLOWED_MAX_ACTIVE_FAIL_FALLBACK_DURATION);
+    if (FLAGS_ALLOWED_MAX_ACTIVE_FAIL_FALLBACK_DURATION >= 0) {
+      service_.SetAllowedMaxActiveFailFallbackDuration(
+          absl::Seconds(FLAGS_ALLOWED_MAX_ACTIVE_FAIL_FALLBACK_DURATION));
+    }
 
     std::vector<string> timeout_secs_str = ToVector(
         absl::StrSplit(FLAGS_COMPILER_PROXY_RPC_TIMEOUT_SECS,
                        ',',
                        absl::SkipEmpty()));
-    std::vector<int> timeout_secs;
+    std::vector<absl::Duration> timeouts;
+    timeouts.reserve(timeout_secs_str.size());
     for (const auto& it : timeout_secs_str)
-      timeout_secs.push_back(atoi(it.c_str()));
-    service_.SetTimeoutSecs(timeout_secs);
+      timeouts.push_back(absl::Seconds(atoi(it.c_str())));
+    service_.SetTimeouts(timeouts);
 
     if (FLAGS_LOG_CLEAN_INTERVAL > 0) {
       log_cleaner_.AddLogBasename(myname_);
@@ -494,10 +498,11 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   //                    good to retry soon for 4xx or 5xx status code.
   bool InitialPing() {
     int http_status_code = -1;
-    time_t ping_end_time = time(nullptr) + FLAGS_PING_TIMEOUT_SEC;
+    const absl::Time ping_end_time =
+        absl::Now() + absl::Seconds(FLAGS_PING_TIMEOUT_SEC);
     int num_retry = 0;
     int backoff_ms = service_.http_client()->options().min_retry_backoff_ms;
-    while (time(nullptr) < ping_end_time) {
+    while (absl::Now() < ping_end_time) {
       HttpRPC::Status status;
       status.timeout_secs.push_back(FLAGS_PING_RETRY_INTERVAL);
       status.trace_id = "ping";
@@ -898,19 +903,9 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
     *ss << "CompilerProxyIdPrefix: " << service_.compiler_proxy_id_prefix()
         << kBr;
 
-    char ctime_buf[30];
-    const time_t start_time = service_.start_time();
-#ifndef _WIN32
-    ctime_r(&start_time, ctime_buf);
-#else
-    ctime_s(ctime_buf, 30, &start_time);
-#endif
-    int uptime = static_cast<int>(time(nullptr) - start_time);
-    int upsec = uptime % 60;
-    int upmin = (uptime / 60) % 60;
-    int uphour = (uptime / 60 / 24);
-    *ss << "Started: " << ctime_buf << " -- up "
-        << uphour << " hr " << upmin << " min "<< upsec << " sec" << kBr;
+    const absl::Time start_time = service_.start_time();
+    const absl::Duration uptime = absl::Now() - start_time;
+    *ss << "Started: " << start_time << " -- up " << uptime << kBr;
 
     *ss << "Built on " << kBuiltTimeString << kBr;
 
@@ -1021,19 +1016,23 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
       *response = ss.str();
       return 200;
     }
-    long long after = 0;
+    int64_t after_ms = 0;
     p = params.find("after");
     if (p != params.end()) {
       const string& after_str = p->second;
 #ifndef _WIN32
-      after = strtoll(after_str.c_str(), nullptr, 10);
+      after_ms = strtoll(after_str.c_str(), nullptr, 10);
 #else
-      after = _atoi64(after_str.c_str());
+      after_ms = _atoi64(after_str.c_str());
 #endif
     }
     OutputOkHeader("application/json", &ss);
     Json::Value json;
-    service_.DumpToJson(&json, after);
+    // We don't want to use an optional time value in case |after_ms| == 0.
+    // DumpToJson looks for all tasks frozen after the second parameter. If
+    // |after_ms| == 0, then it looks for all frozen timestamps, and we can
+    // treat |after_ms| as the Unix Epoch time rather than as undefined.
+    service_.DumpToJson(&json, absl::FromUnixMillis(after_ms));
     ss << json;
     *response = ss.str();
     return 200;
@@ -1430,17 +1429,16 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
 
     if (service_.log_service()) {
       MemoryUsageLog memory_usage_log;
-      memory_usage_log.set_compiler_proxy_start_time(service_.start_time());
+      memory_usage_log.set_compiler_proxy_start_time(
+          absl::ToTimeT(service_.start_time()));
       memory_usage_log.set_compiler_proxy_user_agent(kUserAgentString);
       if (FLAGS_SEND_USER_INFO) {
         memory_usage_log.set_username(service_.username());
         memory_usage_log.set_nodename(service_.nodename());
       }
 
-      time_t current_time;
-      time(&current_time);
       memory_usage_log.set_memory(memory_byte);
-      memory_usage_log.set_time(current_time);
+      memory_usage_log.set_time(absl::ToTimeT(absl::Now()));
 
       service_.log_service()->SaveMemoryUsageLog(memory_usage_log);
     }
@@ -1719,8 +1717,9 @@ void DepsCacheInit() {
 }
 
 void CompilerInfoCacheInit() {
-  CompilerInfoCache::Init(GetCacheDirectory(), FLAGS_COMPILER_INFO_CACHE_FILE,
-                          FLAGS_COMPILER_INFO_CACHE_HOLDING_TIME_SEC);
+  CompilerInfoCache::Init(
+      GetCacheDirectory(), FLAGS_COMPILER_INFO_CACHE_FILE,
+      absl::Seconds(FLAGS_COMPILER_INFO_CACHE_HOLDING_TIME_SEC));
 }
 
 }  // namespace devtools_goma

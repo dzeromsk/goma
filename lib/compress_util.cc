@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "absl/memory/memory.h"
+#include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "glog/logging.h"
 
@@ -34,14 +35,14 @@ const char* GetEncodingName(EncodingType type) {
   return kEncodingNames[type];
 }
 
-EncodingType GetEncodingFromHeader(const char* header) {
-  if (!header) {
+EncodingType GetEncodingFromHeader(absl::string_view header) {
+  if (header.empty()) {
     return NO_ENCODING;
   }
-  if (strstr(header, "lzma2")) {
+  if (absl::StrContains(header, "lzma2")) {
     return ENCODING_LZMA2;
   }
-  if (strstr(header, "deflate")) {
+  if (absl::StrContains(header, "deflate")) {
     return ENCODING_DEFLATE;
   }
   return NO_ENCODING;
