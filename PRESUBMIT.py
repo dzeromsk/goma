@@ -90,7 +90,8 @@ def CheckChangeOnUpload(input_api, output_api):
   results += input_api.canned_checks.CheckLicense(
       input_api, output_api,
       r'(Copyright 201\d Google Inc. All Rights Reserved.|' +
-       'Copyright.*The Chromium Authors. All rights reserved.)')
+       'Copyright.*The Chromium Authors. All rights reserved.|' +
+       'Copyright.*The Goma Authors. All rights reserved.)')
   results += input_api.canned_checks.CheckDoNotSubmit(
       input_api, output_api)
   results += input_api.canned_checks.RunPylint(
@@ -105,5 +106,3 @@ def CheckChangeOnUpload(input_api, output_api):
   results += input_api.canned_checks.CheckGNFormatted(input_api, output_api)
   results += CheckGNGenChecked(input_api, output_api)
   return results
-
-
