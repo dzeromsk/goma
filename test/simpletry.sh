@@ -96,7 +96,7 @@ function echo_warn() {
 
 function at_exit() {
   # cleanup function.
-  rm -f a.out a.out2 out.o out2.o out_plain.o
+  rm -f a.out a.out2 out.o out2.o out_plain.o has_include.o
   rm -f test/compile_error.o
   rm -f test/compile_error*.out test/compile_error*.err
   rm -f cmd_out cmd_err
@@ -528,6 +528,12 @@ if [ "$CXX" = "clang++" ]; then
    third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs${ext} \
    -o out.o -c test/oneinclude.cc"
 fi
+
+expect_success "has_include" \
+  "${LOCAL_CXX} -c test/has_include.cc -o has_include.o"
+expect_success "has_include" \
+  GOMA_FALLBACK=false "${GOMACC} ${CXX} -c test/has_include.cc -o has_include.o"
+rm -f has_include.o
 
 # TODO: From 2015-07-22, -fprofile-generate looks creating
 # default.profraw instead of test.profdata. We need to convert test.profraw

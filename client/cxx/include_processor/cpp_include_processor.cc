@@ -230,12 +230,13 @@ class IncludePathsObserver : public CppParser::IncludeObserver {
       VLOG(2) << "Not found: " << path;
       return false;
     }
-    const std::string abs_filepath =
+    std::string abs_filepath =
         file::JoinPathRespectAbsolute(cwd_, filepath);
     if (shared_include_files_->count(filepath) ||
         access(abs_filepath.c_str(), R_OK) == 0) {
       DCHECK(!file::IsDirectory(abs_filepath, file::Defaults()).ok())
           << abs_filepath;
+      shared_include_files_->insert(std::move(abs_filepath));
       return true;
     }
     return false;
@@ -308,14 +309,23 @@ class IncludePathsObserver : public CppParser::IncludeObserver {
         file::JoinPathRespectAbsolute(cwd_, current_filepath);
     abs_filepath = PathResolver::ResolvePath(abs_filepath);
     bool is_current = (abs_filepath == abs_current_filepath);
-    if (is_current)
+    if (is_current) {
+      shared_include_files_->insert(std::move(abs_filepath));
       return true;
-    if (!file::IsDirectory(abs_filepath, file::Defaults()).ok() &&
-        (shared_include_files_->count(filepath) ||
-         access(abs_filepath.c_str(), R_OK) == 0 ||
-         (IncludeFileFinder::gch_hack_enabled() &&
-          access((abs_filepath + GOMA_GCH_SUFFIX).c_str(), R_OK) == 0))) {
-      return true;
+    }
+    if (!file::IsDirectory(abs_filepath, file::Defaults()).ok()) {
+      if (shared_include_files_->count(filepath)) {
+        return true;
+      }
+      if (access(abs_filepath.c_str(), R_OK) == 0) {
+        shared_include_files_->insert(std::move(abs_filepath));
+        return true;
+      }
+      if (IncludeFileFinder::gch_hack_enabled() &&
+          access((abs_filepath + GOMA_GCH_SUFFIX).c_str(), R_OK) == 0) {
+        shared_include_files_->insert(abs_filepath + GOMA_GCH_SUFFIX);
+        return true;
+      }
     }
     return false;
   }
