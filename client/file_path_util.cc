@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "client_util.h"
+#include "file_path_util.h"
 
 #include <deque>
 
 #include "absl/strings/str_split.h"
+#include "compiler_flag_type_specific.h"
+#include "compiler_specific.h"
+#include "flat_map.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "ioutil.h"
@@ -14,6 +17,10 @@
 #include "path_resolver.h"
 #include "util.h"
 #include "vc_flags.h"
+
+MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
+#include "prototmp/goma_data.pb.h"
+MSVC_POP_WARNING()
 
 namespace devtools_goma {
 
@@ -237,6 +244,62 @@ bool GetRealExecutablePath(const FileStat* gomacc_filestat,
     }
   }
   return false;
+}
+
+bool IsLocalCompilerPathValid(const string& trace_id,
+                              const ExecReq& req,
+                              const string& compiler_name) {
+  // Compiler_proxy will resolve local_compiler_path if gomacc is masqueraded or
+  // prepended compiler is basename. No need to think this as error.
+  if (!req.command_spec().has_local_compiler_path()) {
+    return true;
+  }
+  // If local_compiler_path exists, it must be the same compiler_name with
+  // flag_'s.
+  const string name = CompilerFlagTypeSpecific::GetCompilerNameFromArg(
+      req.command_spec().local_compiler_path());
+  if (req.command_spec().has_name() && req.command_spec().name() != name) {
+    LOG(ERROR) << trace_id << " compiler name mismatches."
+               << " command_spec.name=" << req.command_spec().name()
+               << " name=" << name;
+    return false;
+  }
+  if (compiler_name != name) {
+    LOG(ERROR) << trace_id << " compiler name mismatches."
+               << " compiler_name=" << compiler_name
+               << " name=" << name;
+    return false;
+  }
+  return true;
+}
+
+void RemoveDuplicateFiles(const std::string& cwd,
+                          std::set<std::string>* filenames) {
+  FlatMap<std::string, std::string> path_map;
+  path_map.reserve(filenames->size());
+
+  std::set<std::string> unique_files;
+  for (const auto& filename : *filenames) {
+    std::string abs_filename = file::JoinPathRespectAbsolute(cwd, filename);
+    auto p = path_map.emplace(std::move(abs_filename), filename);
+    if (p.second) {
+      unique_files.insert(filename);
+      continue;
+    }
+
+    // If there is already registered filename, compare and take shorter one.
+    // If length is same, take lexicographically smaller one.
+    const std::string& existing_filename = p.first->second;
+    if (filename.size() < existing_filename.size() ||
+        (filename.size() == existing_filename.size() &&
+         filename < existing_filename)) {
+      unique_files.erase(existing_filename);
+      unique_files.insert(filename);
+      p.first->second = filename;
+    }
+  }
+
+  *filenames = std::move(unique_files);
 }
 
 #ifdef _WIN32

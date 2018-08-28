@@ -22,6 +22,8 @@ CompilerTypeSpecific* CompilerTypeSpecificCollection::Get(
       return &javac_;
     case CompilerFlagType::Java:
       return &java_;
+    case CompilerFlagType::Fake:
+      return &fake_;
   }
 }
 

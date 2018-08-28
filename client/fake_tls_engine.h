@@ -23,6 +23,7 @@ class FakeTLSEngine : public TLSEngine {
     FAKE_TLS_WRITE_BROKEN = 4,
   };
   bool IsIOPending() const override;
+  bool IsReady() const override;
 
   int GetDataToSendTransport(string* data) override;
   size_t GetBufSizeFromTransport() override;

@@ -87,7 +87,7 @@ void LogCleaner::FindOldLogsInDir(const string& log_dir, absl::Time time,
     FileStat file_stat(log_filename);
     if (!file_stat.IsValid()) {
       LOG(ERROR) << "Failed to get file id:" << log_filename;
-    } else if (absl::FromTimeT(file_stat.mtime) < time) {
+    } else if (*file_stat.mtime < time) {
       VLOG(1) << "old log:" << log_filename;
       old_logs->insert(log_filename);
     } else {

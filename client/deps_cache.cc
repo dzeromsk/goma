@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "absl/strings/str_join.h"
+#include "absl/time/clock.h"
 #include "autolock_timer.h"
 #include "compiler_flags.h"
 #include "compiler_info.h"
@@ -65,7 +66,7 @@ namespace devtools_goma {
 DepsCache* DepsCache::instance_;
 
 DepsCache::DepsCache(const string& cache_filename,
-                     int identifier_alive_duration,
+                     absl::optional<absl::Duration> identifier_alive_duration,
                      size_t deps_table_size_threshold,
                      int max_proto_size_in_mega_bytes)
     : cache_file_(cache_filename),
@@ -81,7 +82,7 @@ DepsCache::~DepsCache() {}
 
 // static
 void DepsCache::Init(const string& cache_filename,
-                     int identifier_alive_duration,
+                     absl::optional<absl::Duration> identifier_alive_duration,
                      size_t deps_table_size_threshold,
                      int max_proto_size_in_mega_bytes) {
   if (cache_filename.empty()) {
@@ -188,7 +189,7 @@ bool DepsCache::SetDependencies(const DepsCache::Identifier& identifier,
     return false;
   }
 
-  deps_table_[identifier.value()].last_used_time = time(nullptr);
+  deps_table_[identifier.value()].last_used_time = absl::ToTimeT(absl::Now());
   std::swap(deps_table_[identifier.value()].deps_hash_ids, deps_hash_ids);
   return true;
 }
@@ -209,7 +210,7 @@ bool DepsCache::GetDependencies(const DepsCache::Identifier& identifier,
       IncrMissedCount();
       return false;
     }
-    it->second.last_used_time = time(nullptr);
+    it->second.last_used_time = absl::ToTimeT(absl::Now());
     deps_hash_ids = it->second.deps_hash_ids;
   }
 
@@ -315,13 +316,14 @@ bool DepsCache::IsDirectiveModified(const string& filename,
 }
 
 bool DepsCache::UpdateLastUsedTime(const Identifier& identifier,
-                                   time_t last_used_time) {
+                                   absl::optional<absl::Time> last_used_time) {
   AUTO_SHARED_LOCK(lock, &mu_);
   auto it = deps_table_.find(identifier.value());
   if (it == deps_table_.end())
     return false;
 
-  it->second.last_used_time = last_used_time;
+  it->second.last_used_time =
+      last_used_time.has_value() ? absl::ToTimeT(*last_used_time) : 0;
   return true;
 }
 
@@ -344,7 +346,10 @@ bool DepsCache::GetDepsHashId(const Identifier& identifier,
 }
 
 bool DepsCache::LoadGomaDeps() {
-  const time_t time_threshold = time(nullptr) - identifier_alive_duration_;
+  absl::optional<absl::Time> time_threshold;
+  if (identifier_alive_duration_.has_value()) {
+    time_threshold = absl::Now() - *identifier_alive_duration_;
+  }
   GomaDeps goma_deps;
 
   const int total_bytes_limit = max_proto_size_in_mega_bytes_ * 1024 * 1024;
@@ -399,7 +404,7 @@ bool DepsCache::LoadGomaDeps() {
       }
 
       FileStat file_stat;
-      file_stat.mtime = record.mtime();
+      file_stat.mtime = absl::FromTimeT(record.mtime());
       file_stat.size = record.size();
 
       deps_hash_id_map[record.filename_id()] =
@@ -415,8 +420,10 @@ bool DepsCache::LoadGomaDeps() {
     const GomaDependencyTable& table = goma_deps.dependency_table();
     deps_table_.reserve(table.record_size());
     for (const auto& record : table.record()) {
-      if (identifier_alive_duration_ >= 0 &&
-          record.last_used_time() < time_threshold) {
+      const absl::Time record_last_used_time =
+          absl::FromTimeT(record.last_used_time());
+      if (time_threshold.has_value() &&
+          record_last_used_time < *time_threshold) {
         continue;
       }
 
@@ -469,15 +476,15 @@ bool DepsCache::LoadGomaDeps() {
 
 bool DepsCache::SaveGomaDeps() {
   AUTO_SHARED_LOCK(lock, &mu_);
-  const time_t time_threshold = time(nullptr) - identifier_alive_duration_;
 
   GomaDeps goma_deps;
   goma_deps.set_built_revision(kBuiltRevisionString);
 
   // First, drop older DepsTable entry from deps_table_.
-  if (identifier_alive_duration_ >= 0) {
+  if (identifier_alive_duration_.has_value()) {
+    absl::Time time_threshold = absl::Now() - *identifier_alive_duration_;
     for (auto it = deps_table_.begin(); it != deps_table_.end(); ) {
-      if (it->second.last_used_time < time_threshold) {
+      if (absl::FromTimeT(it->second.last_used_time) < time_threshold) {
         // should be OK since all iterators but deleted one keep valid.
         deps_table_.erase(it++);
       } else {
@@ -492,13 +499,14 @@ bool DepsCache::SaveGomaDeps() {
     LOG(INFO) << "DepsTable size " << deps_table_.size()
               << " exceeds the threshold " << deps_table_size_threshold_
               << ". Older cache will be deleted";
-    std::vector<std::pair<time_t, Key>> keys_by_time;
+    std::vector<std::pair<absl::Time, Key>> keys_by_time;
     keys_by_time.reserve(deps_table_.size());
     for (const auto& entry : deps_table_) {
-      keys_by_time.emplace_back(entry.second.last_used_time, entry.first);
+      keys_by_time.emplace_back(
+          absl::FromTimeT(entry.second.last_used_time.load()), entry.first);
     }
     std::sort(keys_by_time.begin(), keys_by_time.end(),
-         std::greater<std::pair<time_t, Key>>());
+         std::greater<std::pair<absl::Time, Key>>());
     for (size_t i = deps_table_size_threshold_; i < keys_by_time.size(); ++i) {
       deps_table_.erase(keys_by_time[i].second);
     }
@@ -559,7 +567,10 @@ bool DepsCache::SaveGomaDeps() {
         continue;
       GomaDepsIdTableRecord* record = table->add_record();
       record->set_filename_id(entry.first);
-      record->set_mtime(entry.second.first.mtime);
+      // TODO: Use protobuf/timestamp.
+      record->set_mtime(
+          entry.second.first.IsValid() ?
+              absl::ToTimeT(*entry.second.first.mtime) : 0);
       record->set_size(entry.second.first.size);
       record->set_directive_hash(entry.second.second.ToHexString());
     }

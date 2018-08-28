@@ -63,12 +63,24 @@ static_library("lib") {
   }
 }
 
+source_set("cxx_specific") {
+  sources = [
+    "cxx_flags.h",
+  ]
+  deps = [
+    ":lib",
+  ]
+}
+
 static_library("gcc_specific") {
   sources = [
     "gcc_execreq_normalizer.cc",
     "gcc_execreq_normalizer.h",
     "gcc_flags.cc",
     "gcc_flags.h",
+  ]
+  public_deps = [
+    ":cxx_specific",
   ]
   deps = [
     ":clang_flags_helper",
@@ -96,6 +108,9 @@ static_library("vc_specific") {
     "vc_flags.cc",
     "vc_flags.h",
   ]
+  public_deps = [
+    ":cxx_specific",
+  ]
   deps = [
     ":clang_flags_helper",
     ":lib",
@@ -108,6 +123,9 @@ static_library("clang_tidy_specific") {
     "clang_tidy_execreq_normalizer.h",
     "clang_tidy_flags.cc",
     "clang_tidy_flags.h",
+  ]
+  public_deps = [
+    ":cxx_specific",
   ]
   deps = [
     ":gcc_specific",
@@ -127,6 +145,18 @@ static_library("java_specific") {
   ]
 }
 
+static_library("fake_specific") {
+  sources = [
+    "fake_execreq_normalizer.cc",
+    "fake_execreq_normalizer.h",
+    "fake_flags.cc",
+    "fake_flags.h",
+  ]
+  deps = [
+    ":lib",
+  ]
+}
+
 static_library("compiler_flag_type_specific") {
   sources = [
     "compiler_flag_type_specific.cc",
@@ -136,6 +166,7 @@ static_library("compiler_flag_type_specific") {
   ]
   public_deps = [
     ":clang_tidy_specific",
+    ":fake_specific",
     ":gcc_specific",
     ":java_specific",
     ":lib",
@@ -237,7 +268,7 @@ executable("cmdline_parser_unittest") {
 executable("compiler_flags_test") {
   testonly = true
   sources = [
-    "compiler_flags_test.cc",
+    "compiler_flags_unittest.cc",
   ]
   deps = [
     ":clang_tidy_specific",
@@ -282,7 +313,7 @@ executable("compress_util_unittest") {
 executable("execreq_normalizer_unittest") {
   testonly = true
   sources = [
-    "execreq_normalizer_test.cc",
+    "execreq_normalizer_unittest.cc",
   ]
   deps = [
     ":lib",
@@ -296,9 +327,25 @@ executable("execreq_normalizer_unittest") {
 executable("execreq_verifier_unittest") {
   testonly = true
   sources = [
-    "execreq_verifier_test.cc",
+    "execreq_verifier_unittest.cc",
   ]
   deps = [
+    ":lib",
+    "//base:goma_unittest",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:glog",
+    "//third_party:gtest",
+  ]
+}
+
+executable("fake_flags_unittest") {
+  testonly = true
+  sources = [
+    "fake_flags_unittest.cc",
+  ]
+  deps = [
+    ":compiler_flag_type_specific",
+    ":fake_specific",
     ":lib",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
@@ -353,7 +400,7 @@ executable("gcc_execreq_normalizer_unittest") {
 executable("gcc_flags_unittest") {
   testonly = true
   sources = [
-    "gcc_flags_test.cc",
+    "gcc_flags_unittest.cc",
   ]
   deps = [
     ":compiler_flag_type_specific",

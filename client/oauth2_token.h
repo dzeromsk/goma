@@ -10,6 +10,7 @@
 
 #include "http.h"
 #include "oauth2.h"
+#include "worker_thread.h"
 #include "worker_thread_manager.h"
 
 namespace devtools_goma {
@@ -34,7 +35,7 @@ class OAuth2AccessTokenRefreshTask {
 
   virtual std::string GetAuthorization() const = 0;
   virtual bool ShouldRefresh() const = 0;
-  virtual void RunAfterRefresh(WorkerThreadManager::ThreadId thread_id,
+  virtual void RunAfterRefresh(WorkerThread::ThreadId thread_id,
                                OneshotClosure* closure) = 0;
   virtual void Shutdown() = 0;
   virtual void Wait() = 0;

@@ -26,18 +26,18 @@ namespace devtools_goma {
 struct FileStat;
 class IncludeCacheStats;
 
-// IncludeCache stores include files which contains only directives.
+// IncludeCache stores the parsed result of include headers.
 class IncludeCache {
  public:
   static IncludeCache* instance() { return instance_; }
   static bool IsEnabled() { return instance_ != NULL; }
 
   // Initializes IncludeCache.
-  // |max_cache_size_in_mb| specifies the maximum amount of cache size. If cache
-  // size exceeds this value, the oldest cache will be evicted.
-  // When |calculates_directive_hash| is true, we also calculate the hash value
-  // of cache item. This value will be used from DepsCache.
-  static void Init(int max_cache_size_in_mb, bool calculates_directive_hash);
+  // |max_cache_entries| specifies the maximum number of cache entries.
+  // If the number of cache entries exceeds this value, the oldest cache will be
+  // evicted. When |calculates_directive_hash| is true, we also calculate the
+  // hash value of cache item. This value will be used from DepsCache.
+  static void Init(int max_cache_entries, bool calculates_directive_hash);
   static void Quit();
 
   // Get IncludeItem from cache or file.
@@ -62,7 +62,7 @@ class IncludeCache {
   class Item;
   friend class IncludeCacheTest;
 
-  IncludeCache(size_t max_cache_size, bool calculates_directive_hash);
+  IncludeCache(size_t max_cache_entries, bool calculates_directive_hash);
   ~IncludeCache();
 
   const IncludeCache::Item* GetItemIfNotModifiedUnlocked(
@@ -76,6 +76,7 @@ class IncludeCache {
 
   static IncludeCache* instance_;
 
+  const size_t max_cache_entries_;
   const bool calculates_directive_hash_;
 
   ReadWriteLock rwlock_;
@@ -87,9 +88,6 @@ class IncludeCache {
 
   size_t count_item_updated_;
   size_t count_item_evicted_;
-  // The total content size of cached items.
-  size_t current_cache_size_;
-  size_t max_cache_size_;
 
   StatsCounter hit_count_;
   StatsCounter missed_count_;

@@ -28,7 +28,6 @@ namespace devtools_goma {
 class LinkerScriptParser {
  public:
   // Constructs a parser to read content.
-  // It takes ownership of |content|.
   LinkerScriptParser(std::unique_ptr<Content> content,
                      string current_directory,
                      std::vector<string> searchdirs,

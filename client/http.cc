@@ -27,6 +27,8 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "autolock_timer.h"
 #include "callback.h"
 #include "compiler_proxy_info.h"
@@ -37,8 +39,9 @@
 #include "fileflag.h"
 #include "glog/logging.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
-#include "google/protobuf/message.h"
 #include "google/protobuf/io/zero_copy_stream.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
+#include "google/protobuf/message.h"
 MSVC_POP_WARNING()
 #include "histogram.h"
 #include "http_util.h"
@@ -48,52 +51,55 @@ MSVC_POP_WARNING()
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_stats.pb.h"
 MSVC_POP_WARNING()
+#include "rand_util.h"
 #include "scoped_fd.h"
 #include "simple_timer.h"
 #include "socket_descriptor.h"
 #include "socket_factory.h"
 #include "socket_pool.h"
+#include "time_util.h"
 #include "tls_descriptor.h"
-#include "worker_thread_manager.h"
+#include "util.h"
+#include "worker_thread.h"
+#include "zero_copy_stream_impl.h"
 
 using std::string;
 
 namespace devtools_goma {
 
-// Note: we can't use X-Goma-Content-Length, because
-// FindContentLengthAndBodyOffset in file.cc would confuse with Content-Length.
-const char HttpClient::kGomaLength[] = "X-Goma-Length: ";
+namespace {
 
-const int kDefaultThrottleTimeoutMilliSec = 600 * 1000;
-const int kDefaultTimeoutSec = 900;
+constexpr absl::Duration kDefaultThrottleTimeout = absl::Minutes(10);
+constexpr absl::Duration kDefaultTimeout = absl::Minutes(15);
 
 const size_t kMaxTrafficHistory = 120U;
 
 const int kMaxQPS = 700;
 
-const int kRampUpDurationSec = 600; // 10 min
+constexpr absl::Duration kRampUpDuration = absl::Minutes(10);
 
-const int kMaxConnectionFailure = 5;
+constexpr int kMaxConnectionFailure = 5;
 
-const int kDefaultErrorThresholdPercent = 30;
+constexpr int kDefaultErrorThresholdPercent = 30;
 
-static bool IsFatalNetworkErrorCode(int status_code) {
+bool IsFatalNetworkErrorCode(int status_code) {
   return status_code == 302 || status_code == 401 || status_code == 403;
 }
 
-static time_t CalculateEnabledFrom(int status_code, time_t enabled_from) {
-  const int kMinDisableDurationSec = 600;  // 10 min
-  const int kMaxDisableDurationSec = 1200; // 20 min
+absl::optional<absl::Time> CalculateEnabledFrom(
+    int status_code, absl::optional<absl::Time> enabled_from) {
+  constexpr absl::Duration kMinDisableDuration = absl::Minutes(10);
+  constexpr absl::Duration kMaxDisableDuration = absl::Minutes(20);
 
   if (IsFatalNetworkErrorCode(status_code)) {
     // status code for blocking by dos server.
-    time_t t = time(nullptr) + kMinDisableDurationSec +
-        (rand() % (kMaxDisableDurationSec - kMinDisableDurationSec));
-    if (t > enabled_from) {
+    const absl::Time enable_time =
+        absl::Now() + RandomDuration(kMinDisableDuration, kMaxDisableDuration);
+    if (!enabled_from.has_value() || enable_time > *enabled_from) {
       LOG(INFO) << "status=" << status_code
-                << " extend enabled from: " << enabled_from
-                << " to " << t;
-      enabled_from = t;
+                << " extend enabled from: " << OptionalToString(enabled_from)
+                << " to " << enable_time;
+      enabled_from = enable_time;
     }
     return enabled_from;
   }
@@ -107,31 +113,49 @@ static time_t CalculateEnabledFrom(int status_code, time_t enabled_from) {
     // no update of enabled_from for other than 2xx.
     return enabled_from;
   }
-  if (enabled_from == 0) {
-    return 0;
+  if (!enabled_from.has_value()) {
+    return absl::nullopt;
   }
-  time_t now = time(nullptr);
-  if (now < enabled_from) {
+  const absl::Time now = absl::Now();
+  if (now < *enabled_from) {
     // ramp up from now to now+kRampUpDurationSec.
-    LOG(INFO) << "got 200 respose in enabled_from=" << enabled_from
+    LOG(INFO) << "got 200 respose in enabled_from=" << *enabled_from
               << " start ramp up from " << now;
     enabled_from = now;
-  } else if (enabled_from <= now && now < enabled_from + kRampUpDurationSec) {
+  } else if (*enabled_from <= now && now < *enabled_from + kRampUpDuration) {
     // nothing to do in ramp up period:
-  } else if (enabled_from + kRampUpDurationSec <= now) {
+  } else if (*enabled_from + kRampUpDuration <= now) {
     LOG(INFO) << "got 200 response. finish ramp up period";
-    enabled_from = 0;
+    enabled_from.reset();
   }
   return enabled_from;
 }
 
+// Randomizes backoff by subtracting 40%, so it returns
+// [backoff*0.6, backoff].
+absl::Duration RandomizeBackoff(absl::Duration backoff) {
+  constexpr double kMinRandomRatio = 0.4;
+  absl::Duration min_backoff = backoff * kMinRandomRatio;
+  // Handle the special cases where:
+  // - |backoff| is so small that |min_backoff| is rounded down to 0.
+  // - |backoff| < 0.
+  // These are handled after the following if block.
+  if (backoff > min_backoff && min_backoff > absl::ZeroDuration()) {
+    return RandomDuration(min_backoff, backoff);
+  }
+  return absl::Milliseconds(1);
+}
+
+}  // namespace
+
 HttpClient::Options::Options()
     : dest_port(0), proxy_port(0),
       capture_response_header(false),
-      use_ssl(false), ssl_crl_max_valid_duration(-1),
-      socket_read_timeout_sec(1.0),
-      min_retry_backoff_ms(500), max_retry_backoff_ms(5000),
-      fail_fast(false), network_error_margin(0),
+      use_ssl(false),
+      socket_read_timeout(absl::Seconds(1)),
+      min_retry_backoff(absl::Milliseconds(500)),
+      max_retry_backoff(absl::Seconds(5)),
+      fail_fast(false),
       network_error_threshold_percent(kDefaultErrorThresholdPercent),
       allow_throttle(true), reuse_connection(true) {
 }
@@ -237,9 +261,8 @@ string HttpClient::Options::DebugString() const {
     ss << " ssl_extra_cert=" << ssl_extra_cert;
   if (!ssl_extra_cert_data.empty())
     ss << " ssl_extra_cert_data:set";
-  ss << " socket_read_timeout_sec=" << socket_read_timeout_sec;
-  ss << " retry_backoff_ms="
-     << min_retry_backoff_ms << " .. " << max_retry_backoff_ms;
+  ss << " socket_read_timeout=" << socket_read_timeout;
+  ss << " retry_backoff=" << min_retry_backoff << " .. " << max_retry_backoff;
   if (fail_fast) {
     ss << " fail_fast";
   }
@@ -269,14 +292,15 @@ class HttpClient::Task {
         status_(status),
         wm_(wm),
         thread_id_(wm_->GetCurrentThreadId()),
-        d_(nullptr),
+        descriptor_(nullptr),
         active_(false),
         close_state_(HttpClient::ERROR_CLOSE),
         auth_status_(OK),
         is_ping_(status_->trace_id == "ping"),
         callback_(callback) {
-    if (status_->timeout_secs.empty())
-      status_->timeout_secs.push_back(kDefaultTimeoutSec);
+    if (status_->timeouts.empty()) {
+      status_->timeouts.push_back(kDefaultTimeout);
+    }
     client_->IncNumActive();
     resp_->SetRequestPath(req_->request_path());
     resp_->SetTraceId(status_->trace_id);
@@ -315,17 +339,17 @@ class HttpClient::Task {
           NewCallback(this, &HttpClient::Task::Start));
       return;
     }
-    int throttle_time = timer_.GetInIntMilliseconds();
+    const absl::Duration throttle_time = timer_.GetDuration();
     status_->throttle_time += throttle_time;
-    int backoff = client_->TryStart();
-    if (backoff > 0) {
+    const absl::Duration backoff = client_->TryStart();
+    if (backoff > absl::ZeroDuration()) {
       if (status_->num_throttled == 0) {  // only increment first time.
         DCHECK_EQ(Status::INIT, status_->state);
         status_->state = Status::PENDING;
         client_->IncNumPending();
       }
       ++status_->num_throttled;
-      if (status_->throttle_time > kDefaultThrottleTimeoutMilliSec) {
+      if (status_->throttle_time > kDefaultThrottleTimeout) {
         LOG(WARNING) << status_->trace_id
                      << " Timeout in throttled. throttle_time="
                      << status_->throttle_time;
@@ -333,10 +357,9 @@ class HttpClient::Task {
         return;
       }
       LOG(WARNING) << status_->trace_id
-                   << " Throttled backoff=" << backoff << "msec"
+                   << " Throttled backoff=" << backoff
                    << " remaining="
-                   << (kDefaultThrottleTimeoutMilliSec - status_->throttle_time)
-                   << "ms";
+                   << (kDefaultThrottleTimeout - status_->throttle_time);
       // TODO: might need to cancel this on shutdown?
       wm_->RunDelayedClosureInThread(
           FROM_HERE,
@@ -351,16 +374,15 @@ class HttpClient::Task {
         << status_->num_throttled
         << " time=" << status_->throttle_time
         << " [last throttle=" << throttle_time << "]";
-    if (status_->timeout_secs.empty()) {
-      LOG(WARNING) << status_->trace_id
-                   << " Time-out in connect";
+    if (status_->timeouts.empty()) {
+      LOG(WARNING) << status_->trace_id << " Time-out in connect";
       RunCallback(ERR_TIMEOUT, "Time-out in connect");
       return;
     }
 
     // TODO: make connect async.
-    d_ = client_->NewDescriptor();
-    if (d_ == nullptr) {
+    descriptor_ = client_->NewDescriptor();
+    if (descriptor_ == nullptr) {
       ++status_->num_connect_failed;
       // Note we do not retry if handling ping because its scenario
       // does not match what we expect.
@@ -387,7 +409,7 @@ class HttpClient::Task {
       // Since we expect the address is marked as success again in Step 5.
       // we do not retry for long time. (e.g. 60 seconds to error address
       // become available in socket_pool.)
-      int start_backoff = client_->GetRandomizeBackoffTimeInMs();
+      const absl::Duration start_backoff = client_->GetRandomizedBackoff();
       LOG(WARNING) << status_->trace_id
                    << " Can't establish connection to server"
                    << " retry after backoff=" << start_backoff;
@@ -410,16 +432,21 @@ class HttpClient::Task {
     resp_->Reset();
     active_ = true;
     status_->connect_success = true;
-    double t = static_cast<double>(status_->timeout_secs.front());
-    status_->timeout_secs.pop_front();
+    const absl::Duration timeout = status_->timeouts.front();
+    status_->timeouts.pop_front();
     timer_.Start();
     request_stream_ = req_->NewStream();
-    status_->req_build_time = timer_.GetInIntMilliseconds();
+    if (!request_stream_) {
+      LOG(WARNING) << status_->trace_id << " failed to create request stream";
+      RunCallback(FAIL, "Failed to create request stream");
+      return;
+    }
+    status_->req_build_time = timer_.GetDuration();
 
-    d_->NotifyWhenWritable(
+    descriptor_->NotifyWhenWritable(
         NewPermanentCallback(this, &HttpClient::Task::DoWrite));
-    d_->NotifyWhenTimedout(
-        t, NewCallback(this, &HttpClient::Task::DoTimeout));
+    descriptor_->NotifyWhenTimedout(
+        timeout, NewCallback(this, &HttpClient::Task::DoTimeout));
     timer_.Start();
   }
 
@@ -443,8 +470,8 @@ class HttpClient::Task {
       RunCallback(FAIL, "http fail now");
       return;
     }
-    CHECK(d_);
-    VLOG(7) << "DoWrite " << d_;
+    CHECK(descriptor_);
+    VLOG(7) << "DoWrite " << descriptor_;
     const void* data = nullptr;
     int size = 0;
     if (!request_stream_->Next(&data, &size)) {
@@ -452,35 +479,36 @@ class HttpClient::Task {
       DCHECK_EQ(Status::SENDING_REQUEST, status_->state);
       status_->req_size = request_stream_->ByteCount();
       status_->state = Status::REQUEST_SENT;
-      d_->StopWrite();
+      descriptor_->StopWrite();
       wm_->RunClosureInThread(
           FROM_HERE,
           thread_id_,
           NewCallback(this, &HttpClient::Task::DoRequestDone),
-          WorkerThreadManager::PRIORITY_IMMEDIATE);
+          WorkerThread::PRIORITY_IMMEDIATE);
       return;
     }
-    int n = d_->Write(data, size);
+    ssize_t write_size = descriptor_->Write(data, size);
     VLOG(3) << status_->trace_id << " DoWrite "
-            << size << " -> " << n;
-    if (n < 0 && d_->NeedRetry()) {
+            << size << " -> " << write_size;
+    if (write_size < 0 && descriptor_->NeedRetry()) {
       request_stream_->BackUp(size);
       return;
     }
-    if (n <= 0) {
+    if (write_size <= 0) {
       LOG(WARNING) << status_->trace_id
-                   << " Write failed " << n
-                   << " err=" << d_->GetLastErrorMessage();
+                   << " Write failed "
+                   << " write_size=" << write_size
+                   << " err=" << descriptor_->GetLastErrorMessage();
       std::ostringstream err_message;
       err_message << status_->trace_id
-                  << " Write failed ret=" << n
+                  << " Write failed write_size=" << write_size
                   << " @" << request_stream_->ByteCount()
-                  << " : " << d_->GetLastErrorMessage();
+                  << " : " << descriptor_->GetLastErrorMessage();
       RunCallback(FAIL, err_message.str());
       return;
     }
-    request_stream_->BackUp(size - n);
-    client_->IncWriteByte(n);
+    request_stream_->BackUp(size - write_size);
+    client_->IncWriteByte(write_size);
   }
 
   void DoRead() {
@@ -498,43 +526,44 @@ class HttpClient::Task {
       DCHECK_EQ(Status::REQUEST_SENT, status_->state);
       status_->state = Status::RECEIVING_RESPONSE;
     }
-    CHECK(d_);
+    CHECK(descriptor_);
     char* buf;
     int buf_size;
     resp_->Buffer(&buf, &buf_size);
-    int r = d_->Read(buf, buf_size);
-    VLOG(7) << "DoRead " << d_ << " buf_size=" << buf_size << " r=" << r;
-    if (r < 0 && d_->NeedRetry()) {
-      return;
-    }
-
-    if (r < 0) {  // error
+    ssize_t read_size = descriptor_->Read(buf, buf_size);
+    VLOG(7) << "DoRead " << descriptor_
+            << " buf_size=" << buf_size
+            << " read_size=" << read_size;
+    if (read_size < 0) {
+      if (descriptor_->NeedRetry()) {
+        return;
+      }
       LOG(WARNING) << status_->trace_id
-                   << " Read failed " << r
-                   << " err=" << d_->GetLastErrorMessage();
+                   << " Read failed " << read_size
+                   << " err=" << descriptor_->GetLastErrorMessage();
       std::ostringstream err_message;
       err_message << status_->trace_id
-                  << " Read failed ret=" << r
+                  << " Read failed ret=" << read_size
                   << " @" << resp_->len()
                   << " of " << resp_->buffer_size()
-                  << " : " << d_->GetLastErrorMessage();
+                  << " : " << descriptor_->GetLastErrorMessage();
       err_message << " : received=" << resp_->Header();
       RunCallback(FAIL, err_message.str());
       return;
     }
-    if (status_->wait_time == 0 && resp_->len() == 0) {
-      status_->wait_time = timer_.GetInIntMilliseconds();
+    if (status_->wait_time == absl::ZeroDuration() && resp_->len() == 0) {
+      status_->wait_time = timer_.GetDuration();
       timer_.Start();
-      d_->ChangeTimeout(client_->options().socket_read_timeout_sec);
+      descriptor_->ChangeTimeout(client_->options().socket_read_timeout);
     }
-    client_->IncReadByte(r);
-    if (resp_->Recv(r)) {
+    client_->IncReadByte(read_size);
+    if (resp_->Recv(read_size)) {
       VLOG(1) << status_->trace_id << " response\n"
               << resp_->Header();
-      status_->resp_recv_time = timer_.GetInIntMilliseconds();
+      status_->resp_recv_time = timer_.GetDuration();
       timer_.Start();
       resp_->Parse();
-      status_->resp_parse_time = timer_.GetInIntMilliseconds();
+      status_->resp_parse_time = timer_.GetDuration();
       status_->resp_size = resp_->len();
       if (resp_->status_code() != 200 || resp_->result() == FAIL) {
         DCHECK_EQ(close_state_, HttpClient::ERROR_CLOSE);
@@ -552,17 +581,17 @@ class HttpClient::Task {
       }
       status_->http_return_code = resp_->status_code();
       DCHECK_EQ(Status::RECEIVING_RESPONSE, status_->state);
-      status_->state = Status::RESPONSE_RECEIVED;
+      if (resp_->result() == OK || resp_->status_code() != 200) {
+        status_->state = Status::RESPONSE_RECEIVED;
+      }
       RunCallback(resp_->result(), resp_->err_message());
       return;
     }
-    if (client_->options().capture_response_header &&
-        resp_->HasHeader()) {
+    if (client_->options().capture_response_header && resp_->HasHeader()) {
       CaptureResponseHeader();
     }
-    d_->ChangeTimeout(
-        client_->options().socket_read_timeout_sec +
-        client_->EstimatedRecvTime(kNetworkBufSize));
+    descriptor_->ChangeTimeout(client_->options().socket_read_timeout +
+                               client_->EstimatedRecvTime(kNetworkBufSize));
   }
 
   void DoTimeout() {
@@ -575,33 +604,33 @@ class HttpClient::Task {
       RunCallback(FAIL, "http fail now");
       return;
     }
-    if (status_->timeout_secs.empty()) {
+    if (status_->timeouts.empty()) {
       std::ostringstream err_message;
       err_message << "Timed out: ";
       if (request_stream_) {
         err_message << "sending request header "
                     << request_stream_->ByteCount()
-                    << " " << timer_.GetInMilliseconds() << "ms";
+                    << " " << timer_.GetDuration();
       } else if (resp_->len() == 0) {
         err_message << "waiting response "
-                    << " " << timer_.GetInMilliseconds() << "ms";
+                    << " " << timer_.GetDuration();
       } else {
         err_message << "receiving response "
                     << resp_->len()
                     << " of " << resp_->buffer_size()
-                    << " " << timer_.GetInMilliseconds() << "ms";
+                    << " " << timer_.GetDuration();
       }
       LOG(WARNING) << status_->trace_id << " " << err_message.str();
       RunCallback(ERR_TIMEOUT, err_message.str());
       return;
     }
-    d_->StopRead();
-    d_->StopWrite();
+    descriptor_->StopRead();
+    descriptor_->StopWrite();
     wm_->RunClosureInThread(
         FROM_HERE,
         thread_id_,
         NewCallback(this, &HttpClient::Task::DoRetry),
-        WorkerThreadManager::PRIORITY_MED);
+        WorkerThread::PRIORITY_MED);
   }
 
   void RunCallback(int err, const string& err_message) {
@@ -609,9 +638,9 @@ class HttpClient::Task {
             << " RunCallback"
             << " err=" << err
             << " msg=" << err_message;
-    if (d_) {
-      d_->StopRead();
-      d_->StopWrite();
+    if (descriptor_) {
+      descriptor_->StopRead();
+      descriptor_->StopWrite();
     }
     active_ = false;
     status_->err = err;
@@ -627,15 +656,15 @@ class HttpClient::Task {
         FROM_HERE,
         thread_id_,
         NewCallback(this, &HttpClient::Task::DoCallback),
-        WorkerThreadManager::PRIORITY_MED);
+        WorkerThread::PRIORITY_MED);
   }
 
   void DoRetry() {
     LOG(INFO) << status_->trace_id << " DoRetry ";
     if (!active_)
       return;
-    Descriptor* d = d_;
-    d_ = nullptr;
+    Descriptor* d = descriptor_;
+    descriptor_ = nullptr;
     client_->ReleaseDescriptor(d, HttpClient::ERROR_CLOSE);
     active_ = false;
     request_stream_.reset();
@@ -648,10 +677,10 @@ class HttpClient::Task {
     VLOG(3) << status_->trace_id << " DoWrite " << " done";
     if (!active_)
       return;
-    status_->req_send_time = timer_.GetInIntMilliseconds();
+    status_->req_send_time = timer_.GetDuration();
     request_stream_.reset();
-    d_->ClearWritable();
-    d_->NotifyWhenReadable(
+    descriptor_->ClearWritable();
+    descriptor_->NotifyWhenReadable(
         NewPermanentCallback(this, &HttpClient::Task::DoRead));
     timer_.Start();
   }
@@ -660,8 +689,8 @@ class HttpClient::Task {
     VLOG(3) << status_->trace_id << " DoCallback"
             << " close_state=" << close_state_;
     CHECK(!active_);
-    Descriptor* d = d_;
-    d_ = nullptr;
+    Descriptor* d = descriptor_;
+    descriptor_ = nullptr;
     // once callback_ is called, it is not safe to touch status_.
     status_->finished = true;
     // Since status for ping would be updated in
@@ -693,8 +722,8 @@ class HttpClient::Task {
   HttpClient::Response* resp_;
   Status* status_;
   WorkerThreadManager* wm_;
-  WorkerThreadManager::ThreadId thread_id_;
-  Descriptor* d_;
+  WorkerThread::ThreadId thread_id_;
+  Descriptor* descriptor_;
 
   bool active_;
   HttpClient::ConnectionCloseState close_state_;
@@ -744,13 +773,6 @@ HttpClient::Status::Status()
       resp_size(0),
       raw_req_size(0),
       raw_resp_size(0),
-      throttle_time(0),
-      pending_time(0),
-      req_build_time(0),
-      req_send_time(0),
-      wait_time(0),
-      resp_recv_time(0),
-      resp_parse_time(0),
       num_retry(0),
       num_throttled(0),
       num_connect_failed(0) {
@@ -804,8 +826,7 @@ std::unique_ptr<TLSEngineFactory> HttpClient::NewTLSEngineFactoryFromOptions(
     if (!options.proxy_host_name.empty()) {
       ssl_engine_fact->SetProxy(options.proxy_host_name, options.proxy_port);
     }
-    ssl_engine_fact->SetCRLMaxValidDurationInSeconds(
-        options.ssl_crl_max_valid_duration);
+    ssl_engine_fact->SetCRLMaxValidDuration(options.ssl_crl_max_valid_duration);
     return std::unique_ptr<TLSEngineFactory>(std::move(ssl_engine_fact));
   }
   return nullptr;
@@ -838,17 +859,15 @@ HttpClient::HttpClient(std::unique_ptr<SocketFactory> socket_factory,
       read_size_(new Histogram),
       write_size_(new Histogram),
       total_resp_byte_(0),
-      total_resp_time_(0),
+      total_resp_time_(absl::ZeroDuration()),
       ping_http_return_code_(-1),
-      ping_round_trip_time_ms_(-1),
       traffic_history_closure_id_(kInvalidPeriodicClosureId),
-      retry_backoff_ms_(options.min_retry_backoff_ms),
-      enabled_from_(0),
+      retry_backoff_(options.min_retry_backoff),
       num_network_error_(0),
       num_network_recovered_(0) {
   LOG(INFO) << options_.DebugString();
-  CHECK_GT(retry_backoff_ms_, 0);
-  CHECK_LT(options.min_retry_backoff_ms, options.max_retry_backoff_ms);
+  CHECK_GT(retry_backoff_, absl::ZeroDuration());
+  CHECK_LT(options.min_retry_backoff, options.max_retry_backoff);
   read_size_->SetName("read size distribution");
   write_size_->SetName("write size distribution");
   if (!options_.authorization.empty()) {
@@ -864,7 +883,7 @@ HttpClient::HttpClient(std::unique_ptr<SocketFactory> socket_factory,
   traffic_history_.push_back(TrafficStat());
 
   traffic_history_closure_id_ = wm_->RegisterPeriodicClosure(
-      FROM_HERE, 1000, NewPermanentCallback(
+      FROM_HERE, absl::Seconds(1), NewPermanentCallback(
           this, &HttpClient::UpdateTrafficHistory));
 
   if (options_.use_ssl) {
@@ -987,13 +1006,13 @@ Descriptor* HttpClient::NewDescriptor() {
     }
     TLSDescriptor* d = new TLSDescriptor(
         wm_->RegisterSocketDescriptor(std::move(fd),
-                                      WorkerThreadManager::PRIORITY_MED),
+                                      WorkerThread::PRIORITY_MED),
         engine, tls_desc_options, wm_);
     d->Init();
     return d;
   }
   return wm_->RegisterSocketDescriptor(std::move(fd),
-                                       WorkerThreadManager::PRIORITY_MED);
+                                       WorkerThread::PRIORITY_MED);
 }
 
 void HttpClient::ReleaseDescriptor(
@@ -1032,22 +1051,22 @@ bool HttpClient::failnow() const {
   if (shutting_down_) {
     return true;
   }
-  if (enabled_from_ == 0) {
+  if (!enabled_from_.has_value()) {
     return false;
   }
-  return time(nullptr) < enabled_from_;
+  return absl::Now() < *enabled_from_;
 }
 
 int HttpClient::ramp_up() const {
   AUTOLOCK(lock, &mu_);
-  if (enabled_from_ == 0) {
+  if (!enabled_from_.has_value()) {
     return 100;
   }
-  time_t now = time(nullptr);
-  if (now < enabled_from_) {
+  const absl::Time now = absl::Now();
+  if (now < *enabled_from_) {
     return 0;
   }
-  return std::min<int>(100, (now - enabled_from_) * 100 / kRampUpDurationSec);
+  return std::min<int>(100, (now - *enabled_from_) * 100 / kRampUpDuration);
 }
 
 string HttpClient::GetHealthStatusMessage() const {
@@ -1056,12 +1075,10 @@ string HttpClient::GetHealthStatusMessage() const {
 }
 
 void HttpClient::UpdateStatusCodeHistoryUnlocked() {
-  const int kHTTPStatusCodeHistoryHoldingSec = 3;
-  time_t now = time(nullptr);
+  const absl::Time now = absl::Now();
 
   while (!recent_http_status_code_.empty() &&
-         recent_http_status_code_.front().first <
-         now - kHTTPStatusCodeHistoryHoldingSec) {
+         recent_http_status_code_.front().first < now - absl::Seconds(3)) {
     if (recent_http_status_code_.front().second != 200) {
       --bad_status_num_in_recent_http_;
     }
@@ -1072,7 +1089,7 @@ void HttpClient::UpdateStatusCodeHistoryUnlocked() {
 void HttpClient::AddStatusCodeHistoryUnlocked(int status_code) {
   UpdateStatusCodeHistoryUnlocked();
 
-  time_t now = time(nullptr);
+  const absl::Time now = absl::Now();
   if (status_code != 200) {
     ++bad_status_num_in_recent_http_;
   }
@@ -1115,9 +1132,10 @@ bool HttpClient::SetOAuth2Config(const OAuth2Config& config) {
   if (oauth_refresh_task_->SetOAuth2Config(config)) {
     AUTOLOCK(lock, &mu_);
     // if disabled by 401 error, could try now with new oauth2 config.
-    LOG(INFO) << "new oauth2 config: reset enabled_from_=" << enabled_from_
+    LOG(INFO) << "new oauth2 config: reset enabled_from_="
+              << OptionalToString(enabled_from_)
               << " to 0";
-    enabled_from_ = 0;
+    enabled_from_.reset();
     return true;
   }
   return false;
@@ -1186,10 +1204,9 @@ string HttpClient::DebugString() const {
   ss << std::endl;
 
   ss << std::endl;
-  ss << "Backoff: " << retry_backoff_ms_ << "msec" << std::endl;
-  if (enabled_from_ > 0) {
-    ss << "Disabled for " << (enabled_from_ - time(nullptr)) << " sec"
-       << std::endl;
+  ss << "Backoff: " << retry_backoff_ << std::endl;
+  if (enabled_from_.has_value()) {
+    ss << "Disabled for " << (*enabled_from_ - absl::Now()) << std::endl;
   }
 
   ss << std::endl;
@@ -1197,7 +1214,7 @@ string HttpClient::DebugString() const {
      << num_writable_ << "calls" << std::endl;
   ss << "Read: " << total_read_byte_ << "bytes "
      << num_readable_ << "calls "
-     << "(" << total_resp_byte_ << "bytes in " << total_resp_time_ << "msec)";
+     << "(" << total_resp_byte_ << "bytes in " << total_resp_time_ << ")";
   ss << std::endl;
   ss << std::endl;
   ss << write_size_->DebugString() << std::endl;
@@ -1247,7 +1264,8 @@ void HttpClient::DumpToJson(Json::Value* json) const {
   if (!options_.ssl_extra_cert_data.empty()) {
     (*json)["ssl_extra_cert_data"] = "set";
   }
-  (*json)["socket_read_timeout_sec"] = options_.socket_read_timeout_sec;
+  (*json)["socket_read_timeout_sec"] =
+      Json::Int64(absl::ToInt64Seconds(options_.socket_read_timeout));
   (*json)["num_query"] = num_query_;
   (*json)["num_active"] = num_active_;
   (*json)["num_http_retry"] = num_http_retry_;
@@ -1258,7 +1276,8 @@ void HttpClient::DumpToJson(Json::Value* json) const {
   (*json)["num_writable"] = Json::Int64(num_writable_);
   (*json)["num_readable"] = Json::Int64(num_readable_);
   (*json)["resp_byte"] = Json::Int64(total_resp_byte_);
-  (*json)["resp_time"] = Json::Int64(total_resp_time_);
+  (*json)["resp_time"] =
+      Json::Int64(absl::ToInt64Milliseconds(total_resp_time_));
   {
     TrafficHistory::const_reverse_iterator iter = traffic_history_.rbegin();
     ++iter;
@@ -1303,8 +1322,11 @@ void HttpClient::DumpToJson(Json::Value* json) const {
 void HttpClient::DumpStatsToProto(HttpRPCStats* stats) const {
   AUTOLOCK(lock, &mu_);
   stats->set_ping_status_code(ping_http_return_code_);
-  stats->set_ping_round_trip_time_ms(ping_round_trip_time_ms_);
+  if (ping_round_trip_time_.has_value()) {
+    stats->set_ping_round_trip_time_ms(DurationToIntMs(*ping_round_trip_time_));
+  }
   stats->set_query(num_query_);
+  stats->set_active(num_active_);
   stats->set_retry(num_http_retry_);
   stats->set_timeout(num_http_timeout_);
   stats->set_error(num_http_error_);
@@ -1320,8 +1342,8 @@ void HttpClient::DumpStatsToProto(HttpRPCStats* stats) const {
   }
 }
 
-int HttpClient::UpdateHealthStatusMessageForPing(const Status& status,
-                                                 int round_trip_time) {
+int HttpClient::UpdateHealthStatusMessageForPing(
+    const Status& status, absl::optional<absl::Duration> round_trip_time) {
   LOG(INFO) << "Ping status:"
             << " http_return_code=" << status.http_return_code
             << " throttle_time=" << status.throttle_time
@@ -1331,7 +1353,7 @@ int HttpClient::UpdateHealthStatusMessageForPing(const Status& status,
             << " wait_time=" << status.wait_time
             << " resp_recv_time=" << status.resp_recv_time
             << " resp_parse_time=" << status.resp_parse_time
-            << " round_trip_time=" << round_trip_time;
+            << " round_trip_time=" << OptionalToString(round_trip_time);
 
   AUTOLOCK(lock, &mu_);
   AddStatusCodeHistoryUnlocked(status.http_return_code);
@@ -1366,8 +1388,7 @@ int HttpClient::UpdateHealthStatusMessageForPing(const Status& status,
     return ping_http_return_code_;
   }
   ping_http_return_code_ = status.http_return_code;
-  if (round_trip_time > 0)
-    ping_round_trip_time_ms_ = round_trip_time;
+  ping_round_trip_time_ = round_trip_time;
   const string running = options_.fail_fast ? "error:" : "running:";
   if (status.http_return_code != 200) {
     int status_code = status.http_return_code;
@@ -1400,46 +1421,42 @@ int HttpClient::UpdateHealthStatusMessageForPing(const Status& status,
   return status.http_return_code;
 }
 
-double HttpClient::EstimatedRecvTime(size_t bytes) {
+absl::Duration HttpClient::EstimatedRecvTime(size_t bytes) {
   AUTOLOCK(lock, &mu_);
-  double t = 0.0;
-  // total_resp_time_ is millisec.
-  if (total_resp_byte_ > 0) {
-    t += bytes * (static_cast<double>(total_resp_time_) /
-                 (1000.0 * total_resp_byte_));
-  }
-  return t;
+
+  if (total_resp_byte_ == 0)
+    return absl::ZeroDuration();
+
+  // total_resp_time_ is in milliseconds.
+  return total_resp_time_ * bytes / total_resp_byte_;
 }
 
 /* static */
-int HttpClient::BackoffMsec(
-    const Options& options, int prev_backoff_msec, bool in_error) {
+absl::Duration HttpClient::GetNextBackoff(
+    const Options& options, absl::Duration prev_backoff, bool in_error) {
   // Multiply factor used in chromium.
   // URLRequestThrottlerEntry::kDefaultMultiplyFactor
   // in net/url_request/url_request_throttler_entry.cc
-  const double kBackoffBase = 1.4;
-  CHECK_GT(prev_backoff_msec, 0);
-  double uncapped_backoff = static_cast<double>(prev_backoff_msec);
+  constexpr double kBackoffBase = 1.4;
+  CHECK_GT(prev_backoff, absl::ZeroDuration());
+  absl::Duration uncapped_backoff = prev_backoff;
   if (in_error) {
     uncapped_backoff *= kBackoffBase;
-    return static_cast<int>(
-        std::min<double>(uncapped_backoff, options.max_retry_backoff_ms));
+    return std::min(uncapped_backoff, options.max_retry_backoff);
   }
   uncapped_backoff /= kBackoffBase;
-  return static_cast<int>(
-      std::max<double>(uncapped_backoff, options.min_retry_backoff_ms));
+  return std::max(uncapped_backoff, options.min_retry_backoff);
 }
 
 void HttpClient::UpdateBackoffUnlocked(bool in_error) {
-  const int orig_backoff = retry_backoff_ms_;
-  CHECK_GT(retry_backoff_ms_, 0);
-  retry_backoff_ms_ = BackoffMsec(options_, retry_backoff_ms_, in_error);
+  const absl::Duration orig_backoff = retry_backoff_;
+  CHECK_GT(orig_backoff, absl::ZeroDuration());
+  retry_backoff_ = GetNextBackoff(options_, retry_backoff_, in_error);
   if (in_error) {
     LOG(INFO) << "UpdateBackoff error "
-              << orig_backoff << " -> " << retry_backoff_ms_;
+              << orig_backoff << " -> " << retry_backoff_;
   } else {
-    VLOG(2) << "UpdateBackoff ok "
-              << orig_backoff << " -> " << retry_backoff_ms_;
+    VLOG(2) << "UpdateBackoff ok " << orig_backoff << " -> " << retry_backoff_;
   }
 }
 
@@ -1459,41 +1476,29 @@ bool HttpClient::ShouldRefreshOAuth2AccessToken() const {
 }
 
 void HttpClient::RunAfterOAuth2AccessTokenGetReady(
-    WorkerThreadManager::ThreadId thread_id, OneshotClosure* closure) {
+    WorkerThread::ThreadId thread_id, OneshotClosure* closure) {
 
   CHECK(oauth_refresh_task_.get());
   oauth_refresh_task_->RunAfterRefresh(thread_id, closure);
 }
 
-// Randomizes backoff by subtracting 40%, so it returns
-// [backoff_ms*0.6, backoff_ms].
-int RandomizeBackoff(int backoff_ms) {
-  const double kRandomizedRatio = 0.4;
-  int randomize_backoff = static_cast<int>(
-      static_cast<double>(backoff_ms) * kRandomizedRatio);
-  if (randomize_backoff == 0)
-    randomize_backoff = 1;
-  backoff_ms -= (rand() % (randomize_backoff + 1));
-  return std::max(1, backoff_ms);
+absl::Duration HttpClient::GetRandomizedBackoff() const {
+  return RandomizeBackoff(retry_backoff_);
 }
 
-int HttpClient::GetRandomizeBackoffTimeInMs() {
-  return RandomizeBackoff(retry_backoff_ms_);
-}
-
-int HttpClient::TryStart() {
+absl::Duration HttpClient::TryStart() {
   AUTOLOCK(lock, &mu_);
   if ((traffic_history_.back().http_err > 0 ||
        traffic_history_.back().query >= kMaxQPS) &&
       options_.allow_throttle) {
     LOG(WARNING) << "Throttled. queries=" << traffic_history_.back().query
                  << " err=" << traffic_history_.back().http_err
-                 << " retry_backoff_ms=" << retry_backoff_ms_;
-    return GetRandomizeBackoffTimeInMs();
+                 << " retry_backoff_=" << retry_backoff_;
+    return GetRandomizedBackoff();
   }
   ++num_query_;
   ++traffic_history_.back().query;
-  return 0;
+  return absl::ZeroDuration();
 }
 
 void HttpClient::IncNumActive() {
@@ -1587,7 +1592,8 @@ void HttpClient::UpdateStats(const Status& status) {
 void HttpClient::UpdateTrafficHistory() {
   AUTOLOCK(lock, &mu_);
   if (!shutting_down_) {
-    if (traffic_history_.back().query > 0 && total_resp_time_ > 0) {
+    if (traffic_history_.back().query > 0 &&
+        total_resp_time_ > absl::ZeroDuration()) {
       if (traffic_history_.back().http_err == 0) {
         if (health_status_ != "ok") {
           LOG(INFO) << "Update health status:" << health_status_ << " to ok";
@@ -1613,11 +1619,12 @@ void HttpClient::UpdateTrafficHistory() {
 
 void HttpClient::NetworkErrorDetectedUnlocked() {
   // set network error started time if it is not set.
-  time_t now = time(nullptr);
+  const absl::Time now = absl::Now();
 
   if (!network_error_status_.OnNetworkErrorDetected(now)) {
-    LOG(INFO) << "Network error continues from "
-              << network_error_status_.NetworkErrorStartedTime();
+    LOG(INFO)
+        << "Network error continues from "
+        << OptionalToString(network_error_status_.NetworkErrorStartedTime());
     return;
   }
 
@@ -1629,22 +1636,27 @@ void HttpClient::NetworkErrorDetectedUnlocked() {
 }
 
 void HttpClient::NetworkRecoveredUnlocked() {
-  time_t now = time(nullptr);
-
-  time_t network_error_started_time =
+  const absl::Time now = absl::Now();
+  absl::optional<absl::Time> network_error_started_time =
       network_error_status_.NetworkErrorStartedTime();
 
   if (!network_error_status_.OnNetworkRecovered(now)) {
-    LOG_IF(INFO, network_error_started_time > 0)
+    LOG_IF(INFO, network_error_started_time.has_value())
         << "Waiting network recover until "
-        << network_error_status_.NetworkErrorUntil();
+        << *network_error_status_.NetworkErrorUntil();
     return;
   }
 
-  LOG(INFO) << "Network recovered"
-            << " started=" << network_error_started_time
-            << " recovered=" << now
-            << " duration=" << (now - network_error_started_time);
+  LOG(INFO)
+      << "Network recovered"
+      << " started=" << OptionalToString(network_error_started_time)
+      << " recovered=" << now
+      << " duration="
+      << OptionalToString(
+             network_error_started_time.has_value() ?
+                 absl::optional<absl::Duration>(
+                    now - *network_error_started_time) :
+                 absl::nullopt);
   ++num_network_recovered_;
   if (monitor_.get())
     monitor_->OnNetworkRecovered();
@@ -1656,7 +1668,7 @@ void HttpClient::SetMonitor(
   monitor_ = std::move(monitor);
 }
 
-time_t HttpClient::NetworkErrorStartedTime() const {
+absl::optional<absl::Time> HttpClient::NetworkErrorStartedTime() const {
   AUTOLOCK(lock, &mu_);
   return network_error_status_.NetworkErrorStartedTime();
 }
@@ -1782,6 +1794,29 @@ HttpRequest::NewStream() const {
   return absl::make_unique<ChainedInputStream>(std::move(s));
 }
 
+std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>
+HttpFileUploadRequest::NewStream() const {
+  ScopedFd fd(ScopedFd::OpenForRead(filename_));
+  if (!fd.valid()) {
+    return nullptr;
+  }
+  std::vector<std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>> s;
+  s.reserve(2);
+  // TODO: use chunked encoding for body and no require size_ ?
+  s.push_back(absl::make_unique<StringInputStream>(
+      BuildHeader(std::vector<string>(), size_)));
+
+  // pass ownership of fd to body.
+  std::unique_ptr<ScopedFdInputStream> body(
+      absl::make_unique<ScopedFdInputStream>(std::move(fd)));
+  s.push_back(std::move(body));
+  return absl::make_unique<ChainedInputStream>(std::move(s));
+}
+
+std::unique_ptr<HttpClient::Request> HttpFileUploadRequest::Clone() const {
+  return absl::make_unique<HttpFileUploadRequest>(*this);
+}
+
 // GetConentEncoding reports EncodingType specified in header.
 // not http_util because it depends lib/compress_util EncodingType.
 static EncodingType GetContentEncoding(absl::string_view header) {
@@ -1900,6 +1935,15 @@ bool HttpClient::Response::Recv(int r) {
   }
   EncodingType encoding = GetContentEncoding(Header());
   body_ = NewBody(content_length, is_chunked, encoding);
+  if (!body_) {
+    LOG(WARNING) << trace_id_ << " failed to create body "
+                 << " content_length=" << content_length
+                 << " is_chunked=" << is_chunked
+                 << " encoding=" << GetEncodingName(encoding);
+    err_message_ = "filed to create body";
+    result_ = FAIL;
+    return true;
+  }
   if (body_offset_ < len_) {
     // header buffer_ has head of body.
     absl::string_view body(buffer_.data(), len_);
@@ -1930,14 +1974,17 @@ bool HttpClient::Response::BodyRecv(int r) {
         LOG(WARNING) << trace_id_
                      << " connection closed before receiving all data at "
                      << body_->ByteCount();
-        err_message_ = "connection closed before receiving all data.";
+        err_message_ =
+            absl::StrCat("connection closed before receiving all data at ",
+                         body_->ByteCount());
         result_ = FAIL;
         return true;
       }
       LOG(WARNING) << trace_id_
                    << " body receive failed @" << body_->ByteCount()
                    << " size=" << r;
-      err_message_ = "body receive failed";
+      err_message_ =
+          absl::StrCat("body receive failed at ", body_->ByteCount());
       result_ = FAIL;
       return true;
 
@@ -2046,7 +2093,7 @@ HttpResponse::Body::Process(int data_size) {
     return State::Error;
   }
   if (len_ == content_length_) {
-      VLOG(3) << "content finished at " << content_length_;
+    VLOG(3) << "content finished at " << content_length_;
     return State::Ok;
   }
   return State::Incomplete;
@@ -2065,9 +2112,11 @@ HttpResponse::Body::ParsedStream() const {
       = absl::make_unique<ChainedInputStream>(std::move(chunk_streams));
 
   switch (encoding_type_) {
-    case ENCODING_DEFLATE:
+    case EncodingType::DEFLATE:
       return absl::make_unique<InflateInputStream>(std::move(input));
-    case ENCODING_LZMA2:
+    case EncodingType::GZIP:
+      return absl::make_unique<GzipInputStream>(std::move(input));
+    case EncodingType::LZMA2:
 #ifdef ENABLE_LZMA
       return absl::make_unique<LZMAInputStream>(std::move(input));
 #else
@@ -2112,9 +2161,143 @@ void HttpResponse::ParseBody() {
   result_ = OK;
 }
 
-bool HttpClient::NetworkErrorStatus::OnNetworkErrorDetected(
-    time_t now) {
-  if (error_started_time_ > 0) {
+HttpFileDownloadResponse::Body::Body(
+    ScopedFd&& fd,
+    size_t content_length, bool is_chunked, EncodingType encoding_type)
+    : fd_(std::move(fd)),
+      content_length_(content_length),
+      encoding_type_(encoding_type) {
+  if (is_chunked) {
+    chunk_parser_ = absl::make_unique<HttpChunkParser>();
+  }
+  LOG_IF(FATAL, encoding_type_ != EncodingType::NO_ENCODING)
+      << "unsupported encoding:"  << GetEncodingName(encoding_type);
+  // TODO: z_streamp for inflate?
+}
+
+void HttpFileDownloadResponse::Body::Next(char** buf, int* buf_size) {
+  *buf = &buf_[0];
+  *buf_size = kNetworkBufSize;
+}
+
+HttpClient::Response::Body::State
+HttpFileDownloadResponse::Body::Process(int data_size) {
+  VLOG(3) << "body download process " << data_size
+          << " len=" << len_
+          << " content_length=" << content_length_
+          << " is_chunked=" << (chunk_parser_ ? true : false);
+  if (data_size < 0) {
+    return State::Error;
+  }
+  if (data_size == 0) {  // EOF
+    if (!chunk_parser_) {
+      if (content_length_ == string::npos) {
+        VLOG(3) << "content finished with EOF";
+        return Close();
+      }
+      if (content_length_ == len_) {
+        // empty body case
+        VLOG(3) << "empty content";
+        return Close();
+      }
+    }
+    LOG(ERROR) << "unexpected EOF at " << len_;
+    return State::Error;
+  }
+  DCHECK_LE(data_size, kNetworkBufSize);
+  absl::string_view data(buf_, data_size);
+  len_ += data_size;
+  if (chunk_parser_) {
+    std::vector<absl::string_view> chunks;
+    if (!chunk_parser_->Parse(data, &chunks)) {
+      LOG(ERROR) << "failed to parse chunk at " << len_;
+      return State::Error;
+    }
+    for (const auto& chunk : chunks) {
+      if (!Write(chunk)) {
+        return State::Error;
+      }
+    }
+    if (!chunk_parser_->done()) {
+      VLOG(3) << "chunk not fully received yet";
+      return State::Incomplete;
+    }
+    VLOG(3) << "all chunk finihsed";
+    return Close();
+  }
+  if (!Write(data)) {
+    return State::Error;
+  }
+  if (content_length_ == string::npos) {
+    // read until EOF.
+    return State::Incomplete;
+  }
+  if (len_ > content_length_) {
+    LOG(WARNING) << "received extra data?? len=" << len_
+                 << " content_length=" << content_length_;
+    return State::Error;
+  }
+  if (len_ == content_length_) {
+    VLOG(3) << "content finished at " << content_length_;
+    return Close();
+  }
+  return State::Incomplete;
+}
+
+bool HttpFileDownloadResponse::Body::Write(absl::string_view data) {
+  ssize_t n = fd_.Write(data.data(), data.size());
+  if (n != data.size()) {
+    LOG(WARNING) << "partial write " << n << " != " << data.size();
+    return false;
+  }
+  return true;
+}
+
+HttpClient::Response::Body::State
+HttpFileDownloadResponse::Body::Close() {
+  if (!fd_.Close()) {
+    LOG(WARNING) << "close error for downloading to file";
+    return State::Error;
+  }
+  return State::Ok;
+}
+
+HttpFileDownloadResponse::HttpFileDownloadResponse(
+    std::string filename, int mode)
+    : filename_(std::move(filename)),
+      mode_(mode) {
+}
+
+HttpFileDownloadResponse::~HttpFileDownloadResponse() {
+}
+
+HttpClient::Response::Body*
+HttpFileDownloadResponse::NewBody(
+    size_t content_length, bool is_chunked,
+    EncodingType encoding_type) {
+  if (encoding_type != EncodingType::NO_ENCODING) {
+    // TODO: support deflate, lzma2
+    LOG(ERROR) << "unsupported encoding is requested:"
+               << GetEncodingName(encoding_type);
+    return nullptr;
+  }
+  ScopedFd fd(ScopedFd::Create(filename_, mode_));
+  if (!fd.valid()) {
+    LOG(ERROR) << "failed to create " << filename_;
+    return nullptr;
+  }
+  response_body_ =
+      absl::make_unique<Body>(std::move(fd),
+                              content_length, is_chunked, encoding_type);
+  return response_body_.get();
+}
+
+void HttpFileDownloadResponse::ParseBody() {
+  result_ = OK;
+}
+
+bool HttpClient::NetworkErrorStatus::OnNetworkErrorDetected(absl::Time now) {
+  if (error_started_time_.has_value()) {
     error_until_ = now + error_recover_margin_;
     return false;
   }
@@ -2125,39 +2308,20 @@ bool HttpClient::NetworkErrorStatus::OnNetworkErrorDetected(
   return true;
 }
 
-bool HttpClient::NetworkErrorStatus::OnNetworkRecovered(
-    time_t now) {
-  if (error_started_time_ == 0)
+bool HttpClient::NetworkErrorStatus::OnNetworkRecovered(absl::Time now) {
+  if (!error_started_time_.has_value()) {
     return false;
+  }
 
   // We don't consider the network is recovered until error_until_.
-  if (now < error_until_) {
+  if (error_until_.has_value() && now < *error_until_) {
     return false;
   }
 
   // Here, we consider the network error is really recovered.
-  error_started_time_ = 0;
-  error_until_ = 0;
+  error_started_time_.reset();
+  error_until_.reset();
   return true;
-}
-
-StringInputStream::StringInputStream(string data)
-    : data_(std::move(data)),
-      stream_(absl::make_unique<google::protobuf::io::ArrayInputStream>(
-          data_.data(), data_.size())) {
-}
-
-ChainedInputStream::ChainedInputStream(
-    std::vector<std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>>
-    streams)
-    : streams_(std::move(streams)) {
-  streams_array_.reserve(streams_.size());
-  for (const auto& s : streams_) {
-    streams_array_.push_back(s.get());
-  }
-  stream_ = absl::make_unique<
-    google::protobuf::io::ConcatenatingInputStream>(
-        streams_array_.data(), streams_array_.size());
 }
 
 }  // namespace devtools_goma

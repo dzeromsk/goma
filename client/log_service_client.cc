@@ -17,7 +17,7 @@ MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_log.pb.h"
 MSVC_POP_WARNING()
 #include "http_rpc.h"
-#include "worker_thread_manager.h"
+#include "worker_thread.h"
 
 #ifdef __MACH__
 #include "mac_version.h"
@@ -170,20 +170,19 @@ class LogServiceClient::SaveLogJob {
 LogServiceClient::LogServiceClient(HttpRPC* http_rpc,
                                    string save_log_path,
                                    size_t max_log_in_req,
-                                   int max_pending_ms,
+                                   absl::Duration max_pending_duration,
                                    WorkerThreadManager* wm)
     : wm_(wm),
       http_rpc_(http_rpc),
       save_log_path_(std::move(save_log_path)),
       max_log_in_req_(max_log_in_req),
-      max_pending_ms_(max_pending_ms),
+      max_pending_duration_(max_pending_duration),
       periodic_callback_id_(kInvalidPeriodicClosureId),
       save_log_job_(nullptr),
-      num_save_log_job_(0),
-      last_timestamp_ms_(0) {
+      num_save_log_job_(0) {
   CHECK_GT(max_log_in_req_, 0U);
   timer_.Start();
-  last_timestamp_ms_ = timer_.GetInMilliseconds();
+  last_timestamp_ = timer_.GetDuration();
 }
 
 LogServiceClient::~LogServiceClient() {
@@ -224,12 +223,12 @@ void LogServiceClient::SaveLogImpl(const SaveLogFunc& func) {
   SaveLogJob* job = nullptr;
   {
     AUTOLOCK(lock, &mu_);
-    last_timestamp_ms_ = timer_.GetInMilliseconds();
+    last_timestamp_ = timer_.GetDuration();
     if (!http_rpc_->client()->shutting_down() &&
         periodic_callback_id_ == kInvalidPeriodicClosureId) {
       periodic_callback_id_ = wm_->RegisterPeriodicClosure(
           FROM_HERE,
-          std::min(max_pending_ms_ / 10, 1000),
+          std::min(max_pending_duration_ / 10, absl::Seconds(1)),
           NewPermanentCallback(this, &LogServiceClient::CheckPending));
     }
     if (save_log_job_ == nullptr)
@@ -255,7 +254,7 @@ void LogServiceClient::Flush() {
   SaveLogJob* job = nullptr;
   {
     AUTOLOCK(lock, &mu_);
-    last_timestamp_ms_ = timer_.GetInMilliseconds();
+    last_timestamp_ = timer_.GetDuration();
     if (save_log_job_ == nullptr)
       return;
     if (save_log_job_->num_log() == 0) {
@@ -273,7 +272,7 @@ void LogServiceClient::Flush() {
     wm_->RunClosure(
         FROM_HERE,
         NewCallback(job, &LogServiceClient::SaveLogJob::Call),
-        WorkerThreadManager::PRIORITY_MED);
+        WorkerThread::PRIORITY_MED);
   }
 }
 
@@ -304,7 +303,7 @@ void LogServiceClient::CheckPending() {
       return;
     if (save_log_job_->num_log() == 0)
       return;
-    if (timer_.GetInMilliseconds() < last_timestamp_ms_ + max_pending_ms_)
+    if (timer_.GetDuration() < last_timestamp_ + max_pending_duration_)
       return;
     job = save_log_job_;
     save_log_job_ = nullptr;
@@ -316,7 +315,7 @@ void LogServiceClient::CheckPending() {
     wm_->RunClosure(
         FROM_HERE,
         NewCallback(job, &LogServiceClient::SaveLogJob::Call),
-        WorkerThreadManager::PRIORITY_MED);
+        WorkerThread::PRIORITY_MED);
   }
 }
 

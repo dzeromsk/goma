@@ -12,6 +12,7 @@
 #include <json/json.h>
 
 #include "basictypes.h"
+#include "gtest/gtest_prod.h"
 #include "lockhelper.h"
 #include "http.h"
 
@@ -86,6 +87,7 @@ class HttpRPC {
   const Options& options() const { return options_; }
 
  private:
+  FRIEND_TEST(HttpRPCTest, EnableCompression);
   class Request;
   class CallRequest;
   class Response;
@@ -100,12 +102,16 @@ class HttpRPC {
 
   void DisableCompression();
   void EnableCompression(absl::string_view header);
+  // Initial request_encoding_type is determined by options_.accept_encoding.
+  // Once it received response, use server's Accept-Encoding: response header.
+  // Prefers gzip to deflate.  no lzma2 support yet.
+  EncodingType request_encoding_type() const;
   bool IsCompressionEnabled() const;
 
   HttpClient* client_;
   const Options options_;
   mutable Lock mu_;
-  bool compression_enabled_;
+  EncodingType request_encoding_type_ GUARDED_BY(mu_);
 
   DISALLOW_COPY_AND_ASSIGN(HttpRPC);
 };
@@ -113,14 +119,16 @@ class HttpRPC {
 class ExecServiceClient {
  public:
   ExecServiceClient(HttpRPC* http_rpc, string path);
+  virtual ~ExecServiceClient() = default;
 
   ExecServiceClient(const ExecServiceClient&) = delete;
   ExecServiceClient& operator=(const ExecServiceClient&) = delete;
 
-  void ExecAsync(const ExecReq* req, ExecResp* resp,
-                 HttpClient::Status* status, OneshotClosure* callback);
+  virtual void ExecAsync(const ExecReq* req, ExecResp* resp,
+                         HttpClient::Status* status, OneshotClosure* callback);
 
-  void Exec(const ExecReq* req, ExecResp* resp, HttpClient::Status* status);
+  virtual void Exec(const ExecReq* req, ExecResp* resp,
+                    HttpClient::Status* status);
 
  private:
   HttpRPC* http_rpc_;

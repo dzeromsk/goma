@@ -49,8 +49,8 @@
 #include "file_dir.h"
 #include "file_hash_cache.h"
 #include "file_helper.h"
+#include "file_path_util.h"
 #include "filesystem.h"
-#include "flat_map.h"
 #include "gcc_flags.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
@@ -74,9 +74,10 @@
 #include "path_util.h"
 #include "simple_timer.h"
 #include "subprocess_task.h"
+#include "time_util.h"
 #include "util.h"
 #include "vc_flags.h"
-#include "worker_thread_manager.h"
+#include "worker_thread.h"
 
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_data.pb.h"
@@ -89,9 +90,11 @@ MSVC_POP_WARNING()
 
 namespace devtools_goma {
 
-static const int kMaxExecRetry = 4;
+namespace {
 
-static string GetLastErrorMessage() {
+constexpr int kMaxExecRetry = 4;
+
+string GetLastErrorMessage() {
   char error_message[1024];
 #ifndef _WIN32
   // Meaning of returned value of strerror_r is different between
@@ -104,11 +107,11 @@ static string GetLastErrorMessage() {
   return error_message;
 }
 
-static bool IsFatalError(ExecResp::ExecError error_code) {
+bool IsFatalError(ExecResp::ExecError error_code) {
   return error_code == ExecResp::BAD_REQUEST;
 }
 
-static void DumpSubprograms(
+void DumpSubprograms(
     const google::protobuf::RepeatedPtrField<SubprogramSpec>& subprogram_specs,
     std::ostringstream* ss) {
   for (int i = 0; i < subprogram_specs.size(); ++i) {
@@ -119,8 +122,8 @@ static void DumpSubprograms(
   }
 }
 
-static void LogCompilerOutput(
-    const string& trace_id, const string& name, absl::string_view out) {
+void LogCompilerOutput(const string& trace_id, const string& name,
+                       absl::string_view out) {
   LOG(INFO) << trace_id << " " << name << ": size=" << out.size();
   static const int kMaxLines = 32;
   static const size_t kMaxCols = 200;
@@ -163,23 +166,18 @@ static void LogCompilerOutput(
   }
 }
 
-static void ReleaseMemoryForExecReqInput(ExecReq* req) {
+void ReleaseMemoryForExecReqInput(ExecReq* req) {
   ExecReq new_req;
   new_req.Swap(req);
   new_req.clear_input();
   *req = new_req;
 }
 
-absl::once_flag CompileTask::init_once_;
-Lock CompileTask::global_mu_;
-
-std::deque<CompileTask*>* CompileTask::link_file_req_tasks_ = nullptr;
-
-static string CreateCommandVersionString(const CommandSpec& spec) {
+string CreateCommandVersionString(const CommandSpec& spec) {
   return spec.name() + ' ' + spec.version() + " (" + spec.binary_hash() + ")";
 }
 
-static string StateName(CompileTask::State state) {
+string StateName(CompileTask::State state) {
   static const char* names[] = {
     "INIT",
     "SETUP",
@@ -201,8 +199,8 @@ static string StateName(CompileTask::State state) {
 }
 
 template <typename Iter>
-static void NormalizeSystemIncludePaths(const string& home, const string& cwd,
-                                        Iter path_begin, Iter path_end) {
+void NormalizeSystemIncludePaths(const string& home, const string& cwd,
+                                 Iter path_begin, Iter path_end) {
   if (home.empty())
     return;
 
@@ -215,7 +213,7 @@ static void NormalizeSystemIncludePaths(const string& home, const string& cwd,
 
 // Returns true if |buf| is bigobj format header.
 // |buf| should contain 32 byte at least.
-static bool IsBigobjFormat(const unsigned char* buf) {
+bool IsBigobjFormat(const unsigned char* buf) {
   static const unsigned char kV1UUID[16] = {
     0x38, 0xFE, 0xB3, 0x0C, 0xA5, 0xD9, 0xAB, 0x4D,
     0xAC, 0x9B, 0xD6, 0xB6, 0x22, 0x26, 0x53, 0xC2,
@@ -253,6 +251,13 @@ static bool IsBigobjFormat(const unsigned char* buf) {
 
   return true;
 }
+
+}  // namespace
+
+absl::once_flag CompileTask::init_once_;
+Lock CompileTask::global_mu_;
+
+std::deque<CompileTask*>* CompileTask::link_file_req_tasks_ = nullptr;
 
 class CompileTask::InputFileTask {
  public:
@@ -298,7 +303,7 @@ class CompileTask::InputFileTask {
   }
 
   void Run(CompileTask* task, OneshotClosure* closure) {
-    WorkerThreadManager::ThreadId thread_id = task->thread_id_;
+    WorkerThread::ThreadId thread_id = task->thread_id_;
     {
       AUTOLOCK(lock, &mu_);
       switch (state_) {
@@ -313,7 +318,7 @@ class CompileTask::InputFileTask {
         case DONE:
           VLOG(1) << task->trace_id() << " input done";
           wm_->RunClosureInThread(FROM_HERE, thread_id, closure,
-                                  WorkerThreadManager::PRIORITY_LOW);
+                                  WorkerThread::PRIORITY_LOW);
           return;
       }
     }
@@ -434,7 +439,7 @@ class CompileTask::InputFileTask {
       VLOG(1) << task->trace_id() << " (" << num_tasks() << " tasks)"
               << " clear task by filename" << filename_;
     }
-    std::vector<std::pair<WorkerThreadManager::ThreadId,
+    std::vector<std::pair<WorkerThread::ThreadId,
                           OneshotClosure*>> callbacks;
 
     {
@@ -444,11 +449,11 @@ class CompileTask::InputFileTask {
       callbacks.swap(callbacks_);
     }
     wm_->RunClosureInThread(FROM_HERE, thread_id, closure,
-                            WorkerThreadManager::PRIORITY_LOW);
+                            WorkerThread::PRIORITY_LOW);
     for (const auto& callback : callbacks)
       wm_->RunClosureInThread(FROM_HERE,
                               callback.first, callback.second,
-                              WorkerThreadManager::PRIORITY_LOW);
+                              WorkerThread::PRIORITY_LOW);
   }
 
   void Done(CompileTask* task) {
@@ -469,7 +474,9 @@ class CompileTask::InputFileTask {
   const string& filename() const { return filename_; }
   bool missed_content() const { return missed_content_; }
   bool need_hash_only() const { return need_hash_only_; }
-  time_t mtime() const { return file_stat_.mtime; }
+  const absl::optional<absl::Time>& mtime() const {
+    return file_stat_.mtime;
+  }
   const SimpleTimer& timer() const { return timer_; }
   ssize_t file_size() const { return file_stat_.size; }
   const string& old_hash_key() const { return old_hash_key_; }
@@ -605,7 +612,7 @@ class CompileTask::InputFileTask {
 
   mutable Lock mu_;
   std::map<CompileTask*, ExecReq_Input*> tasks_ GUARDED_BY(mu_);
-  std::vector<std::pair<WorkerThreadManager::ThreadId, OneshotClosure*>>
+  std::vector<std::pair<WorkerThread::ThreadId, OneshotClosure*>>
       callbacks_ GUARDED_BY(mu_);
 
   // true if goma servers couldn't find the content, so we must upload it.
@@ -656,6 +663,7 @@ bool IsOutputFileEmbedded(const ExecResult& result) {
   return true;
 }
 
+// TODO: move to BlobClient::Downloader?
 struct CompileTask::OutputFileInfo {
   OutputFileInfo() : mode(0666), size(0) {}
   // actual output filename.
@@ -674,6 +682,7 @@ struct CompileTask::OutputFileInfo {
 
   // hash_key is hash of output filename. It will be stored in file hash cache
   // once output file is committed.
+  // TODO: fix this to support cas digest.
   string hash_key;
 
   // content is output content.
@@ -684,17 +693,16 @@ struct CompileTask::OutputFileInfo {
 
 class CompileTask::OutputFileTask {
  public:
-  // Takes ownership of |file_service|.
   // Doesn't take ownership of |info|.
   OutputFileTask(WorkerThreadManager* wm,
-                 std::unique_ptr<FileServiceHttpClient> file_service,
+                 std::unique_ptr<BlobClient::Downloader> blob_downloader,
                  CompileTask* task,
                  int output_index,
                  const ExecResult_Output& output,
                  OutputFileInfo* info)
       : wm_(wm),
         thread_id_(wm->GetCurrentThreadId()),
-        file_service_(std::move(file_service)),
+        blob_downloader_(std::move(blob_downloader)),
         task_(task),
         output_index_(output_index),
         output_(output),
@@ -710,10 +718,15 @@ class CompileTask::OutputFileTask {
 
   void Run(OneshotClosure* closure) {
     VLOG(1) << task_->trace_id() << " output " << info_->filename;
-    std::unique_ptr<FileServiceClient::Output> dest(OpenOutput());
-    // TODO: We might want to restrict paths this program may write?
-    success_ = file_service_->OutputFileBlob(output_.blob(), dest.get());
+    if (info_->tmp_filename.empty()) {
+      success_ = blob_downloader_->DownloadInBuffer(output_, &info_->content);
+    } else {
+      // TODO: We might want to restrict paths this program may write?
+      success_ =
+          blob_downloader_->Download(output_, info_->tmp_filename, info_->mode);
+    }
     if (success_) {
+      // TODO: fix to support cas digest.
       info_->hash_key = FileServiceClient::ComputeHashKey(output_.blob());
     } else {
       LOG(WARNING) << task_->trace_id()
@@ -721,7 +734,7 @@ class CompileTask::OutputFileTask {
                    << " output file failed:" << info_->filename;
     }
     wm_->RunClosureInThread(FROM_HERE, thread_id_, closure,
-                            WorkerThreadManager::PRIORITY_LOW);
+                            WorkerThread::PRIORITY_LOW);
   }
 
   CompileTask* task() const { return task_; }
@@ -733,24 +746,18 @@ class CompileTask::OutputFileTask {
   }
 
   int num_rpc() const {
-    return file_service_->num_rpc();
+    // TODO: need this?
+    return blob_downloader_->num_rpc();
   }
-  const HttpRPC::Status& http_rpc_status() const {
-    return file_service_->http_rpc_status();
+  const HttpClient::Status& http_status() const {
+    // TODO: blob_uploader should support this API?
+    return blob_downloader_->http_status();
   }
 
  private:
-  std::unique_ptr<FileServiceClient::Output> OpenOutput() {
-    if (info_->tmp_filename.empty()) {
-      return FileServiceClient::StringOutput(info_->filename, &info_->content);
-    }
-    remove(info_->tmp_filename.c_str());
-    return FileServiceClient::FileOutput(info_->tmp_filename, info_->mode);
-  }
-
   WorkerThreadManager* wm_;
-  WorkerThreadManager::ThreadId thread_id_;
-  std::unique_ptr<FileServiceHttpClient> file_service_;
+  WorkerThread::ThreadId thread_id_;
+  std::unique_ptr<BlobClient::Downloader> blob_downloader_;
   CompileTask* task_;
   int output_index_;
   const ExecResult_Output& output_;
@@ -765,14 +772,14 @@ class CompileTask::OutputFileTask {
 class CompileTask::LocalOutputFileTask {
  public:
   LocalOutputFileTask(WorkerThreadManager* wm,
-                      std::unique_ptr<FileServiceClient> file_service,
+                      std::unique_ptr<BlobClient::Uploader> blob_uploader,
                       FileHashCache* file_hash_cache,
                       const FileStat& file_stat,
                       CompileTask* task,
                       string filename)
       : wm_(wm),
         thread_id_(wm_->GetCurrentThreadId()),
-        file_service_(std::move(file_service)),
+        blob_uploader_(std::move(blob_uploader)),
         file_hash_cache_(file_hash_cache),
         file_stat_(file_stat),
         task_(task),
@@ -788,18 +795,16 @@ class CompileTask::LocalOutputFileTask {
   void Run(OneshotClosure* closure) {
     // Store hash_key of output file.  This file would be used in link phase.
     VLOG(1) << task_->trace_id() << " local output " << filename_;
-    success_ = file_service_->CreateFileBlob(
-        filename_, true, &blob_);
+    success_ = blob_uploader_->Upload();
     if (success_) {
-      CHECK(FileServiceClient::IsValidFileBlob(blob_)) << filename_;
-      string hash_key = FileServiceClient::ComputeHashKey(blob_);
+      string hash_key = blob_uploader_->hash_key();
       bool new_cache_key = file_hash_cache_->StoreFileCacheKey(
           filename_, hash_key, absl::Now(), file_stat_);
       if (new_cache_key) {
         LOG(INFO) << task_->trace_id()
                   << " local output store:" << filename_
-                  << " size=" << blob_.file_size();
-        success_ = file_service_->StoreFileBlob(blob_);
+                  << " size=" << file_stat_.size;
+        success_ = blob_uploader_->Store();
       }
     }
     if (!success_) {
@@ -807,24 +812,23 @@ class CompileTask::LocalOutputFileTask {
                    << " local output read failed:" << filename_;
     }
     wm_->RunClosureInThread(FROM_HERE, thread_id_, closure,
-                            WorkerThreadManager::PRIORITY_LOW);
+                            WorkerThread::PRIORITY_LOW);
   }
 
   CompileTask* task() const { return task_; }
   const string& filename() const { return filename_; }
-  const FileBlob& blob() const { return blob_; }
   const SimpleTimer& timer() const { return timer_; }
+  const FileStat& file_stat() const { return file_stat_; }
   bool success() const { return success_; }
 
  private:
   WorkerThreadManager* wm_;
-  WorkerThreadManager::ThreadId thread_id_;
-  std::unique_ptr<FileServiceClient> file_service_;
+  WorkerThread::ThreadId thread_id_;
+  std::unique_ptr<BlobClient::Uploader> blob_uploader_;
   FileHashCache* file_hash_cache_;
   const FileStat file_stat_;
   CompileTask* task_;
   const string filename_;
-  FileBlob blob_;
   SimpleTimer timer_;
   bool success_;
 
@@ -844,7 +848,7 @@ CompileTask::CompileTask(CompileService* service, int id)
       caller_thread_id_(service->wm()->GetCurrentThreadId()),
       done_(nullptr),
       stats_(new CompileStats),
-      responsecode_(0),
+      response_code_(0),
       state_(INIT),
       abort_(false),
       finished_(false),
@@ -856,6 +860,7 @@ CompileTask::CompileTask(CompileService* service, int id)
       canceled_(false),
       resp_(new ExecResp),
       exit_status_(0),
+      http_rpc_status_(absl::make_unique<HttpRPC::Status>()),
       delayed_setup_subproc_(nullptr),
       subproc_(nullptr),
       subproc_weight_(SubProcessReq::LIGHT_WEIGHT),
@@ -868,6 +873,7 @@ CompileTask::CompileTask(CompileService* service, int id)
       local_killed_(false),
       depscache_used_(false),
       gomacc_revision_mismatched_(false),
+      replied_(false),
       input_file_callback_(nullptr),
       num_input_file_task_(0),
       input_file_success_(false),
@@ -884,9 +890,7 @@ CompileTask::CompileTask(CompileService* service, int id)
   ss << "Task:" << id_;
   trace_id_ = ss.str();
 
-  time_t start_time;
-  time(&start_time);
-  stats_->set_start_time(start_time);
+  stats_->set_start_time(absl::ToTimeT(absl::Now()));
   stats_->set_compiler_proxy_user_agent(kUserAgentString);
 }
 
@@ -907,7 +911,7 @@ void CompileTask::Deref() {
 }
 
 void CompileTask::Init(CompileService::RpcController* rpc,
-                       const ExecReq* req,
+                       const ExecReq& req,
                        ExecResp* resp,
                        OneshotClosure* done) {
   VLOG(1) << trace_id_ << " init";
@@ -917,17 +921,19 @@ void CompileTask::Init(CompileService::RpcController* rpc,
   rpc_ = rpc;
   rpc_resp_ = resp;
   done_ = done;
-  *req_ = *req;
+  *req_ = req;
 #ifdef _WIN32
-  pathext_ = GetEnvFromEnvIter(req->env().begin(), req->env().end(),
-                               "PATHEXT", true);
+  pathext_ = GetEnvFromEnvIter(req.env().begin(), req.env().end(), "PATHEXT",
+                               true);
 #endif
 }
 
 void CompileTask::Start() {
   VLOG(1) << trace_id_ << " start";
   CHECK_EQ(INIT, state_);
-  stats_->set_pending_time(handler_timer_.GetInIntMilliseconds());
+  const absl::Duration pending_time = handler_timer_.GetDuration();
+  stats_->set_pending_time(DurationToIntMs(pending_time));
+  stats_->pending_time = pending_time;
 
   // We switched to new thread.
   DCHECK(!BelongsToCurrentThread());
@@ -960,7 +966,7 @@ void CompileTask::Start() {
     ProcessFinished("Unsupported command");
     return;
   }
-  if (!IsLocalCompilerPathValid(trace_id_, *req_, flags_.get())) {
+  if (!IsLocalCompilerPathValid(trace_id_, *req_, flags_->compiler_name())) {
     LOG(ERROR) << trace_id_ << " Start error: invalid local compiler."
                << " path=" << req_->command_spec().local_compiler_path();
     AddErrorToResponse(TO_USER, "Invalid command", true);
@@ -1086,8 +1092,8 @@ void CompileTask::Start() {
     if (service_->local_run_for_failed_input()) {
       is_failed_input = service_->ContainFailedInput(flags_->input_filenames());
     }
-    int delay_subproc_ms =
-        absl::ToInt64Milliseconds(service_->GetEstimatedSubprocessDelayTime());
+    const absl::Duration subproc_delay =
+        service_->GetEstimatedSubprocessDelayTime();
     if (num_pending_subprocs == 0) {
       stats_->set_local_run_reason("local idle");
       SetupSubProcess();
@@ -1095,7 +1101,7 @@ void CompileTask::Start() {
       stats_->set_local_run_reason("previous failed");
       SetupSubProcess();
       // TODO: RunSubProcess to run it soon?
-    } else if (delay_subproc_ms <= 0) {
+    } else if (subproc_delay <= absl::ZeroDuration()) {
       stats_->set_local_run_reason("slow goma");
       SetupSubProcess();
     } else if (!service_->http_client()->IsHealthyRecently()) {
@@ -1103,14 +1109,15 @@ void CompileTask::Start() {
       SetupSubProcess();
     } else {
       stats_->set_local_run_reason("should not run while delaying subproc");
-      stats_->set_local_delay_time(delay_subproc_ms);
-      VLOG(1) << trace_id_ << " delay subproc " << delay_subproc_ms << "msec";
+      stats_->set_local_delay_time(absl::ToInt64Milliseconds(subproc_delay));
+      stats_->local_delay_time = subproc_delay;
+      VLOG(1) << trace_id_ << " subproc_delay=" << subproc_delay;
       DCHECK(delayed_setup_subproc_ == nullptr) << trace_id_ << " subproc";
       delayed_setup_subproc_ =
           service_->wm()->RunDelayedClosureInThread(
               FROM_HERE,
               thread_id_,
-              delay_subproc_ms,
+              subproc_delay,
               NewCallback(
                   this,
                   &CompileTask::SetupSubProcess));
@@ -1157,9 +1164,9 @@ bool CompileTask::IsGomaccRunning() {
                               gomacc_pid_));
     running = proc.valid();
   }
-  int ms = timer.GetInIntMilliseconds();
-  LOG_IF(WARNING, ms > 100) << trace_id_
-                            << " SLOW IsGomaccRunning in " << ms << " msec";
+  const absl::Duration duration = timer.GetDuration();
+  LOG_IF(WARNING, duration > absl::Milliseconds(100))
+        << trace_id_ << " SLOW IsGomaccRunning in " << duration;
   if (!running) {
     gomacc_pid_ = SubProcessState::kInvalidPid;
   }
@@ -1223,8 +1230,11 @@ void CompileTask::ProcessFileRequest() {
   // FILE_RESP: failed with missing inputs, and retry
   CHECK(state_ == SETUP || state_ == FILE_REQ || state_ == FILE_RESP)
       << trace_id_ << " " << StateName(state_);
+  const absl::Duration fileload_pending_time =
+      file_request_timer_.GetDuration();
+  stats_->include_fileload_pending_time += fileload_pending_time;
   stats_->add_include_fileload_pending_time(
-      file_request_timer_.GetInIntMilliseconds());
+      DurationToIntMs(fileload_pending_time));
   file_request_timer_.Start();
   if (abort_) {
     ProcessPendingFileRequest();
@@ -1261,7 +1271,7 @@ void CompileTask::ProcessFileRequest() {
   interleave_uploaded_files_.clear();
   SetInputFileCallback();
   std::vector<OneshotClosure*> closures;
-  time_t now = time(nullptr);
+  const absl::Time now = absl::Now();
   stats_->set_num_total_input_file(required_files_.size());
 
   for (const string& filename : required_files_) {
@@ -1271,7 +1281,7 @@ void CompileTask::ProcessFileRequest() {
         file::JoinPathRespectAbsolute(flags_->cwd(), filename);
     bool missed_content =
         missed_content_files.find(filename) != missed_content_files.end();
-    time_t mtime = 0;
+    absl::optional<absl::Time> mtime;
     string hash_key;
     bool hash_key_is_ok = false;
     absl::optional<absl::Time> missed_timestamp;
@@ -1300,9 +1310,9 @@ void CompileTask::ProcessFileRequest() {
     // the timestamp of file upload and execution to identify this condition.
     // If upload time is later than execution time (last_req_timestamp_),
     // we can assume the file is uploaded by others.
-    const FileStat& input_file_stat = input_file_stat_cache_->Get(abs_filename);
+    const FileStat input_file_stat = input_file_stat_cache_->Get(abs_filename);
     if (input_file_stat.IsValid()) {
-      mtime = input_file_stat.mtime;
+      mtime = *input_file_stat.mtime;
     }
     hash_key_is_ok = service_->file_hash_cache()->GetFileCacheKey(
         abs_filename, missed_timestamp, input_file_stat, &hash_key);
@@ -1316,9 +1326,10 @@ void CompileTask::ProcessFileRequest() {
         LOG(INFO) << trace_id_ << " missed content:" << abs_filename;
       }
     }
-    if (mtime > stats_->latest_input_mtime()) {
+    if (mtime.has_value() &&
+        *mtime > absl::FromTimeT(stats_->latest_input_mtime())) {
       stats_->set_latest_input_filename(abs_filename);
-      stats_->set_latest_input_mtime(mtime);
+      stats_->set_latest_input_mtime(absl::ToTimeT(*mtime));
     }
     if (hash_key_is_ok) {
       input->set_hash_key(hash_key);
@@ -1329,15 +1340,15 @@ void CompileTask::ProcessFileRequest() {
     VLOG(1) << trace_id_ << " input file:" << abs_filename
             << (linking_ ? " [linking]" : "");
     bool is_new_file = false;
-    if (mtime > 0) {
+    if (mtime.has_value()) {
       if (linking_) {
         // For linking, we assume input files is old if it is older than
         // compiler_proxy start time. (i.e. it would be built in previous
         // build session, so that the files were generated by goma backends
         // or uploaded by previous compiler_proxy.
-        is_new_file = mtime > absl::ToTimeT(service_->start_time());
+        is_new_file = *mtime > service_->start_time();
       } else {
-        is_new_file = ((now - mtime) < service_->new_file_threshold());
+        is_new_file = (now - *mtime < service_->new_file_threshold_duration());
       }
     }
     // If need_to_send_content is set to true, we consider all file is new file.
@@ -1372,22 +1383,25 @@ void CompileTask::ProcessFileRequest() {
   }
   for (auto* closure : closures)
     service_->wm()->RunClosure(
-        FROM_HERE, closure, WorkerThreadManager::PRIORITY_LOW);
+        FROM_HERE, closure, WorkerThread::PRIORITY_LOW);
 }
 
 void CompileTask::ProcessFileRequestDone() {
   VLOG(1) << trace_id_ << " file req done";
   CHECK(BelongsToCurrentThread());
   CHECK_EQ(FILE_REQ, state_);
-  stats_->add_include_fileload_run_time(
-      file_request_timer_.GetInIntMilliseconds());
-  stats_->set_include_fileload_time(include_timer_.GetInIntMilliseconds() -
-                                    stats_->include_preprocess_time());
+  const absl::Duration fileload_run_time = file_request_timer_.GetDuration();
+  stats_->add_include_fileload_run_time(DurationToIntMs(fileload_run_time));
+  stats_->include_fileload_run_time += fileload_run_time;
+
+  const absl::Duration include_fileload_time =
+      include_timer_.GetDuration() - stats_->include_preprocess_time;
+  stats_->include_fileload_time = include_fileload_time;
 
   VLOG(1) << trace_id_
           << " input files processing preprocess "
-          << stats_->include_preprocess_time() << "ms"
-          << ", loading " << stats_->include_fileload_time() << "ms";
+          << stats_->include_preprocess_time
+          << ", loading " << stats_->include_fileload_time;
 
   ProcessPendingFileRequest();
 
@@ -1424,7 +1438,7 @@ void CompileTask::ProcessFileRequestDone() {
             FROM_HERE,
             thread_id_,
             NewCallback(this, &CompileTask::TryProcessFileRequest),
-            WorkerThreadManager::PRIORITY_LOW);
+            WorkerThread::PRIORITY_LOW);
         return;
       }
     }
@@ -1484,7 +1498,7 @@ void CompileTask::ProcessPendingFileRequest() {
         FROM_HERE,
         pending_task->thread_id_,
         NewCallback(pending_task, &CompileTask::ProcessFileRequest),
-        WorkerThreadManager::PRIORITY_LOW);
+        WorkerThread::PRIORITY_LOW);
   }
 }
 
@@ -1516,9 +1530,7 @@ void CompileTask::ProcessCallExec() {
     http_rpc_status_->trace_id = trace_id_;
     const auto& timeouts = service_->timeouts();
     for (const auto& timeout : timeouts) {
-      // TODO: convert |http_rpc_status_| to absl::Duration.
-      http_rpc_status_->timeout_secs.push_back(
-          absl::ToInt64Milliseconds(timeout));
+      http_rpc_status_->timeouts.push_back(timeout);
     }
   }
 
@@ -1556,24 +1568,12 @@ void CompileTask::ProcessCallExecDone() {
   // server error message logged, but not send back to user.
   resp_->clear_error_message();
 
-  stats_->add_rpc_call_time(rpc_call_timer_.GetInIntMilliseconds());
+  const absl::Duration rpc_call_timer_duration = rpc_call_timer_.GetDuration();
+  stats_->add_rpc_call_time(DurationToIntMs(rpc_call_timer_duration));
+  stats_->total_rpc_call_time += rpc_call_timer_duration;
 
-  if (http_rpc_status_->master_trace_id.empty() ||
-      http_rpc_status_->master_trace_id == http_rpc_status_->trace_id) {
-    stats_->add_rpc_req_size(http_rpc_status_->req_size);
-    stats_->add_rpc_resp_size(http_rpc_status_->resp_size);
-    stats_->add_rpc_raw_req_size(http_rpc_status_->raw_req_size);
-    stats_->add_rpc_raw_resp_size(http_rpc_status_->raw_resp_size);
-    stats_->add_rpc_throttle_time(http_rpc_status_->throttle_time);
-    stats_->add_rpc_pending_time(http_rpc_status_->pending_time);
-    stats_->add_rpc_req_build_time(http_rpc_status_->req_build_time);
-    stats_->add_rpc_req_send_time(http_rpc_status_->req_send_time);
-    stats_->add_rpc_wait_time(http_rpc_status_->wait_time);
-    stats_->add_rpc_resp_recv_time(http_rpc_status_->resp_recv_time);
-    stats_->add_rpc_resp_parse_time(http_rpc_status_->resp_parse_time);
-  }
-  stats_->add_rpc_master_trace_id(http_rpc_status_->master_trace_id);
-
+  stats_->AddStatsFromHttpStatus(*http_rpc_status_);
+  stats_->AddStatsFromExecResp(*resp_);
 
   stats_->set_cache_hit(resp_->cache_hit() == ExecResp::LOCAL_OUTPUT_CACHE ||
                         (http_rpc_status_->finished && resp_->has_cache_hit() &&
@@ -1708,7 +1708,7 @@ void CompileTask::ProcessCallExecDone() {
             FROM_HERE,
             thread_id_,
             NewCallback(this, &CompileTask::ProcessCallExec),
-            WorkerThreadManager::PRIORITY_LOW);
+            WorkerThread::PRIORITY_LOW);
         return;
       }
       if (service_->should_fail_for_unsupported_compiler_flag() &&
@@ -1915,13 +1915,10 @@ void CompileTask::ProcessFileResponse() {
               << " filename=" << filename
               << " mode=" << std::oct << output_info->mode;
     }
-    std::unique_ptr<OutputFileTask> output_file_task(
-        new OutputFileTask(
-            service_->wm(),
-            service_->file_service()->WithRequesterInfoAndTraceId(
-                requester_info_, trace_id_),
-            this, i, resp_->result().output(i),
-            output_info));
+    std::unique_ptr<OutputFileTask> output_file_task(new OutputFileTask(
+        service_->wm(),
+        service_->blob_client()->NewDownloader(requester_info_, trace_id_),
+        this, i, resp_->result().output(i), output_info));
 
     OutputFileTask* output_file_task_pointer = output_file_task.get();
     closures.push_back(
@@ -1939,7 +1936,7 @@ void CompileTask::ProcessFileResponse() {
   } else {
     for (auto* closure : closures) {
       service_->wm()->RunClosure(
-          FROM_HERE, closure, WorkerThreadManager::PRIORITY_LOW);
+          FROM_HERE, closure, WorkerThread::PRIORITY_LOW);
     }
   }
 }
@@ -1949,7 +1946,9 @@ void CompileTask::ProcessFileResponseDone() {
   CHECK(BelongsToCurrentThread());
   CHECK_EQ(FILE_RESP, state_);
 
-  stats_->set_file_response_time(file_response_timer_.GetInIntMilliseconds());
+  const absl::Duration file_response_time = file_response_timer_.GetDuration();
+  stats_->file_response_time += file_response_time;
+  stats_->set_file_response_time(DurationToIntMs(file_response_time));
 
   if (abort_) {
     ProcessFinished("aborted in file resp");
@@ -2455,6 +2454,7 @@ void CompileTask::CommitOutput(bool use_remote) {
     SimpleTimer timer;
     const string& filename = info.filename;
     const string& tmp_filename = info.tmp_filename;
+    // TODO: fix to support cas digest.
     const string& hash_key = info.hash_key;
     DCHECK(!hash_key.empty()) << filename;
     const bool use_content = tmp_filename.empty();
@@ -2546,11 +2546,12 @@ void CompileTask::CommitOutput(bool use_remote) {
             << " " << hash_key;
     LOG_IF(ERROR, !info.content.empty())
         << trace_id_ << " content was not released: " << filename;
-    int ms = timer.GetInIntMilliseconds();
-    LOG_IF(WARNING, ms > 100) << trace_id_
-                              << " CommitOutput " << ms << " msec"
-                              << " size=" << info.size
-                              << " filename=" << info.filename;
+    const absl::Duration duration = timer.GetDuration();
+    LOG_IF(WARNING, duration > absl::Milliseconds(100))
+          << trace_id_
+          << " CommitOutput " << duration
+          << " size=" << info.size
+          << " filename=" << info.filename;
     absl::string_view output_base = file::Basename(info.filename);
     output_bases.push_back(string(output_base));
     absl::string_view ext = file::Extension(output_base);
@@ -2590,14 +2591,9 @@ void CompileTask::ReplyResponse(const string& msg) {
 
   if (failed() || fail_fallback_) {
     auto allowed_error_duration = service_->AllowedNetworkErrorDuration();
-    time_t error_start_time =
-        service_->http_client()->NetworkErrorStartedTime();
-    if (allowed_error_duration.has_value() && error_start_time > 0) {
-      time_t now = time(nullptr);
-      // TODO: Convert to absl::Duration.
-      const int allowed_error_duration_sec =
-          absl::ToInt64Seconds(*allowed_error_duration);
-      if (now > error_start_time + allowed_error_duration_sec) {
+    auto error_start_time = service_->http_client()->NetworkErrorStartedTime();
+    if (allowed_error_duration.has_value() && error_start_time.has_value()) {
+      if (absl::Now() > *error_start_time + *allowed_error_duration) {
         AddErrorToResponse(
             TO_USER, "network error continued for a long time", true);
       }
@@ -2635,7 +2631,7 @@ void CompileTask::ReplyResponse(const string& msg) {
   if (done) {
     service_->wm()->RunClosureInThread(
         FROM_HERE,
-        caller_thread_id_, done, WorkerThreadManager::PRIORITY_IMMEDIATE);
+        caller_thread_id_, done, WorkerThread::PRIORITY_IMMEDIATE);
   }
   if (!canceled_ && stats_->exec_exit_status() != 0) {
     if (exit_status_ == 0 && subproc_exit_status_ == 0) {
@@ -2644,12 +2640,20 @@ void CompileTask::ReplyResponse(const string& msg) {
                  << "due to compiler_proxy error.";
     }
   }
-  responsecode_ = 200;
-  stats_->set_handler_time(handler_timer_.GetInIntMilliseconds());
+
+  // The caching of the HTTP return code in |response_code_| might not be
+  // required, but let's keep it to be safe. If we directly wrote
+  // |http_rpc_status_->http_return_code| to the JSON output in DumpToJson(), it
+  // will probably work. However, there is no guarantee that http_rpc_status_
+  // won't be overwritten by a new call to ProcessCallExec() before calling
+  // DumpToJson().
+  response_code_ = http_rpc_status_->http_return_code;
+
+  stats_->handler_time = handler_timer_.GetDuration();
+  stats_->set_handler_time(DurationToIntMs(stats_->handler_time));
   gomacc_pid_ = SubProcessState::kInvalidPid;
 
-  static const int kSlowTaskInMs = 5 * 60 * 1000;  // 5 mins
-  if (stats_->handler_time() > kSlowTaskInMs) {
+  if (stats_->handler_time > absl::Minutes(5)) {
     ExecLog stats = *stats_;
     // clear non-stats fields.
     stats.clear_username();
@@ -2709,8 +2713,8 @@ void CompileTask::ProcessLocalFileOutput() {
     std::unique_ptr<LocalOutputFileTask> local_output_file_task(
         new LocalOutputFileTask(
             service_->wm(),
-            service_->file_service()->WithRequesterInfoAndTraceId(
-                requester_info_, trace_id_),
+            service_->blob_client()->NewUploader(
+                filename, requester_info_, trace_id_),
             service_->file_hash_cache(), output_file_stat_cache_->Get(filename),
             this, filename));
 
@@ -2734,12 +2738,12 @@ void CompileTask::ProcessLocalFileOutput() {
         NewCallback(
             this,
             &CompileTask::MaybeRunLocalOutputFileCallback, false),
-        WorkerThreadManager::PRIORITY_LOW);
+        WorkerThread::PRIORITY_LOW);
     return;
   }
   for (auto* closure : closures)
     service_->wm()->RunClosure(
-        FROM_HERE, closure, WorkerThreadManager::PRIORITY_LOW);
+        FROM_HERE, closure, WorkerThread::PRIORITY_LOW);
 }
 
 void CompileTask::ProcessLocalFileOutputDone() {
@@ -2762,6 +2766,7 @@ void CompileTask::Done() {
   // FINISHED: normal case.
   // LOCAL_FINISHED: fallback by should_fallback_.
   // abort_: idle fallback.
+  replied_ = true;
   if (!abort_)
     CHECK_GE(state_, FINISHED);
   CHECK(rpc_ == nullptr) << trace_id_
@@ -2799,21 +2804,21 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
     }
   }
 
+  stats_->DumpToJson(root,
+                     need_detail ? CompileStats::DumpDetailLevel::kDetailed
+                                 : CompileStats::DumpDetailLevel::kNotDetailed);
+
   (*root)["id"] = id_;
 
   if ((state_ < FINISHED && !abort_) || state_ == LOCAL_RUN) {
-    // elapsed total time for current running process.
-    (*root)["elapsed"] = handler_timer_.GetInIntMilliseconds();
+    // Elapsed total time for current running process.
+    // This field needs to be strictly in milliseconds so that it can be sorted.
+    (*root)["elapsed"] =
+        FormatDurationInMilliseconds(handler_timer_.GetDuration());
   }
-  if (stats_->handler_time()) (*root)["time"] = stats_->handler_time();
   if (gomacc_pid_ != SubProcessState::kInvalidPid)
     (*root)["pid"] = gomacc_pid_;
   if (!flag_dump_.empty()) (*root)["flag"] = flag_dump_;
-  if (local_cache_hit()) {
-    (*root)["cache"] = "local hit";
-  } else if (stats_->cache_hit()) {
-    (*root)["cache"] = "hit";
-  }
   (*root)["state"] = StateName(state_);
   if (abort_) (*root)["abort"] = 1;
   if (subproc_pid != static_cast<pid_t>(SubProcessState::kInvalidPid)) {
@@ -2821,34 +2826,13 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
         SubProcessState::State_Name(subproc_state);
     (*root)["subproc_pid"] = Json::Value::Int64(subproc_pid);
   }
-  string major_factor_str = stats_->major_factor();
-  if (!major_factor_str.empty())
-    (*root)["major_factor"] = major_factor_str;
-  if (stats_->has_exec_command_version_mismatch()) {
-    (*root)["command_version_mismatch"] =
-        stats_->exec_command_version_mismatch();
-  }
-  if (stats_->has_exec_command_binary_hash_mismatch()) {
-    (*root)["command_binary_hash_mismatch"] =
-        stats_->exec_command_binary_hash_mismatch();
-  }
-  if (stats_->has_exec_command_subprograms_mismatch()) {
-    (*root)["command_subprograms_mismatch"] =
-        stats_->exec_command_subprograms_mismatch();
-  }
   // for task color.
-  if (responsecode_) (*root)["http"] = responsecode_;
-  if (stats_->exec_exit_status())
-    (*root)["exit"] = stats_->exec_exit_status();
-  if (stats_->exec_request_retry())
-    (*root)["retry"] = stats_->exec_request_retry();
+  if (response_code_) (*root)["http"] = response_code_;
   if (fail_fallback_) (*root)["fail_fallback"]= 1;
-  if (stats_->goma_error())
-    (*root)["goma_error"] = 1;
-  if (stats_->compiler_proxy_error())
-    (*root)["compiler_proxy_error"] = 1;
   if (canceled_)
     (*root)["canceled"] = 1;
+  if (replied_)
+    (*root)["replied"] = 1;
 
   // additional message
   if (gomacc_revision_mismatched_) {
@@ -2856,188 +2840,16 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
   }
 
   if (need_detail) {
-    struct tm local_start_time;
-    char timebuf[64];
-    const time_t start_time = static_cast<time_t>(stats_->start_time());
-#ifndef _WIN32
-    localtime_r(&start_time, &local_start_time);
-    strftime(timebuf, sizeof timebuf, "%Y-%m-%d %H:%M:%S %z",
-             &local_start_time);
-#else
-    localtime_s(&local_start_time, &start_time);
-    strftime(timebuf, sizeof timebuf, "%Y-%m-%d %H:%M:%S ",
-             &local_start_time);
-    long tzoff = 0;
-    _get_timezone(&tzoff);
-    char tzsign = tzoff >= 0 ? '-' : '+';
-    tzoff = abs(tzoff);
-    sprintf_s(timebuf + strlen(timebuf), sizeof timebuf - strlen(timebuf),
-              "%c%02d%02d",
-              tzsign, tzoff / 3600, (tzoff % 3600) / 60);
-#endif
-    (*root)["start_time"] = timebuf;
-
-    if (stats_->has_latest_input_filename()) {
-      (*root)["latest_input_filename"] =
-          stats_->latest_input_filename();
-    }
-    if (stats_->has_latest_input_mtime()) {
-      (*root)["input_wait"] =
-          stats_->start_time() - stats_->latest_input_mtime();
-    }
-
-    if (stats_->num_total_input_file())
-      (*root)["total_input"] = stats_->num_total_input_file();
-    if (stats_->num_uploading_input_file_size() > 0) {
-      (*root)["uploading_input"] = Json::Value::Int64(
-          SumRepeatedInt32(stats_->num_uploading_input_file()));
-    }
     if (num_input_file_task_ > 0) {
       (*root)["num_input_file_task"] = num_input_file_task_;
     }
-    if (stats_->num_missing_input_file_size() > 0) {
-      (*root)["missing_input"] = Json::Value::Int64(
-          SumRepeatedInt32(stats_->num_missing_input_file()));
-    }
-    if (stats_->compiler_info_process_time()) {
-      (*root)["compiler_info_process_time"] =
-          stats_->compiler_info_process_time();
-    }
-    // When depscache_used() is true, we ran include_preprocessor but its
-    // processing time was 0ms. So, we'd like to show it.
-    if (stats_->include_preprocess_time() || stats_->depscache_used()) {
-      (*root)["include_preprocess_time"] = stats_->include_preprocess_time();
-    }
-    if (stats_->depscache_used()) {
-      (*root)["depscache_used"] =
-          (stats_->depscache_used() ? "true" : "false");
-    }
-    if (stats_->include_fileload_time()) {
-      (*root)["include_fileload_time"] = stats_->include_fileload_time();
-    }
-    if (stats_->include_fileload_pending_time_size()) {
-      int64_t sum = SumRepeatedInt32(stats_->include_fileload_pending_time());
-      if (sum) {
-        (*root)["include_fileload_pending_time"] = Json::Value::Int64(sum);
-      }
-    }
-    if (stats_->include_fileload_run_time_size()) {
-      int64_t sum = SumRepeatedInt32(stats_->include_fileload_run_time());
-      if (sum) {
-        (*root)["include_fileload_run_time"] = Json::Value::Int64(sum);
-      }
-    }
-    if (stats_->rpc_call_time_size()) {
-      (*root)["rpc_call_time"] = Json::Value::Int64(
-          SumRepeatedInt32(stats_->rpc_call_time()));
-    }
-    if (stats_->file_response_time())
-      (*root)["file_response_time"] = stats_->file_response_time();
-    if (stats_->gomacc_req_size)
-      (*root)["gomacc_req_size"] = Json::Value::Int64(stats_->gomacc_req_size);
-    if (stats_->gomacc_resp_size)
-      (*root)["gomacc_resp_size"] =
-          Json::Value::Int64(stats_->gomacc_resp_size);
     {
       AUTOLOCK(lock, &mu_);
-      if (http_rpc_status_.get()) {
-        if (!http_rpc_status_->response_header.empty()) {
-          (*root)["response_header"] =
-              http_rpc_status_->response_header;
-        }
+      if (!http_rpc_status_->response_header.empty()) {
+        (*root)["response_header"] = http_rpc_status_->response_header;
       }
     }
-    if (stats_->rpc_req_size_size() > 0) {
-      (*root)["exec_req_size"] =
-          Json::Value::Int64(SumRepeatedInt32(stats_->rpc_req_size()));
-    }
-    if (stats_->rpc_master_trace_id_size() > 0) {
-      string masters = absl::StrJoin(stats_->rpc_master_trace_id(), " ");
-      (*root)["exec_rpc_master"] = masters;
-    }
-    if (stats_->rpc_throttle_time_size() > 0) {
-      (*root)["exec_throttle_time"] =
-          Json::Value::Int64(SumRepeatedInt32(stats_->rpc_throttle_time()));
-    }
-    if (stats_->rpc_pending_time_size() > 0) {
-      (*root)["exec_pending_time"] =
-          Json::Value::Int64(SumRepeatedInt32(stats_->rpc_pending_time()));
-    }
-    if (stats_->rpc_req_build_time_size() > 0) {
-      (*root)["exec_req_build_time"] =
-          Json::Value::Int64(SumRepeatedInt32(stats_->rpc_req_build_time()));
-    }
-    if (stats_->rpc_req_send_time_size() > 0) {
-      (*root)["exec_req_send_time"] =
-          Json::Value::Int64(SumRepeatedInt32(stats_->rpc_req_send_time()));
-    }
-    if (stats_->rpc_wait_time_size() > 0) {
-      (*root)["exec_wait_time"] =
-          Json::Value::Int64(SumRepeatedInt32(stats_->rpc_wait_time()));
-    }
-    if (stats_->rpc_resp_size_size() > 0) {
-      (*root)["exec_resp_size"] =
-          Json::Value::Int64(SumRepeatedInt32(stats_->rpc_resp_size()));
-    }
-    if (stats_->rpc_resp_recv_time_size() > 0) {
-      (*root)["exec_resp_recv_time"] =
-          Json::Value::Int64(SumRepeatedInt32(stats_->rpc_resp_recv_time()));
-    }
-    if (stats_->rpc_resp_parse_time_size() > 0) {
-      (*root)["exec_resp_parse_time"] =
-          Json::Value::Int64(SumRepeatedInt32(stats_->rpc_resp_parse_time()));
-    }
-    if (stats_->has_local_run_reason()) {
-      (*root)["local_run_reason"] =
-          stats_->local_run_reason();
-    }
-    if (stats_->local_delay_time() > 0)
-      (*root)["local_delay_ms"] = stats_->local_delay_time();
-    if (stats_->local_pending_time() > 0)
-      (*root)["local_pending_ms"] = stats_->local_pending_time();
-    if (stats_->local_run_time() > 0)
-      (*root)["local_run_ms"] = stats_->local_run_time();
-    if (stats_->local_mem_kb() > 0)
-      (*root)["local_mem_kb"] = Json::Value::Int64(stats_->local_mem_kb());
-    if (stats_->local_output_file_time_size() > 0) {
-      (*root)["local_output_file_time"] = Json::Value::Int64(
-          SumRepeatedInt32(stats_->local_output_file_time()));
-    }
-    if (stats_->local_output_file_size_size() > 0) {
-      (*root)["local_output_file_size"] = Json::Value::Int64(
-          SumRepeatedInt32(stats_->local_output_file_size()));
-    }
 
-    if (stats_->output_file_size_size() > 0) {
-      (*root)["output_file_size"] =
-          Json::Value::Int64(SumRepeatedInt32(stats_->output_file_size()));
-    }
-    if (stats_->chunk_resp_size_size() > 0) {
-      (*root)["chunk_resp_size"] =
-          Json::Value::Int64(SumRepeatedInt32(stats_->chunk_resp_size()));
-    }
-    if (stats_->output_file_rpc)
-      (*root)["output_file_rpc"] = Json::Value::Int64(stats_->output_file_rpc);
-    if (stats_->output_file_rpc_req_build_time) {
-      (*root)["output_file_rpc_req_build_time"] =
-          Json::Value::Int64(stats_->output_file_rpc_req_build_time);
-    }
-    if (stats_->output_file_rpc_req_send_time) {
-      (*root)["output_file_rpc_req_send_time"] =
-          Json::Value::Int64(stats_->output_file_rpc_req_send_time);
-    }
-    if (stats_->output_file_rpc_wait_time) {
-      (*root)["output_file_rpc_wait_time"] =
-          Json::Value::Int64(stats_->output_file_rpc_wait_time);
-    }
-    if (stats_->output_file_rpc_resp_recv_time) {
-      (*root)["output_file_rpc_resp_recv_time"] =
-          Json::Value::Int64(stats_->output_file_rpc_resp_recv_time);
-    }
-    if (stats_->output_file_rpc_resp_parse_time) {
-      (*root)["output_file_rpc_resp_parse_time"] =
-          Json::Value::Int64(stats_->output_file_rpc_resp_parse_time);
-    }
     if (exec_output_file_.size() > 0) {
       Json::Value exec_output_file(Json::arrayValue);
       for (size_t i = 0; i < exec_output_file_.size(); ++i) {
@@ -3048,14 +2860,6 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
     if (!resp_cache_key_.empty())
       (*root)["cache_key"] = resp_cache_key_;
 
-    if (stats_->exec_request_retry_reason_size() > 0) {
-      Json::Value exec_output_retry_reason(Json::arrayValue);
-      for (int i = 0; i < stats_->exec_request_retry_reason_size(); ++i) {
-        exec_output_retry_reason.append(
-            stats_->exec_request_retry_reason(i));
-      }
-      (*root)["exec_request_retry_reason"] = exec_output_retry_reason;
-    }
     if (exec_error_message_.size() > 0) {
       Json::Value error_message(Json::arrayValue);
       for (size_t i = 0; i < exec_error_message_.size(); ++i) {
@@ -3063,17 +2867,8 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
       }
       (*root)["error_message"] = error_message;
     }
-    if (!stats_->cwd().empty())
-      (*root)["cwd"] = stats_->cwd();
     if (!orig_flag_dump_.empty())
         (*root)["orig_flag"] = orig_flag_dump_;
-    if (stats_->env_size() > 0) {
-      Json::Value env(Json::arrayValue);
-      for (int i = 0; i < stats_->env_size(); ++i) {
-        env.append(stats_->env(i));
-      }
-      (*root)["env"] = env;
-    }
     if (!stdout_.empty())
       (*root)["stdout"] = stdout_;
     if (!stderr_.empty())
@@ -3125,7 +2920,7 @@ void CompileTask::CopyEnvFromRequest() {
   req_->mutable_requester_info()->set_compiler_proxy_id(
       GenerateCompilerProxyId());
   stats_->set_port(rpc_->server_port());
-  // TODO: Update stats_ to use absl/time.
+  // TODO: Convert field to protobuf/timestamp.
   stats_->set_compiler_proxy_start_time(absl::ToTimeT(service_->start_time()));
   stats_->set_task_id(id_);
   requester_info_ = req_->requester_info();
@@ -3135,66 +2930,6 @@ string CompileTask::GenerateCompilerProxyId() const {
   std::ostringstream s;
   s << service_->compiler_proxy_id_prefix() << id_;
   return s.str();
-}
-
-// static
-bool CompileTask::IsLocalCompilerPathValid(
-    const string& trace_id,
-    const ExecReq& req, const CompilerFlags* flags) {
-  // Compiler_proxy will resolve local_compiler_path
-  // if gomacc is masqueraded or prepended compiler is basename.
-  // No need to think this as error.
-  if (!req.command_spec().has_local_compiler_path()) {
-    return true;
-  }
-  // If local_compiler_path exists, it must be the same compiler_name with
-  // flag_'s.
-  const string name = CompilerFlagTypeSpecific::GetCompilerNameFromArg(
-      req.command_spec().local_compiler_path());
-  if (req.command_spec().has_name() &&
-      req.command_spec().name() != name) {
-    LOG(ERROR) << trace_id << " compiler name mismatches."
-               << " command_spec.name=" << req.command_spec().name()
-               << " name=" << name;
-    return false;
-  }
-  if (flags && flags->compiler_name() != name) {
-    LOG(ERROR) << trace_id << " compiler name mismatches."
-               << " flags.compiler_name=" << flags->compiler_name()
-               << " name=" << name;
-    return false;
-  }
-  return true;
-}
-
-// static
-void CompileTask::RemoveDuplicateFiles(const std::string& cwd,
-                                       std::set<std::string>* filenames) {
-  FlatMap<std::string, std::string> path_map;
-  path_map.reserve(filenames->size());
-
-  std::set<std::string> unique_files;
-  for (const auto& filename : *filenames) {
-    std::string abs_filename = file::JoinPathRespectAbsolute(cwd, filename);
-    auto p = path_map.emplace(std::move(abs_filename), filename);
-    if (p.second) {
-      unique_files.insert(filename);
-      continue;
-    }
-
-    // If there is already registered filename, compare and take shorter one.
-    // If length is same, take lexicographically smaller one.
-    const std::string& existing_filename = p.first->second;
-    if (filename.size() < existing_filename.size() ||
-        (filename.size() == existing_filename.size() &&
-         filename < existing_filename)) {
-      unique_files.erase(existing_filename);
-      unique_files.insert(filename);
-      p.first->second = filename;
-    }
-  }
-
-  *filenames = std::move(unique_files);
 }
 
 void CompileTask::InitCompilerFlags() {
@@ -3550,14 +3285,15 @@ void CompileTask::FillCompilerInfoDone(
     std::unique_ptr<CompileService::GetCompilerInfoParam> param) {
   CHECK_EQ(SETUP, state_);
 
-  int msec = compiler_info_timer_.GetInIntMilliseconds();
-  stats_->set_compiler_info_process_time(msec);
+  const absl::Duration compiler_info_time = compiler_info_timer_.GetDuration();
+  stats_->set_compiler_info_process_time(DurationToIntMs(compiler_info_time));
+  stats_->compiler_info_process_time = compiler_info_time;
   std::ostringstream ss;
   ss << " cache_hit=" << param->cache_hit
      << " updated=" << param->updated
      << " state=" << param->state.get()
-     << " in " << msec << " msec";
-  if (msec > 1000) {
+     << " in " << compiler_info_time;
+  if (compiler_info_time > absl::Seconds(1)) {
     LOG(WARNING) << trace_id_ << " SLOW fill compiler info"
                  << ss.str();
   } else {
@@ -3631,50 +3367,6 @@ void CompileTask::UpdateRequiredFiles() {
   include_timer_.Start();
   include_wait_timer_.Start();
 
-  // TODO: Move compiler-specific code to CompilerTypeSpecific.
-
-  if (flags_->type() == CompilerFlagType::Gcc) {
-    const GCCFlags& gcc_flag = static_cast<const GCCFlags&>(*flags_);
-    if (gcc_flag.lang() == "ir") {
-      if (gcc_flag.thinlto_index().empty()) {
-        // No need to read .imports file.
-        UpdateRequiredFilesDone(true);
-        return;
-      }
-      // ThinLTO backend phase.
-      GetThinLTOImports();
-      return;
-    }
-    if (gcc_flag.mode() != GCCFlags::LINK) {
-      CHECK(!linking_);
-      GetIncludeFiles();
-      return;
-    }
-    if (gcc_flag.args().size() == 2 &&
-        gcc_flag.args()[1] == "--version") {
-      // for requester_env_.verify_command()
-      VLOG(1) << trace_id_ << " --version";
-      UpdateRequiredFilesDone(true);
-      return;
-    }
-    // TODO: if input files are not obj/ar, check include files as well?
-    VLOG(1) << trace_id_ << " link mode";
-    CHECK(linking_);
-    GetLinkRequiredFiles();
-    return;
-  }
-
-  if (flags_->type() == CompilerFlagType::Clexe) {
-    // TODO: fix for linking_ mode.
-    GetIncludeFiles();
-    return;
-  }
-
-  if (flags_->type() == CompilerFlagType::ClangTidy) {
-    GetIncludeFiles();
-    return;
-  }
-
   // Go to the general include processor phase.
   StartIncludeProcessor();
 }
@@ -3715,14 +3407,16 @@ void CompileTask::UpdateRequiredFilesDone(bool ok) {
   }
   req_->clear_input();
 
-  stats_->set_include_preprocess_time(include_timer_.GetInIntMilliseconds());
+  const absl::Duration include_preprocess_time = include_timer_.GetDuration();
+  stats_->set_include_preprocess_time(DurationToIntMs(include_preprocess_time));
+  stats_->include_preprocess_time = include_preprocess_time;
   stats_->set_depscache_used(depscache_used_);
 
-  LOG_IF(WARNING, stats_->include_processor_run_time() > 1000)
+  LOG_IF(WARNING, stats_->include_processor_run_time > absl::Seconds(1))
       << trace_id_ << " SLOW run IncludeProcessor"
       << " required_files=" << required_files_.size()
       << " depscache=" << depscache_used_
-      << " in " << stats_->include_processor_run_time() << " msec";
+      << " in " << stats_->include_processor_run_time;
 
   SetupRequestDone(true);
 }
@@ -3832,15 +3526,12 @@ static void FixCommandSpec(const CompilerInfo& compiler_info,
   // might be wrong. For C program, cxx_system_include_paths would be empty.
   // c.f. b/25675250
   if (compiler_info.type() == CompilerInfoType::Cxx) {
-    bool is_cplusplus = false;
-    if (flags.type() == CompilerFlagType::Gcc) {
-      is_cplusplus = static_cast<const GCCFlags&>(flags).is_cplusplus();
-    } else if (flags.type() == CompilerFlagType::Clexe) {
-      is_cplusplus = static_cast<const VCFlags&>(flags).is_cplusplus();
-    } else if (flags.type() == CompilerFlagType::ClangTidy) {
-      is_cplusplus = static_cast<const ClangTidyFlags&>(flags).is_cplusplus();
-    }
+    DCHECK(flags.type() == CompilerFlagType::Gcc ||
+           flags.type() == CompilerFlagType::Clexe ||
+           flags.type() == CompilerFlagType::ClangTidy)
+        << flags.type();
 
+    bool is_cplusplus = static_cast<const CxxFlags&>(flags).is_cplusplus();
     const CxxCompilerInfo& cxxci = ToCxxCompilerInfo(compiler_info);
     if (!is_cplusplus) {
       for (const auto& path : cxxci.system_include_paths())
@@ -3967,45 +3658,31 @@ void CompileTask::MayUpdateSubprogramSpec() {
   }
 }
 
-struct CompileTask::RunCppIncludeProcessorParam {
-  RunCppIncludeProcessorParam()
-      : result_status(false), total_files(0), skipped_files(0) {}
-  // request
-  string input_filename;
-  string abs_input_filename;
-  // response
-  bool result_status;
-  std::set<string> required_files;
-  int total_files;
-  int skipped_files;
+struct CompileTask::IncludeProcessorRequestParam {
+  // input file_stat_cache will be moved to temporarily.
   std::unique_ptr<FileStatCache> file_stat_cache;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RunCppIncludeProcessorParam);
 };
 
-void CompileTask::GetIncludeFiles() {
+struct CompileTask::IncludeProcessorResponseParam {
+  // result of IncludeProcessor.
+  CompilerTypeSpecific::IncludeProcessorResult result;
+  // return borrowed file_stat_cache to CompileTask.
+  std::unique_ptr<FileStatCache> file_stat_cache;
+};
+
+void CompileTask::StartIncludeProcessor() {
+  VLOG(1) << "StartIncludeProcessor";
   CHECK_EQ(SETUP, state_);
-  DCHECK(flags_->type() == CompilerFlagType::Gcc ||
-         flags_->type() == CompilerFlagType::Clexe ||
-         flags_->type() == CompilerFlagType::ClangTidy);
-  DCHECK(compiler_info_state_.get() != nullptr);
 
-  // We don't support multiple input files.
-  if (flags_->input_filenames().size() != 1U) {
-    LOG(ERROR) << trace_id_ << " multiple inputs? "
-               << flags_->input_filenames().size()
-               << " " << flags_->input_filenames();
-    AddErrorToResponse(TO_USER, "multiple inputs are not supported. ", true);
-    UpdateRequiredFilesDone(false);
-    return;
-  }
-  const string& input_filename = flags_->input_filenames()[0];
+  // TODO: DepsCache should be able to support multiple input files,
+  // however currently we have to pass |abs_input_filename|, so DeosCache
+  // supports a compile task that has one input file.
+  if (DepsCache::IsEnabled() && compiler_type_specific_->SupportsDepsCache() &&
+      flags_->input_filenames().size() == 1U) {
+    const string& input_filename = flags_->input_filenames()[0];
+    const string& abs_input_filename =
+        file::JoinPathRespectAbsolute(flags_->cwd(), input_filename);
 
-  const string& abs_input_filename =
-      file::JoinPathRespectAbsolute(flags_->cwd(), input_filename);
-
-  if (DepsCache::IsEnabled()) {
     DepsCache* dc = DepsCache::instance();
     deps_identifier_ = DepsCache::MakeDepsIdentifier(
         compiler_info_state_.get()->info(), *flags_);
@@ -4019,212 +3696,6 @@ void CompileTask::GetIncludeFiles() {
       return;
     }
   }
-  std::unique_ptr<RunCppIncludeProcessorParam> param(
-      new RunCppIncludeProcessorParam);
-  param->input_filename = input_filename;
-  param->abs_input_filename = abs_input_filename;
-  input_file_stat_cache_->ReleaseOwner();
-  param->file_stat_cache = std::move(input_file_stat_cache_);
-
-  OneshotClosure* closure =
-      NewCallback(this, &CompileTask::RunCppIncludeProcessor, std::move(param));
-  service_->wm()->RunClosureInPool(
-      FROM_HERE, service_->include_processor_pool(),
-      closure,
-      WorkerThreadManager::PRIORITY_LOW);
-}
-
-void CompileTask::RunCppIncludeProcessor(
-    std::unique_ptr<RunCppIncludeProcessorParam> param) {
-  DCHECK(compiler_info_state_.get() != nullptr);
-
-  // Pass ownership temporary to IncludeProcessor thread.
-  param->file_stat_cache->AcquireOwner();
-
-  stats_->set_include_processor_wait_time(
-      include_wait_timer_.GetInIntMilliseconds());
-  LOG_IF(WARNING, stats_->include_processor_wait_time() > 1000)
-      << trace_id_ << " SLOW start IncludeProcessor"
-      << " in " << stats_->include_processor_wait_time() << " msec";
-
-  SimpleTimer include_timer(SimpleTimer::START);
-  CppIncludeProcessor include_processor;
-  param->result_status = include_processor.GetIncludeFiles(
-      param->input_filename, flags_->cwd_for_include_processor(), *flags_,
-      ToCxxCompilerInfo(compiler_info_state_.get()->info()),
-      &param->required_files, param->file_stat_cache.get());
-  stats_->set_include_processor_run_time(include_timer.GetInIntMilliseconds());
-
-  if (!param->result_status) {
-    LOG(WARNING) << trace_id_
-                 << " Unsupported feature detected "
-                 << "in our pseudo includer! "
-                 << flags_->DebugString();
-  }
-  param->total_files = include_processor.total_files();
-  param->skipped_files = include_processor.skipped_files();
-
-  // Back ownership from IncludeProcessor thread to CompileTask thread.
-  param->file_stat_cache->ReleaseOwner();
-  service_->wm()->RunClosureInThread(
-      FROM_HERE, thread_id_,
-      NewCallback(this, &CompileTask::RunCppIncludeProcessorDone,
-                  std::move(param)),
-      WorkerThreadManager::PRIORITY_LOW);
-}
-
-void CompileTask::RunCppIncludeProcessorDone(
-    std::unique_ptr<RunCppIncludeProcessorParam> param) {
-  DCHECK(BelongsToCurrentThread());
-
-  input_file_stat_cache_ = std::move(param->file_stat_cache);
-  input_file_stat_cache_->AcquireOwner();
-  required_files_.swap(param->required_files);
-
-  stats_->set_include_preprocess_total_files(param->total_files);
-  stats_->set_include_preprocess_skipped_files(param->skipped_files);
-
-  if (DepsCache::IsEnabled()) {
-    if (param->result_status && deps_identifier_.has_value()) {
-      DepsCache* dc = DepsCache::instance();
-      if (!dc->SetDependencies(deps_identifier_, flags_->cwd(),
-                               param->abs_input_filename, required_files_,
-                               input_file_stat_cache_.get())) {
-        LOG(INFO) << trace_id_ << " failed to save dependencies.";
-      }
-    }
-  }
-
-  UpdateRequiredFilesDone(param->result_status);
-}
-
-struct CompileTask::RunLinkerInputProcessorParam {
-  RunLinkerInputProcessorParam() : result_status(false) {}
-  // request
-  // response
-  bool result_status;
-  std::set<string> required_files;
-  std::vector<string> system_library_paths;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RunLinkerInputProcessorParam);
-};
-
-void CompileTask::GetLinkRequiredFiles() {
-  CHECK_EQ(SETUP, state_);
-  DCHECK(compiler_info_state_.get() != nullptr);
-
-  std::unique_ptr<RunLinkerInputProcessorParam> param(
-      new RunLinkerInputProcessorParam);
-
-  OneshotClosure* closure =
-      NewCallback(
-          this, &CompileTask::RunLinkerInputProcessor, std::move(param));
-  service_->wm()->RunClosureInPool(
-      FROM_HERE, service_->include_processor_pool(),
-      closure,
-      WorkerThreadManager::PRIORITY_LOW);
-}
-
-void CompileTask::RunLinkerInputProcessor(
-    std::unique_ptr<RunLinkerInputProcessorParam> param) {
-  DCHECK(compiler_info_state_.get() != nullptr);
-  LinkerInputProcessor linker_input_processor(
-      flags_->args(), flags_->cwd());
-  param->result_status = linker_input_processor.GetInputFilesAndLibraryPath(
-      compiler_info_state_.get()->info(),
-      req_->command_spec(),
-      &param->required_files,
-      &param->system_library_paths);
-  if (!param->result_status) {
-    LOG(WARNING) << trace_id_
-                 << " Failed to get input files "
-                 << flags_->DebugString();
-  }
-  service_->wm()->RunClosureInThread(
-      FROM_HERE, thread_id_,
-      NewCallback(
-          this, &CompileTask::RunLinkerInputProcessorDone, std::move(param)),
-      WorkerThreadManager::PRIORITY_LOW);
-}
-
-void CompileTask::RunLinkerInputProcessorDone(
-    std::unique_ptr<RunLinkerInputProcessorParam> param) {
-  DCHECK(BelongsToCurrentThread());
-
-  required_files_.swap(param->required_files);
-  system_library_paths_.swap(param->system_library_paths);
-  FixSystemLibraryPath(system_library_paths_, req_->mutable_command_spec());
-
-  UpdateRequiredFilesDone(param->result_status);
-}
-
-struct CompileTask::ReadThinLTOImportsParam {
-  ReadThinLTOImportsParam() {}
-
-  ReadThinLTOImportsParam(ReadThinLTOImportsParam&&) = delete;
-  ReadThinLTOImportsParam(const ReadThinLTOImportsParam&) = delete;
-  ReadThinLTOImportsParam& operator=(const ReadThinLTOImportsParam&) = delete;
-  ReadThinLTOImportsParam& operator=(ReadThinLTOImportsParam&&) = delete;
-
-  // request
-  // response
-  std::set<string> required_files;
-};
-
-void CompileTask::GetThinLTOImports() {
-  CHECK_EQ(SETUP, state_);
-
-  std::unique_ptr<ReadThinLTOImportsParam> param(new ReadThinLTOImportsParam);
-
-  OneshotClosure* closure =
-      NewCallback(this, &CompileTask::ReadThinLTOImports, std::move(param));
-  service_->wm()->RunClosureInPool(
-      FROM_HERE, service_->include_processor_pool(),
-      closure,
-      WorkerThreadManager::PRIORITY_LOW);
-}
-
-void CompileTask::ReadThinLTOImports(
-    std::unique_ptr<ReadThinLTOImportsParam> param) {
-  DCHECK_EQ(CompilerFlagType::Gcc, flags_->type());
-  const GCCFlags& gcc_flags = static_cast<const GCCFlags&>(*flags_);
-
-  ThinLTOImportProcessor processor;
-  if (!processor.GetIncludeFiles(gcc_flags.thinlto_index(), gcc_flags.cwd(),
-                                 &param->required_files)) {
-    LOG(ERROR) << trace_id_ << " failed to get ThinLTO imports";
-  }
-
-  service_->wm()->RunClosureInThread(
-      FROM_HERE, thread_id_,
-      NewCallback(this, &CompileTask::ReadThinLTOImportsDone, std::move(param)),
-      WorkerThreadManager::PRIORITY_LOW);
-}
-
-void CompileTask::ReadThinLTOImportsDone(
-    std::unique_ptr<ReadThinLTOImportsParam> param) {
-  DCHECK(BelongsToCurrentThread());
-
-  required_files_.swap(param->required_files);
-  UpdateRequiredFilesDone(true);
-}
-
-struct CompileTask::IncludeProcessorRequestParam {
-  std::unique_ptr<FileStatCache> file_stat_cache;
-};
-
-struct CompileTask::IncludeProcessorResponseParam {
-  CompilerTypeSpecific::IncludeProcessorResult result;
-  // Move file_stat_cache from request.
-  std::unique_ptr<FileStatCache> file_stat_cache;
-};
-
-void CompileTask::StartIncludeProcessor() {
-  VLOG(1) << "StartIncludeProcessor";
-  CHECK_EQ(SETUP, state_);
-
-  // TODO: DepsCache handling here.
 
   auto request_param = absl::make_unique<IncludeProcessorRequestParam>();
 
@@ -4236,7 +3707,7 @@ void CompileTask::StartIncludeProcessor() {
   service_->wm()->RunClosureInPool(
       FROM_HERE, service_->include_processor_pool(),
       closure,
-      WorkerThreadManager::PRIORITY_LOW);
+      WorkerThread::PRIORITY_LOW);
 }
 
 void CompileTask::RunIncludeProcessor(
@@ -4247,18 +3718,25 @@ void CompileTask::RunIncludeProcessor(
   // Pass ownership temporary to IncludeProcessor thread.
   request_param->file_stat_cache->AcquireOwner();
 
+  const absl::Duration include_processor_wait_time =
+      include_wait_timer_.GetDuration();
   stats_->set_include_processor_wait_time(
-      include_wait_timer_.GetInIntMilliseconds());
-  LOG_IF(WARNING, stats_->include_processor_wait_time() > 1000)
+      DurationToIntMs(include_processor_wait_time));
+  stats_->include_processor_wait_time = include_processor_wait_time;
+
+  LOG_IF(WARNING, stats_->include_processor_wait_time > absl::Seconds(1))
       << trace_id_ << " SLOW start IncludeProcessor"
-      << " in " << stats_->include_processor_wait_time() << " msec";
+      << " in " << stats_->include_processor_wait_time;
 
   SimpleTimer include_timer(SimpleTimer::START);
   CompilerTypeSpecific::IncludeProcessorResult result =
       compiler_type_specific_->RunIncludeProcessor(
           trace_id_, *flags_, compiler_info_state_.get()->info(),
           req_->command_spec(), request_param->file_stat_cache.get());
-  stats_->set_include_processor_run_time(include_timer.GetInIntMilliseconds());
+  const absl::Duration include_processor_run_time = include_timer.GetDuration();
+  stats_->set_include_processor_run_time(
+      DurationToIntMs(include_processor_run_time));
+  stats_->include_processor_run_time = include_processor_run_time;
 
   auto response_param = absl::make_unique<IncludeProcessorResponseParam>();
   response_param->result = std::move(result);
@@ -4269,7 +3747,7 @@ void CompileTask::RunIncludeProcessor(
       FROM_HERE, thread_id_,
       NewCallback(this, &CompileTask::RunIncludeProcessorDone,
                   std::move(response_param)),
-      WorkerThreadManager::PRIORITY_LOW);
+      WorkerThread::PRIORITY_LOW);
 }
 
 void CompileTask::RunIncludeProcessorDone(
@@ -4299,14 +3777,29 @@ void CompileTask::RunIncludeProcessorDone(
 
   if (!response_param->result.ok) {
     LOG(WARNING) << trace_id_ << "include processor failed"
-                 << " error_reason=" << response_param->result.error_reason
+                 << " error=" << response_param->result.error_reason
                  << " flags=" << flags_->DebugString();
     if (response_param->result.error_to_user) {
       AddErrorToResponse(TO_USER, response_param->result.error_reason, true);
     }
   }
 
-  // TODO: DepsCache handling here.
+  // When deps_identifier_.has_value() is true, the condition to use DepsCache
+  // should be satisfied. However, several checks are done for the safe.
+  if (DepsCache::IsEnabled() && compiler_type_specific_->SupportsDepsCache() &&
+      response_param->result.ok && deps_identifier_.has_value() &&
+      flags_->input_filenames().size() == 1U) {
+    const string& input_filename = flags_->input_filenames()[0];
+    const string& abs_input_filename =
+        file::JoinPathRespectAbsolute(flags_->cwd(), input_filename);
+
+    DepsCache* dc = DepsCache::instance();
+    if (!dc->SetDependencies(deps_identifier_, flags_->cwd(),
+                             abs_input_filename, required_files_,
+                             input_file_stat_cache_.get())) {
+      LOG(INFO) << trace_id_ << " failed to save dependencies.";
+    }
+  }
 
   UpdateRequiredFilesDone(response_param->result.ok);
 }
@@ -4343,11 +3836,12 @@ void CompileTask::InputFileTaskFinished(InputFileTask* input_file_task) {
   const string& filename = input_file_task->filename();
   const string& hash_key = input_file_task->hash_key();
   const ssize_t file_size = input_file_task->file_size();
-  const time_t mtime = input_file_task->mtime();
+  const absl::optional<absl::Time>& mtime = input_file_task->mtime();
   VLOG(1) << trace_id_ << " input done:" << filename;
-  if (mtime > stats_->latest_input_mtime()) {
+  if (mtime.has_value() &&
+      *mtime > absl::FromTimeT(stats_->latest_input_mtime())) {
     stats_->set_latest_input_filename(filename);
-    stats_->set_latest_input_mtime(mtime);
+    stats_->set_latest_input_mtime(absl::ToTimeT(*mtime));
   }
   if (!input_file_task->success()) {
     AddErrorToResponse(TO_LOG, "Create file blob failed for:" + filename, true);
@@ -4356,7 +3850,8 @@ void CompileTask::InputFileTaskFinished(InputFileTask* input_file_task) {
     return;
   }
   DCHECK(!hash_key.empty()) << filename;
-  stats_->add_input_file_time(input_file_task->timer().GetInIntMilliseconds());
+  stats_->add_input_file_time(
+      DurationToIntMs(input_file_task->timer().GetDuration()));
   stats_->add_input_file_size(file_size);
   if (!input_file_task->UpdateInputInTask(this)) {
     LOG(ERROR) << trace_id_ << " bad input data "
@@ -4805,32 +4300,30 @@ void CompileTask::OutputFileTaskFinished(
     }
     return;
   }
-  int output_file_time = output_file_task->timer().GetInIntMilliseconds();
-  LOG_IF(WARNING, output_file_time > 60 * 1000)
-      << trace_id_
-      << " SLOW output file:"
+  absl::Duration output_file_time = output_file_task->timer().GetDuration();
+  LOG_IF(WARNING, output_file_time > absl::Minutes(1))
+      << trace_id_ << " SLOW output file:"
       << " filename=" << filename
-      << " http_rpc=" << output_file_task->http_rpc_status().DebugString()
+      << " http_rpc=" << output_file_task->http_status().DebugString()
       << " num_rpc=" << output_file_task->num_rpc()
-      << " in_memory=" << output_file_task->IsInMemory()
-      << " in " << output_file_time << " msec";
-  stats_->add_output_file_time(output_file_time);
+      << " in_memory=" << output_file_task->IsInMemory() << " in "
+      << output_file_time;
+  stats_->add_output_file_time(DurationToIntMs(output_file_time));
   LOG_IF(WARNING,
          output.blob().blob_type() != FileBlob::FILE &&
          output.blob().blob_type() != FileBlob::FILE_META)
       << "Invalid blob type: " << output.blob().blob_type();
   stats_->add_output_file_size(output.blob().file_size());
   stats_->output_file_rpc += output_file_task->num_rpc();
-  const HttpRPC::Status& http_rpc_status =
-      output_file_task->http_rpc_status();
-  stats_->add_chunk_resp_size(http_rpc_status.resp_size);
-  stats_->output_file_rpc_req_build_time += http_rpc_status.req_build_time;
-  stats_->output_file_rpc_req_send_time += http_rpc_status.req_send_time;
-  stats_->output_file_rpc_wait_time += http_rpc_status.wait_time;
-  stats_->output_file_rpc_resp_recv_time += http_rpc_status.resp_recv_time;
-  stats_->output_file_rpc_resp_parse_time += http_rpc_status.resp_parse_time;
-  stats_->output_file_rpc_size += http_rpc_status.resp_size;
-  stats_->output_file_rpc_raw_size += http_rpc_status.raw_resp_size;
+  const HttpClient::Status& http_status = output_file_task->http_status();
+  stats_->add_chunk_resp_size(http_status.resp_size);
+  stats_->output_file_rpc_req_build_time += http_status.req_build_time;
+  stats_->output_file_rpc_req_send_time += http_status.req_send_time;
+  stats_->output_file_rpc_wait_time += http_status.wait_time;
+  stats_->output_file_rpc_resp_recv_time += http_status.resp_recv_time;
+  stats_->output_file_rpc_resp_parse_time += http_status.resp_parse_time;
+  stats_->output_file_rpc_size += http_status.resp_size;
+  stats_->output_file_rpc_raw_size += http_status.raw_resp_size;
 }
 
 void CompileTask::MaybeRunOutputFileCallback(int index, bool task_finished) {
@@ -4967,10 +4460,14 @@ void CompileTask::LocalOutputFileTaskFinished(
                  << " Create file blob failed for local output:" << filename;
     return;
   }
-  const FileBlob& blob = local_output_file_task->blob();
+  const absl::Duration local_output_file_task_duration =
+      local_output_file_task->timer().GetDuration();
   stats_->add_local_output_file_time(
-      local_output_file_task->timer().GetInIntMilliseconds());
-  stats_->add_local_output_file_size(blob.file_size());
+      DurationToIntMs(local_output_file_task_duration));
+  stats_->total_local_output_file_time += local_output_file_task_duration;
+
+  const FileStat& file_stat = local_output_file_task->file_stat();
+  stats_->add_local_output_file_size(file_stat.size);
 }
 
 void CompileTask::MaybeRunLocalOutputFileCallback(bool task_finished) {
@@ -4995,30 +4492,9 @@ void CompileTask::MaybeRunLocalOutputFileCallback(bool task_finished) {
 void CompileTask::UpdateStats() {
   CHECK(state_ >= FINISHED || abort_);
 
-  resp_->set_compiler_proxy_time(
-      handler_timer_.GetInIntMilliseconds() / 1000.0);
-  resp_->set_compiler_proxy_include_preproc_time(
-      stats_->include_preprocess_time() / 1000.0);
-  resp_->set_compiler_proxy_include_fileload_time(
-      stats_->include_fileload_time() / 1000.0);
-  resp_->set_compiler_proxy_rpc_call_time(
-      SumRepeatedInt32(stats_->rpc_call_time()) / 1000.0);
-  resp_->set_compiler_proxy_file_response_time(
-      stats_->file_response_time() / 1000.0);
-  resp_->set_compiler_proxy_rpc_build_time(
-      SumRepeatedInt32(stats_->rpc_req_build_time()) / 1000.0);
-  resp_->set_compiler_proxy_rpc_send_time(
-      SumRepeatedInt32(stats_->rpc_req_send_time()) / 1000.0);
-  resp_->set_compiler_proxy_rpc_wait_time(
-      SumRepeatedInt32(stats_->rpc_wait_time()) / 1000.0);
-  resp_->set_compiler_proxy_rpc_recv_time(
-      SumRepeatedInt32(stats_->rpc_resp_recv_time()) / 1000.0);
-  resp_->set_compiler_proxy_rpc_parse_time(
-      SumRepeatedInt32(stats_->rpc_resp_parse_time()) / 1000.0);
+  resp_->set_compiler_proxy_time(DurationToIntMs(handler_timer_.GetDuration()));
 
-  resp_->set_compiler_proxy_local_pending_time(
-      stats_->local_pending_time() / 1000.0);
-  resp_->set_compiler_proxy_local_run_time(stats_->local_run_time() / 1000.0);
+  stats_->StoreStatsInExecResp(resp_.get());
 
   // TODO: similar logic found in CompileService::CompileTaskDone, so
   // it would be better to be merged.  Note that ExecResp are not available
@@ -5026,7 +4502,7 @@ void CompileTask::UpdateStats() {
   switch (state_) {
     case FINISHED:
       resp_->set_compiler_proxy_goma_finished(true);
-      if (stats_->cache_hit())
+      if (cache_hit())
         resp_->set_compiler_proxy_goma_cache_hit(true);
       break;
     case LOCAL_FINISHED:
@@ -5036,15 +4512,10 @@ void CompileTask::UpdateStats() {
       resp_->set_compiler_proxy_goma_aborted(true);
       break;
   }
-  if (stats_->goma_error())
-    resp_->set_compiler_proxy_goma_error(true);
   if (local_run_)
     resp_->set_compiler_proxy_local_run(true);
   if (local_killed_)
     resp_->set_compiler_proxy_local_killed(true);
-
-  resp_->set_compiler_proxy_exec_request_retry(
-      stats_->exec_request_retry());
 }
 
 void CompileTask::SaveInfoFromInputOutput() {
@@ -5230,7 +4701,12 @@ void CompileTask::FinishSubProcess() {
       }
     }
     stats_->set_local_pending_time(subproc->started().pending_ms());
+    stats_->local_pending_time =
+        absl::Milliseconds(subproc->started().pending_ms());
+
     stats_->set_local_run_time(subproc->terminated().run_ms());
+    stats_->local_run_time = absl::Milliseconds(subproc->terminated().run_ms());
+
     stats_->set_local_mem_kb(subproc->terminated().mem_kb());
     VLOG(1) << trace_id_ << " subproc finished"
             << " pid=" << subproc->started().pid();
@@ -5392,8 +4868,7 @@ bool CompileTask::cache_hit() const {
 }
 
 bool CompileTask::local_cache_hit() const {
-  return stats_->has_cache_source() &&
-         stats_->cache_source() == ExecLog::LOCAL_OUTPUT_CACHE;
+  return stats_->LocalCacheHit();
 }
 
 void CompileTask::AddErrorToResponse(
@@ -5405,7 +4880,7 @@ void CompileTask::AddErrorToResponse(
       LOG(WARNING) << trace_id_ << " " << error_message;
     std::ostringstream msg;
     msg << "compiler_proxy:";
-    msg << handler_timer_.GetInIntMilliseconds() << "ms: ";
+    msg << handler_timer_.GetDuration();
     msg << error_message;
     if (dest == TO_USER) {
       DCHECK(set_error) << trace_id_

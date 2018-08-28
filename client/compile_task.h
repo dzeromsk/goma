@@ -27,10 +27,13 @@
 #include "deps_cache.h"
 #include "file_stat.h"
 #include "file_stat_cache.h"
+#include "gtest/gtest_prod.h"
 #include "http_rpc.h"
 #include "simple_timer.h"
 #include "subprocess_task.h"
 #include "threadpool_http_server.h"
+#include "worker_thread.h"
+#include "worker_thread_manager.h"
 
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "google/protobuf/repeated_field.h"
@@ -77,7 +80,7 @@ class CompileTask {
   // Inits CompileTask.
   // It takes ownership of rpc, req, resp and done.
   void Init(CompileService::RpcController* rpc,
-            const ExecReq* req,
+            const ExecReq& req,
             ExecResp* resp,
             OneshotClosure* done);
 
@@ -113,7 +116,15 @@ class CompileTask {
   absl::Time GetLastReqTimestamp() const { return last_req_timestamp_; }
 
  private:
-  friend class CompileTaskTest;
+  FRIEND_TEST(CompileTaskTest, DumpToJsonWithUnsuccessfulStart);
+  FRIEND_TEST(CompileTaskTest, DumpToJsonWithValidCallToServer);
+  FRIEND_TEST(CompileTaskTest, DumpToJsonWithHTTPErrorCode);
+  FRIEND_TEST(CompileTaskTest, DumpToJsonWithDone);
+  FRIEND_TEST(CompileTaskTest, UpdateStatsFinished);
+  FRIEND_TEST(CompileTaskTest, UpdateStatsFinishedCacheHit);
+  FRIEND_TEST(CompileTaskTest, UpdateStatsLocalFinished);
+  FRIEND_TEST(CompileTaskTest, UpdateStatsAborted);
+
   enum ErrDest {
     // To log: write in log file, and show on status page.
     TO_LOG,
@@ -131,9 +142,6 @@ class CompileTask {
   friend class CompilerProxyHistogram;
   struct RenameParam;
   struct ContentOutputParam;
-  struct RunCppIncludeProcessorParam;
-  struct RunLinkerInputProcessorParam;
-  struct ReadThinLTOImportsParam;
   struct IncludeProcessorRequestParam;
   struct IncludeProcessorResponseParam;
 
@@ -152,17 +160,6 @@ class CompileTask {
   // from req_.
   void CopyEnvFromRequest();
   string GenerateCompilerProxyId() const;
-
-  // validate local compiler path.
-  static bool IsLocalCompilerPathValid(
-      const string& trace_id,
-      const ExecReq& req, const CompilerFlags* flags);
-
-  // Remove duplicate filepath from |filenames|
-  // for files normalized by JoinPathRepectAbsolute with |cwd|.
-  // Relative path is taken in high priority.
-  static void RemoveDuplicateFiles(const std::string& cwd,
-                                   std::set<std::string>* filenames);
 
   // Initializes compiler flags from the request.
   void InitCompilerFlags();
@@ -258,27 +255,14 @@ class CompileTask {
       google::protobuf::RepeatedPtrField<SubprogramSpec>* subprogram_specs)
           const;
   void UpdateRequiredFiles();
-  void GetIncludeFiles();
-  void RunCppIncludeProcessor(
-      std::unique_ptr<RunCppIncludeProcessorParam> param);
-  void RunCppIncludeProcessorDone(
-      std::unique_ptr<RunCppIncludeProcessorParam> param);
-  void GetLinkRequiredFiles();
-  void RunLinkerInputProcessor(
-      std::unique_ptr<RunLinkerInputProcessorParam> param);
-  void RunLinkerInputProcessorDone(
-      std::unique_ptr<RunLinkerInputProcessorParam> param);
-  void GetThinLTOImports();
-  void ReadThinLTOImports(std::unique_ptr<ReadThinLTOImportsParam> param);
-  void ReadThinLTOImportsDone(std::unique_ptr<ReadThinLTOImportsParam> param);
+  void UpdateRequiredFilesDone(bool ok);
+  void SetupRequestDone(bool ok);
 
   void StartIncludeProcessor();
   void RunIncludeProcessor(
       std::unique_ptr<IncludeProcessorRequestParam> request_param);
   void RunIncludeProcessorDone(
       std::unique_ptr<IncludeProcessorResponseParam> response_param);
-  void UpdateRequiredFilesDone(bool ok);
-  void SetupRequestDone(bool ok);
 
   // Methods used state_: FILE_REQ
   void SetInputFileCallback();
@@ -341,12 +325,12 @@ class CompileTask {
   // These are vaild until ReplyResponse().
   CompileService::RpcController* rpc_;
   ExecResp* rpc_resp_;
-  WorkerThreadManager::ThreadId caller_thread_id_;
+  WorkerThread::ThreadId caller_thread_id_;
   OneshotClosure* done_;
 
   std::unique_ptr<CompileStats> stats_;
 
-  int responsecode_;
+  int response_code_;
 
   State state_;
   bool abort_;  // local proc finished first.
@@ -406,7 +390,7 @@ class CompileTask {
   // HttpRPC stt for ExecRequest.
   std::unique_ptr<HttpRPC::Status> http_rpc_status_;
 
-  WorkerThreadManager::CancelableClosure* delayed_setup_subproc_;
+  WorkerThread::CancelableClosure* delayed_setup_subproc_;
   // local subprocess
   string local_path_;
   // PATHEXT environment variable in ExecReq for Windows.
@@ -435,6 +419,8 @@ class CompileTask {
   bool local_killed_;
   bool depscache_used_;
   bool gomacc_revision_mismatched_;
+  // Mark this true in Done.
+  bool replied_;
 
   // Timers
   SimpleTimer handler_timer_;

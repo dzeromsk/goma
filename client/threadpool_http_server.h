@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
 #include "basictypes.h"
 #include "lockhelper.h"
 #ifdef _WIN32
@@ -18,6 +19,7 @@
 #endif
 #include "scoped_fd.h"
 #include "simple_timer.h"
+#include "worker_thread.h"
 #include "worker_thread_manager.h"
 
 using std::string;
@@ -37,23 +39,17 @@ class ThreadpoolHttpServer {
   };
   class Stat {
    public:
-    Stat()
-        : req_size(0),
-          resp_size(0),
-          waiting_time_msec(0),
-          read_req_time_msec(0),
-          handler_time_msec(0),
-          write_resp_time_msec(0) {}
+    Stat() : req_size(0), resp_size(0) {}
     ~Stat() {}
 
     SimpleTimer timer;
     size_t req_size;
     size_t resp_size;
-    // Time (in ms).
-    int waiting_time_msec;
-    int read_req_time_msec;
-    int handler_time_msec;
-    int write_resp_time_msec;
+
+    absl::Duration waiting_time;
+    absl::Duration read_req_time;
+    absl::Duration handler_time;
+    absl::Duration write_resp_time;
   };
   class Monitor {
    public:
@@ -137,7 +133,7 @@ class ThreadpoolHttpServer {
     virtual ~HttpServerRequest() {}
 
     WorkerThreadManager* wm_;
-    WorkerThreadManager::ThreadId thread_id_;
+    WorkerThread::ThreadId thread_id_;
     ThreadpoolHttpServer* server_;
     Monitor* monitor_;
 

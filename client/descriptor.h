@@ -15,6 +15,8 @@
 #include "config_win.h"
 #endif
 
+#include "absl/time/time.h"
+
 using std::string;
 
 namespace devtools_goma {
@@ -28,7 +30,6 @@ class SocketDescriptor;
 class Descriptor {
  public:
   // closure must be created by NewPermanentCallback.
-  // it takes ownership of closure.
   // must not call this in notification closure itself.
   virtual void NotifyWhenReadable(
       std::unique_ptr<PermanentClosure> closure) = 0;
@@ -37,15 +38,17 @@ class Descriptor {
   virtual void ClearWritable() = 0;
   // closure must be created by NewCallback, that is, one shot closure.
   // must not call this in notification closure itself.
-  virtual void NotifyWhenTimedout(double timeout,
+  virtual void NotifyWhenTimedout(absl::Duration timeout,
                                   OneshotClosure* closure) = 0;
-  virtual void ChangeTimeout(double timeout) = 0;
+  virtual void ChangeTimeout(absl::Duration timeout) = 0;
 
   // Read/Write returns following values:
   //  < 0: I/O error including retriable error.
   //       (A caller should retry Read/Write if NeedRetry is true)
   //  = 0: a connection is closed by a peer.
   //  > 0: number of bytes read/written.
+  // len must be > 0.  because, if len == 0 and returns 0, it is not certain
+  // whether no data transferred or close detected.
   virtual ssize_t Read(void* ptr, size_t len) = 0;
   virtual ssize_t Write(const void* ptr, size_t len) = 0;
   // NeedRetry is true when previous Read or Write is failed but

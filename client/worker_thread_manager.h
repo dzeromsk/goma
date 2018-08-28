@@ -10,14 +10,11 @@
 #include <string>
 #include <vector>
 
-#include "autolock_timer.h"
+#include "absl/time/time.h"
 #include "basictypes.h"
 #include "lockhelper.h"
 #include "platform_thread.h"
-
-#define GOMA_WORKER_THREAD_STRINGFY(i) #i
-#define GOMA_WORKER_THREAD_STR(i) GOMA_WORKER_THREAD_STRINGFY(i)
-#define FROM_HERE __FILE__ ":" GOMA_WORKER_THREAD_STR(__LINE__)
+#include "worker_thread.h"
 
 using std::string;
 
@@ -31,78 +28,18 @@ class ScopedSocket;
 class SocketDescriptor;
 class WorkerThreadManagerTest;
 
-using PeriodicClosureId = int;
-const PeriodicClosureId kInvalidPeriodicClosureId = -1;
-
 class WorkerThreadManager {
  public:
-  // Windows often pass back 0xfffffffe (pseudo handle) as thread handle.
-  // Therefore the reliable way of selecting a thread is to use the thread id.
-  // ThreadHandle is used for Join().
-  typedef PlatformThreadHandle ThreadHandle;
-  typedef PlatformThreadId ThreadId;
+  // Aliases for types that were moved to WorkerThread.
+  using CancelableClosure = WorkerThread::CancelableClosure;
+  using Priority = WorkerThread::Priority;
+  using ThreadId = WorkerThread::ThreadId;
 
   // Default pool ids.
-  static const int kDeadPool;  // for terminated workers.
-  static const int kAlarmPool;  // for periodic closures.
-  static const int kFreePool;  // for RunClosure().
-
-  class WorkerThread;
-  // Priority of closures and descriptors.
-  enum Priority {
-    PRIORITY_MIN = 0,
-    PRIORITY_LOW = 0,    // Used in compile_task.
-    PRIORITY_MED,        // Used in http rpc and subprocess ipc.
-    PRIORITY_HIGH,       // Used in http server (http and goma ipc serving)
-    PRIORITY_IMMEDIATE,  // Called without descriptor polling.
-                         // Used to clear notification closures of descriptor,
-                         // delayed closures, or periodic closures.
-    NUM_PRIORITIES
-  };
-
-  // Thread unsafe.  See RunDelayedClosureInThread.
-  class CancelableClosure {
-   public:
-    CancelableClosure(const char* const locaction, Closure* closure);
-    const char* location() const;
-    void Cancel();
-   protected:
-    virtual ~CancelableClosure();
-    Closure* closure_;
-   private:
-    const char* const location_;
-    DISALLOW_COPY_AND_ASSIGN(CancelableClosure);
-  };
-
-  // See UnregisterPeriodicClosure
-  class UnregisteredClosureData {
-   public:
-    UnregisteredClosureData() : done_(false), location_(nullptr) {}
-
-    bool Done() const {
-      AUTOLOCK(lock, &mu_);
-      return done_;
-    }
-    void SetDone(bool b) {
-      AUTOLOCK(lock, &mu_);
-      done_ = b;
-    }
-
-    const char* Location() const {
-      AUTOLOCK(lock, &mu_);
-      return location_;
-    }
-    void SetLocation(const char* location) {
-      AUTOLOCK(lock, &mu_);
-      location_ = location;
-    }
-
-   private:
-    mutable Lock mu_;
-    bool done_ GUARDED_BY(mu_);
-    const char* location_ GUARDED_BY(mu_);
-
-    DISALLOW_COPY_AND_ASSIGN(UnregisteredClosureData);
+  enum {
+    kDeadPool = -2,   // For terminated workers.
+    kAlarmPool = -1,  // For periodic closures.
+    kFreePool = 0,    // For RunClosure().
   };
 
   WorkerThreadManager();
@@ -144,7 +81,8 @@ class WorkerThreadManager {
   // Registers periodic closure.
   PeriodicClosureId RegisterPeriodicClosure(
       const char* const location,
-      int ms, std::unique_ptr<PermanentClosure> closure);
+      absl::Duration period,
+      std::unique_ptr<PermanentClosure> closure);
 
   // Unregisters periodic closure.
   void UnregisterPeriodicClosure(PeriodicClosureId id);
@@ -175,14 +113,13 @@ class WorkerThreadManager {
   // Cancel is called.
   // CancelableClosure is thread unsafe.  Access it only in the specified
   // worker thread.
-  CancelableClosure* RunDelayedClosureInThread(
-      const char* const location,
-      ThreadId handle, int msec, Closure* closure);
+  CancelableClosure* RunDelayedClosureInThread(const char* const location,
+                                               ThreadId handle,
+                                               absl::Duration delay,
+                                               Closure* closure);
 
   string DebugString() const;
   void DebugLog() const;
-
-  static string Priority_Name(int priority);
 
  private:
   friend class WorkerThreadManagerTest;
@@ -190,7 +127,7 @@ class WorkerThreadManager {
 
   static void RegisterPeriodicClosureOnAlarmer(
       WorkerThread* alarmer, PeriodicClosureId id, const char* location,
-      int ms, std::unique_ptr<PermanentClosure> closure);
+      absl::Duration period, std::unique_ptr<PermanentClosure> closure);
 
   WorkerThread* GetWorker(ThreadId id);
   WorkerThread* GetWorkerUnlocked(ThreadId id) SHARED_LOCKS_REQUIRED(mu_);

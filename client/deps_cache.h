@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "absl/time/time.h"
 #include "absl/types/optional.h"
 #include "autolock_timer.h"
 #include "cache_file.h"
@@ -49,7 +50,7 @@ class DepsCache {
   // When |cache_filename| is empty, this won't be enabled.
   // When |cache_filename| file exists, we load it.
   static void Init(const std::string& cache_filename,
-                   int identifier_alive_duration,
+                   absl::optional<absl::Duration> identifier_alive_duration,
                    size_t deps_table_size_threshold,
                    int max_proto_size_in_mega_bytes);
 
@@ -117,6 +118,7 @@ class DepsCache {
     DepsTableData() : last_used_time(0) {
     }
 
+    // We need to keep this as a time_t to preserve the std::atomic behavior.
     std::atomic<time_t> last_used_time;
     std::vector<DepsHashId> deps_hash_ids;
   };
@@ -126,7 +128,7 @@ class DepsCache {
       DepsTable;
 
   DepsCache(const string& cache_filename,
-            int identifier_alive_duration,
+            absl::optional<absl::Duration> identifier_alive_duration,
             size_t deps_table_size_threshold,
             int max_proto_size_in_mega_bytes);
   ~DepsCache();
@@ -146,7 +148,8 @@ class DepsCache {
                                   FileStatCache* file_stat_cache);
 
   // Used for test.
-  bool UpdateLastUsedTime(const Identifier& identifier, time_t last_used_time);
+  bool UpdateLastUsedTime(const Identifier& identifier,
+                          absl::optional<absl::Time> last_used_time);
   size_t deps_table_size() const {
     AUTO_SHARED_LOCK(lock, &mu_);
     return deps_table_.size();
@@ -159,8 +162,8 @@ class DepsCache {
 
   const CacheFile cache_file_;
   // When an identifier is older than this value (in second), it won't be
-  // removed in save/load. If negative, we don't dispose old cache.
-  const int identifier_alive_duration_;
+  // removed in save/load. If unset, we don't dispose of old cache.
+  const absl::optional<absl::Duration> identifier_alive_duration_;
   // When lots of DepsTable exist, we'd like to remove older DepsTable entry
   // when saving.
   const size_t deps_table_size_threshold_;

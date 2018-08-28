@@ -6,7 +6,6 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_FILE_STAT_H_
 #define DEVTOOLS_GOMA_CLIENT_FILE_STAT_H_
 
-#include <time.h>
 #ifndef _WIN32
 #include <sys/stat.h>
 #else
@@ -15,6 +14,9 @@
 
 #include <ostream>
 #include <string>
+
+#include "absl/time/time.h"
+#include "absl/types/optional.h"
 
 using std::string;
 
@@ -26,11 +28,11 @@ namespace devtools_goma {
 // FileStat is used for detecting update of compilers/subprograms.
 struct FileStat {
   static const off_t kInvalidFileSize;
-  FileStat() : mtime(0), size(kInvalidFileSize), is_directory(false) {}
+  FileStat() : size(kInvalidFileSize), is_directory(false) {}
   explicit FileStat(const string& filename);
 
   bool IsValid() const;
-  bool CanBeNewerThan(const FileStat& old, time_t last_checked) const;
+  bool CanBeNewerThan(const FileStat& old, absl::Time last_checked) const;
 
   std::string DebugString() const;
 
@@ -44,7 +46,7 @@ struct FileStat {
   // For output during testing.
   friend std::ostream& operator<<(std::ostream& os, const FileStat& stat);
 
-  time_t mtime;
+  absl::optional<absl::Time> mtime;
   off_t size;
   bool is_directory;
 

@@ -9,6 +9,7 @@
 #include <sstream>
 
 #include "absl/memory/memory.h"
+#include "absl/time/time.h"
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
 #include "ioutil.h"
@@ -66,7 +67,7 @@ class GomaIPCTest : public ::testing::Test {
 #ifdef _WIN32
   class NamedPipeChanFactory : public GomaIPC::ChanFactory {
    public:
-    NamedPipeChanFactory() : factory_(kNamedPipeName, 13000) {
+    NamedPipeChanFactory() : factory_(kNamedPipeName, absl::Seconds(13)) {
     }
     ~NamedPipeChanFactory() override {}
 

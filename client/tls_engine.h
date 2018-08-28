@@ -38,6 +38,9 @@ class TLSEngine {
   // Returns true if the transport layer is not ready.
   virtual bool IsIOPending() const = 0;
 
+  // Returns true if it is ready to read or write data.
+  virtual bool IsReady() const = 0;
+
   // An interface to the transport layer:
   // Sets |data| to be sent to the transport layer.
   // Returns |data| size (>=0) to send or TLSErrorReason if error.

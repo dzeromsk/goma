@@ -561,8 +561,8 @@ OpenSSLCRLCache* OpenSSLCRLCache::cache_ = nullptr;
 // Let's follow chromium's net/socket/ssl_client_socket_impl.cc.
 // It uses BoringSSL default but avoid to select CBC ciphers.
 const char* kCipherList = "ALL:!SHA256:!SHA384:!aPSK:!ECDSA+SHA1";
-const int kCrlIoTimeout = 1000;  // milliseconds.
-const size_t kMaxDownloadCrlRetry = 5;  // times.
+constexpr absl::Duration kCrlIoTimeout = absl::Seconds(1);
+constexpr size_t kMaxDownloadCrlRetry = 5;  // times.
 
 void InitOpenSSL() {
   CRYPTO_library_init();
@@ -734,7 +734,6 @@ bool MatchAltIPAddress(X509* x509, int af, void* ap) {
   return matched;
 }
 
-
 // URL should be http (not https).
 void DownloadCrl(
     ScopedSocket* sock,
@@ -840,7 +839,7 @@ bool VerifyCrl(X509_CRL* crl, X509_STORE_CTX* store_ctx) {
 }
 
 bool IsCrlExpired(const string& label, X509_CRL* crl,
-                  int crl_max_valid_duration) {
+                  absl::optional<absl::Duration> crl_max_valid_duration) {
   // Is the CRL expired?
   if (!X509_CRL_get_nextUpdate(crl) ||
       X509_cmp_current_time(X509_CRL_get_nextUpdate(crl)) <= 0) {
@@ -850,13 +849,14 @@ bool IsCrlExpired(const string& label, X509_CRL* crl,
   }
 
   // Does the CRL hit max valid duration set by the user?
-  if (crl_max_valid_duration >= 0) {
+  if (crl_max_valid_duration.has_value()) {
     ASN1_TIME* crl_last_update = X509_CRL_get_lastUpdate(crl);
-    time_t t = time(nullptr) - crl_max_valid_duration;
+    time_t t = time(nullptr) -
+               absl::ToInt64Milliseconds(*crl_max_valid_duration);
     if (X509_cmp_time(crl_last_update, &t) < 0) {
       LOG(INFO) << "CRL is too old to use.  We need to refresh: "
                 << " label=" << label
-                << " crl_max_valid_duration_=" << crl_max_valid_duration
+                << " crl_max_valid_duration_=" << *crl_max_valid_duration
                 << " info=" << GetHumanReadableCRL(crl);
       return true;
     }
@@ -871,7 +871,7 @@ bool IsCrlExpired(const string& label, X509_CRL* crl,
 //
 void OpenSSLContext::Init(
     const string& hostname,
-    int crl_max_valid_duration,
+    absl::optional<absl::Duration> crl_max_valid_duration,
     OneshotClosure* invalidate_closure) {
   AUTOLOCK(lock, &mu_);
   // To keep room to support higher version, let's allow to understand all
@@ -948,8 +948,7 @@ ScopedX509CRL OpenSSLContext::GetX509CrlsFromUrl(
       // It might be better to wait a while.
       LOG(WARNING) << "It seems to fail to connect to all available addresses."
                    << " Going to wait for a while."
-                   << " kWaitForThingsGetsBetterInMs="
-                   << kWaitForThingsGetsBetter;
+                   << " kWaitForThingsGetsBetter=" << kWaitForThingsGetsBetter;
       absl::SleepFor(kWaitForThingsGetsBetter);
       continue;
     }
@@ -1349,6 +1348,10 @@ bool OpenSSLEngine::IsIOPending() const {
   return (state_ == IN_CONNECT) || want_read_ || want_write_;
 }
 
+bool OpenSSLEngine::IsReady() const {
+  return state_ == READY;
+}
+
 int OpenSSLEngine::GetDataToSendTransport(string* data) {
   DCHECK_NE(state_, BEFORE_INIT);
   size_t max_read = BIO_ctrl(network_bio_, BIO_CTRL_PENDING, 0, nullptr);
@@ -1504,8 +1507,7 @@ string OpenSSLEngine::GetLastErrorMessage() const {
   return oss.str();
 }
 
-OpenSSLEngineCache::OpenSSLEngineCache() :
-    ctx_(nullptr), crl_max_valid_duration_(-1) {
+OpenSSLEngineCache::OpenSSLEngineCache() : ctx_(nullptr) {
   absl::call_once(g_openssl_init_once, InitOpenSSL);
 }
 

@@ -40,9 +40,6 @@ const PlatformThreadHandle kNullThreadHandle = NULL;
 inline PlatformThreadId GetCurrentThreadId() {
   return ::GetCurrentThreadId();
 }
-inline PlatformThreadId GetThreadId(PlatformThreadHandle th) {
-  return ::GetThreadId(th);
-}
 inline bool THREAD_ID_IS_SELF(PlatformThreadId thread_id) {
   return (thread_id == ::GetCurrentThreadId());
 }
@@ -53,9 +50,6 @@ const PlatformThreadHandle kNullThreadHandle = 0;
 
 inline PlatformThreadId GetCurrentThreadId() {
   return pthread_self();
-}
-inline PlatformThreadId GetThreadId(PlatformThreadHandle th) {
-  return th;
 }
 inline bool THREAD_ID_IS_SELF(PlatformThreadId thread_id) {
   return pthread_equal(thread_id, pthread_self());

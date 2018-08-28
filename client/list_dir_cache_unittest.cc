@@ -10,6 +10,7 @@
 
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
 #include "path.h"
 #include "unittest_util.h"
 
@@ -101,8 +102,9 @@ TEST_F(ListDirCacheTest, SecondTimeCacheHit) {
   const string path = GetTestDirPath();
   FileStat file_stat(path);
 
-  // Decrease mtime for Cache hit in second attempt.
-  file_stat.mtime -= 2;
+  // Decrease mtime for cache hit in second attempt.
+  ASSERT_TRUE(file_stat.mtime.has_value());
+  *file_stat.mtime -= absl::Seconds(2);
 
   EXPECT_TRUE(Cache()->GetDirEntries(path, file_stat, &entries1));
 

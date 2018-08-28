@@ -5,10 +5,11 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_SHA256_HASH_CACHE_H_
 #define DEVTOOLS_GOMA_CLIENT_SHA256_HASH_CACHE_H_
 
-#include <ctime>
 #include <string>
 #include <unordered_map>
 
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "atomic_stats_counter.h"
 #include "file_stat.h"
 #include "lockhelper.h"
@@ -17,7 +18,7 @@ namespace devtools_goma {
 
 class SHA256HashCache {
  public:
-  SHA256HashCache() : time_fn_(time) {}
+  SHA256HashCache() : now_fn_(&absl::Now) {}
 
   // If |path| exsts in |sha256_cache| and filestat is not updated,
   // the value is returned.
@@ -42,7 +43,7 @@ class SHA256HashCache {
   StatsCounter hit_;
 
   // injectable time function for test.
-  time_t (*time_fn_)(time_t*);
+  absl::Time (*now_fn_)();
 };
 
 }  // namespace devtools_goma

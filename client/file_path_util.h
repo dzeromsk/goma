@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef DEVTOOLS_GOMA_CLIENT_CLIENT_UTIL_H_
-#define DEVTOOLS_GOMA_CLIENT_CLIENT_UTIL_H_
+#ifndef DEVTOOLS_GOMA_CLIENT_FILE_PATH_UTIL_H_
+#define DEVTOOLS_GOMA_CLIENT_FILE_PATH_UTIL_H_
 
+#include <set>
 #include <string>
 
 #include "file_stat.h"
@@ -12,6 +13,8 @@
 using std::string;
 
 namespace devtools_goma {
+
+class ExecReq;
 
 // Returns true if |candidate_path| (at |cwd| with PATH=|path|) is gomacc.
 // Note: this is usually used to confirm the |candidate_path| is not gomacc.
@@ -52,6 +55,18 @@ string ResolveExtension(const string& cmd,
                         const string& cwd);
 #endif
 
+// Validate local compiler path in |req| against |compiler_name|.
+// Returns true if they match, or if no local compiler path was provided.
+bool IsLocalCompilerPathValid(const string& trace_id,
+                              const ExecReq& req,
+                              const string& compiler_name);
+
+// Remove duplicate filepath from |filenames|
+// for files normalized by JoinPathRepectAbsolute with |cwd|.
+// Relative path is taken in high priority.
+void RemoveDuplicateFiles(const std::string& cwd,
+                          std::set<std::string>* filenames);
+
 }  // namespace devtools_goma
 
-#endif  // DEVTOOLS_GOMA_CLIENT_CLIENT_UTIL_H_
+#endif  // DEVTOOLS_GOMA_CLIENT_FILE_PATH_UTIL_H_

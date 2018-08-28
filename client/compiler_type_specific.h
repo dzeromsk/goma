@@ -37,6 +37,9 @@ class CompilerTypeSpecific {
       const string& local_compiler_path,
       const std::vector<string>& compiler_info_envs) = 0;
 
+  // Returns true if DepsCache is supported.
+  virtual bool SupportsDepsCache() const = 0;
+
   // Runs include processor.
   // |trace_id| is used only for logging purpose.
   // The required_files of the return result should be in relative path form
@@ -64,6 +67,7 @@ struct CompilerTypeSpecific::IncludeProcessorResult {
 
   // true if IncludeProcessor run correctly.
   bool ok = false;
+  // the set of include files.
   std::set<string> required_files;
   bool error_to_user = false;
   string error_reason;

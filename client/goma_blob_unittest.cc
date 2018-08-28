@@ -60,10 +60,37 @@ class ExampleBlobClient : public BlobClient {
       return true;
     }
 
+    bool Store() const override {
+      return need_blob_;
+    }
+
    private:
     ExampleBlobClient* client_;
     std::unique_ptr<FileBlob> blob_;
     bool need_blob_ = false;
+    HttpClient::Status http_status_;
+  };
+
+  class Downloader : public BlobClient::Downloader {
+   public:
+    ~Downloader() override = default;
+
+    bool Download(const ExecResult_Output& output,
+                  const std::string& filename,
+                  int mode) override {
+      return true;
+    }
+    bool DownloadInBuffer(const ExecResult_Output& output,
+                          string* buffer) override {
+      return true;
+    }
+
+    int num_rpc() const override { return 0; }
+    const HttpClient::Status& http_status() const override {
+      return http_status_;
+    }
+
+   private:
     HttpClient::Status http_status_;
   };
 
@@ -78,6 +105,12 @@ class ExampleBlobClient : public BlobClient {
   }
 
   bool uploaded() const { return uploaded_; }
+
+  std::unique_ptr<BlobClient::Downloader> NewDownloader(
+      const RequesterInfo& requester_info,
+      std::string trace_id) override {
+    return absl::make_unique<Downloader>();
+  }
 
  private:
   bool uploaded_ = false;
@@ -141,6 +174,25 @@ TEST(BlobClient, ExampleEmbed) {
   EXPECT_EQ("/path/to/filename", input.filename());
   EXPECT_TRUE(input.has_content());
   EXPECT_FALSE(blob_client->uploaded());
+}
+
+TEST(BlobClient, ExampleDownload) {
+  std::unique_ptr<ExampleBlobClient> blob_client =
+      absl::make_unique<ExampleBlobClient>();
+
+  RequesterInfo requester_info;
+  std::unique_ptr<BlobClient::Downloader> downloader =
+      blob_client->NewDownloader(
+          requester_info, "trace_id");
+
+  ExecResult_Output output;
+  output.set_filename("/path/to/output");
+  FileBlob* blob = output.mutable_blob();
+  blob->set_blob_type(FileBlob::FILE);
+  blob->set_content("");
+  EXPECT_TRUE(downloader->Download(output, "/path/to/output_file", 0644));
+  string buffer;
+  EXPECT_TRUE(downloader->DownloadInBuffer(output, &buffer));
 }
 
 }  // namespace devtools_goma

@@ -6,6 +6,7 @@
 #include "mock_socket_factory.h"
 
 #ifndef _WIN32
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #else
@@ -17,6 +18,7 @@
 #include "callback.h"
 #include "compiler_specific.h"
 #include "platform_thread.h"
+#include "worker_thread.h"
 #include "worker_thread_manager.h"
 
 #include "glog/logging.h"
@@ -89,7 +91,12 @@ void MockSocketFactory::CloseSocket(ScopedSocket&& sock, bool err) {
 }
 
 MockSocketServer::MockSocketServer(WorkerThreadManager* wm)
-    : wm_(wm) {
+    : wm_(wm),
+      actions_(0) {
+#ifndef _WIN32
+  // Do not die with SIGPIPE (i.e. write after client finished).
+  signal(SIGPIPE, SIG_IGN);
+#endif
   int n = wm_->num_threads();
   pool_ = wm_->StartPool(1, "mock_socket_server");
   while (wm_->num_threads() < n + 1U)
@@ -97,15 +104,25 @@ MockSocketServer::MockSocketServer(WorkerThreadManager* wm)
 }
 
 MockSocketServer::~MockSocketServer() {
+  AutoLock lock(&mu_);
+  LOG(INFO) << "actions=" << actions_;
+  while (actions_ > 0) {
+    cond_.Wait(&mu_);
+  }
+  LOG(INFO) << "all action done";
 }
 
 void MockSocketServer::ServerRead(int sock, string* buf) {
+  {
+    AutoLock lock(&mu_);
+    ++actions_;
+  }
   wm_->RunClosureInPool(
       FROM_HERE,
       pool_,
       NewCallback(
           this, &MockSocketServer::DoServerRead, sock, buf),
-      WorkerThreadManager::PRIORITY_LOW);
+      WorkerThread::PRIORITY_LOW);
 }
 
 void MockSocketServer::DoServerRead(int sock, string* buf) {
@@ -130,15 +147,24 @@ void MockSocketServer::DoServerRead(int sock, string* buf) {
     }
     nread += n;
   }
+  {
+    AutoLock lock(&mu_);
+    --actions_;
+    cond_.Signal();
+  }
 }
 
 void MockSocketServer::ServerWrite(int sock, string buf) {
+  {
+    AutoLock lock(&mu_);
+    ++actions_;
+  }
   wm_->RunClosureInPool(
       FROM_HERE,
       pool_,
       NewCallback(
           this, &MockSocketServer::DoServerWrite, sock, buf),
-      WorkerThreadManager::PRIORITY_LOW);
+      WorkerThread::PRIORITY_LOW);
 }
 
 void MockSocketServer::DoServerWrite(int sock, string buf) {
@@ -158,15 +184,24 @@ void MockSocketServer::DoServerWrite(int sock, string buf) {
     }
     written += n;
   }
+  {
+    AutoLock lock(&mu_);
+    --actions_;
+    cond_.Signal();
+  }
 }
 
 void MockSocketServer::ServerClose(int sock) {
+  {
+    AutoLock lock(&mu_);
+    ++actions_;
+  }
   wm_->RunClosureInPool(
       FROM_HERE,
       pool_,
       NewCallback(
           this, &MockSocketServer::DoServerClose, sock),
-      WorkerThreadManager::PRIORITY_LOW);
+      WorkerThread::PRIORITY_LOW);
 }
 
 void MockSocketServer::DoServerClose(int sock) {
@@ -176,21 +211,35 @@ void MockSocketServer::DoServerClose(int sock) {
 #else
   closesocket(sock);
 #endif
+  {
+    AutoLock lock(&mu_);
+    --actions_;
+    cond_.Signal();
+  }
 }
 
 void MockSocketServer::ServerWait(absl::Duration wait_time) {
+  {
+    AutoLock lock(&mu_);
+    ++actions_;
+  }
   wm_->RunClosureInPool(
       FROM_HERE,
       pool_,
       NewCallback(
           this, &MockSocketServer::DoServerWait, wait_time),
-      WorkerThreadManager::PRIORITY_LOW);
+      WorkerThread::PRIORITY_LOW);
 }
 
 void MockSocketServer::DoServerWait(absl::Duration wait_time) {
   LOG(INFO) << "DoServerWait " << wait_time;
   absl::SleepFor(wait_time);
   LOG(INFO) << "DoServerWait " << wait_time << " done";
+  {
+    AutoLock lock(&mu_);
+    --actions_;
+    cond_.Signal();
+  }
 }
 
 }  // namespace devtools_goma

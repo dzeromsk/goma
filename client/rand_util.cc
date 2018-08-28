@@ -67,4 +67,14 @@ std::string GetRandomAlphanumeric(size_t length) {
   return buf;
 }
 
+absl::Duration RandomDuration(absl::Duration min, absl::Duration max) {
+  DCHECK_LE(min, max);
+  const int64_t min_ns = absl::ToInt64Nanoseconds(min);
+  const int64_t max_ns = absl::ToInt64Nanoseconds(max);
+
+  MyCryptographicSecureRNG generator;
+  std::uniform_int_distribution<> distribution(min_ns, max_ns);
+  return absl::Nanoseconds(distribution(generator));
+}
+
 }  // namespace devtools_goma

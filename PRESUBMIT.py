@@ -11,7 +11,7 @@ See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
 for more details about the presubmit API built into git-cl.
 """
 
-def CheckChangeLintsClean(input_api, output_api, source_file_filter=None):
+def CheckChangeLintsClean(input_api, output_api):
   """Checks that all '.cc' and '.h' files pass cpplint.py.
 
   It is clone of depot_tools/presubmit_canned_checks.py, but hacks on
@@ -28,8 +28,14 @@ def CheckChangeLintsClean(input_api, output_api, source_file_filter=None):
 
   input_api.cpplint._SetFilters('-build/include,-build/include_order,'
                                 '-readability/casting,-runtime/int')
+
+  def Filter(affected_file):
+    return input_api.FilterSourceFile(
+        affected_file,
+        black_list=input_api.DEFAULT_BLACK_LIST+(r".+\.pb\.(h|cc)$",))
+
   files = [f.AbsoluteLocalPath() for f in
-           input_api.AffectedSourceFiles(source_file_filter)]
+           input_api.AffectedSourceFiles(Filter)]
   for file_name in files:
     if _RE_IS_TEST.match(file_name):
       level = 5
@@ -106,3 +112,5 @@ def CheckChangeOnUpload(input_api, output_api):
   results += input_api.canned_checks.CheckGNFormatted(input_api, output_api)
   results += CheckGNGenChecked(input_api, output_api)
   return results
+
+

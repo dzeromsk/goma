@@ -192,7 +192,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
            access_token_.empty();
   }
 
-  void RunAfterRefresh(WorkerThreadManager::ThreadId thread_id,
+  void RunAfterRefresh(WorkerThread::ThreadId thread_id,
                        OneshotClosure* closure) override LOCKS_EXCLUDED(mu_) {
     const absl::Time now = absl::Now();
     {
@@ -202,7 +202,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
         // access token is valid or oauth2 not available, go ahead.
         wm_->RunClosureInThread(FROM_HERE,
                                 thread_id, closure,
-                                WorkerThreadManager::PRIORITY_MED);
+                                WorkerThread::PRIORITY_MED);
         return;
       }
       if (last_network_error_time_ &&
@@ -213,7 +213,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
                      << " pending=" << kErrorRefreshPendingTimeout;
         wm_->RunClosureInThread(FROM_HERE,
                                 thread_id, closure,
-                                WorkerThreadManager::PRIORITY_MED);
+                                WorkerThread::PRIORITY_MED);
         return;
       }
       // should refresh access token.
@@ -222,8 +222,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
         case NOT_STARTED: // first run.
           state_ = RUN;
           refresh_deadline_ = now + kRefreshTimeout;
-          refresh_backoff_duration_ =
-              absl::Milliseconds(client_->options().min_retry_backoff_ms);
+          refresh_backoff_duration_ = client_->options().min_retry_backoff;
           break;
         case RUN:
           return;
@@ -237,7 +236,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
           refresh_task_thread_id_,
           NewCallback(
               this, &GoogleOAuth2AccessTokenRefreshTask::RunRefresh),
-          WorkerThreadManager::PRIORITY_IMMEDIATE);
+          WorkerThread::PRIORITY_IMMEDIATE);
     }
   }
 
@@ -275,7 +274,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
               refresh_task_thread_id_,
               NewCallback(
                   this, &GoogleOAuth2AccessTokenRefreshTask::Cancel),
-              WorkerThreadManager::PRIORITY_IMMEDIATE);
+              WorkerThread::PRIORITY_IMMEDIATE);
         }
       }
     }
@@ -360,19 +359,16 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
                        << " refresh_backoff_duration_="
                        << refresh_backoff_duration_;
 
-          auto refresh_backoff_ms =
-              absl::ToInt64Milliseconds(refresh_backoff_duration_);
           refresh_backoff_duration_ =
-              absl::Milliseconds(HttpClient::BackoffMsec(
-                  client_->options(), refresh_backoff_ms, true));
+              HttpClient::GetNextBackoff(
+                  client_->options(), refresh_backoff_duration_, true);
           LOG(INFO) << "backoff"
                     << " refresh_backoff_duration="
                     << refresh_backoff_duration_;
           CHECK(cancel_refresh_ == nullptr)
               << "Somebody else seems to run refresh task and failing?";
           cancel_refresh_ = wm_->RunDelayedClosureInThread(
-              FROM_HERE, wm_->GetCurrentThreadId(),
-              absl::ToInt64Milliseconds(refresh_backoff_duration_),
+              FROM_HERE, wm_->GetCurrentThreadId(), refresh_backoff_duration_,
               NewCallback(this,
                           &GoogleOAuth2AccessTokenRefreshTask::RunRefresh));
           return;
@@ -393,7 +389,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
         << " err_message=" << status_->err_message
         << " http=" << status_->http_return_code;
     VLOG(1) << "Get access token done.";
-    std::vector<std::pair<WorkerThreadManager::ThreadId,
+    std::vector<std::pair<WorkerThread::ThreadId,
                           OneshotClosure*>> callbacks;
     absl::Duration next_update_in;
     {
@@ -410,7 +406,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
     for (const auto& callback : callbacks) {
       wm_->RunClosureInThread(FROM_HERE,
                               callback.first, callback.second,
-                              WorkerThreadManager::PRIORITY_MED);
+                              WorkerThread::PRIORITY_MED);
     }
     if (next_update_in > absl::ZeroDuration()) {
       {
@@ -427,8 +423,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
 
         DCHECK(THREAD_ID_IS_SELF(refresh_task_thread_id_));
         cancel_refresh_now_ = wm_->RunDelayedClosureInThread(
-            FROM_HERE, refresh_task_thread_id_,
-            absl::ToInt64Milliseconds(next_update_in),
+            FROM_HERE, refresh_task_thread_id_, next_update_in,
             NewCallback(this,
                         &GoogleOAuth2AccessTokenRefreshTask::RunRefreshNow));
       }
@@ -487,8 +482,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
       case NOT_STARTED: // first run.
         state_ = RUN;
         refresh_deadline_ = absl::Now() + kRefreshTimeout;
-        refresh_backoff_duration_ =
-            absl::Milliseconds(client_->options().min_retry_backoff_ms);
+        refresh_backoff_duration_ = client_->options().min_retry_backoff;
         break;
       case RUN:
         return;
@@ -531,7 +525,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
   absl::Time token_expiration_time_ GUARDED_BY(mu_);
   absl::optional<absl::Time> last_network_error_time_ GUARDED_BY(mu_);
   absl::Duration refresh_backoff_duration_ GUARDED_BY(mu_);
-  std::vector<std::pair<WorkerThreadManager::ThreadId, OneshotClosure*>>
+  std::vector<std::pair<WorkerThread::ThreadId, OneshotClosure*>>
       pending_tasks_ GUARDED_BY(mu_);
 
   // This class cannot have an ownership of CancelableClosure.
@@ -545,7 +539,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
       nullptr;
   WorkerThreadManager::CancelableClosure* cancel_refresh_ GUARDED_BY(mu_) =
       nullptr;
-  WorkerThreadManager::ThreadId refresh_task_thread_id_ GUARDED_BY(mu_);
+  WorkerThread::ThreadId refresh_task_thread_id_ GUARDED_BY(mu_);
   bool has_set_thread_id_ GUARDED_BY(mu_) = false;
   bool shutting_down_ GUARDED_BY(mu_) = false;
 

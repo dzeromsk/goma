@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 
 #include "absl/memory/memory.h"
+#include "absl/time/time.h"
 #include "callback.h"
 #include "compiler_specific.h"
 #include "lockhelper.h"
@@ -27,6 +28,7 @@
 #include "scoped_fd.h"
 #include "simple_timer.h"
 #include "socket_descriptor.h"
+#include "worker_thread.h"
 
 namespace devtools_goma {
 
@@ -43,16 +45,18 @@ class WorkerThreadManagerTest : public ::testing::Test {
  protected:
   class TestReadContext {
    public:
-    TestReadContext(int fd, double timeout)
-        : fd_(fd), timeout_(timeout), num_read_(-1), d_(nullptr),
-          timeout_called_(false) {
-    }
+    TestReadContext(int fd, absl::Duration timeout)
+        : fd_(fd),
+          timeout_(timeout),
+          num_read_(-1),
+          socket_descriptor_(nullptr),
+          timeout_called_(false) {}
     ~TestReadContext() {
     }
     const int fd_;
-    const double timeout_;
+    const absl::Duration timeout_;
     int num_read_;
-    SocketDescriptor* d_;
+    SocketDescriptor* socket_descriptor_;
     bool timeout_called_;
 
    private:
@@ -62,14 +66,16 @@ class WorkerThreadManagerTest : public ::testing::Test {
   class TestWriteContext {
    public:
     TestWriteContext(int fd, int total_write)
-        : fd_(fd), total_write_(total_write), num_write_(-1), d_(nullptr) {
-    }
+        : fd_(fd),
+          total_write_(total_write),
+          num_write_(-1),
+          socket_descriptor_(nullptr) {}
     ~TestWriteContext() {
     }
     const int fd_;
     const int total_write_;
     int num_write_;
-    SocketDescriptor* d_;
+    SocketDescriptor* socket_descriptor_;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(TestWriteContext);
@@ -135,12 +141,12 @@ class WorkerThreadManagerTest : public ::testing::Test {
   }
 
   OneshotClosure* NewTestThreadId(
-      WorkerThreadManager::ThreadId id) {
+      WorkerThread::ThreadId id) {
     return NewCallback(
         this, &WorkerThreadManagerTest::TestThreadId, id);
   }
 
-  void TestThreadId(WorkerThreadManager::ThreadId id) {
+  void TestThreadId(WorkerThread::ThreadId id) {
     EXPECT_EQ(id, wm_->GetCurrentThreadId());
     AutoLock lock(&mu_);
     ++num_test_threadid_;
@@ -181,7 +187,7 @@ class WorkerThreadManagerTest : public ::testing::Test {
       AutoLock lock(&mu_);
       EXPECT_GT(tc->fd_, 0);
       EXPECT_LT(tc->num_read_, 0);
-      EXPECT_TRUE(tc->d_ == nullptr);
+      EXPECT_TRUE(tc->socket_descriptor_ == nullptr);
     }
     return NewCallback(
         this, &WorkerThreadManagerTest::TestDescriptorRead, tc);
@@ -189,53 +195,51 @@ class WorkerThreadManagerTest : public ::testing::Test {
 
   void TestDescriptorRead(TestReadContext* tc) {
     ScopedSocket sock;
-    double timeout = 0;
+    absl::Duration timeout;
     {
       AutoLock lock(&mu_);
       EXPECT_LT(tc->num_read_, 0);
-      EXPECT_TRUE(tc->d_ == nullptr);
+      EXPECT_TRUE(tc->socket_descriptor_ == nullptr);
       timeout = tc->timeout_;
       EXPECT_FALSE(tc->timeout_called_);
       sock.reset(tc->fd_);
     }
-    SocketDescriptor* d =
-        wm_->RegisterSocketDescriptor(
-            std::move(sock), WorkerThreadManager::PRIORITY_HIGH);
-    d->NotifyWhenReadable(
+    SocketDescriptor* descriptor = wm_->RegisterSocketDescriptor(
+        std::move(sock), WorkerThread::PRIORITY_HIGH);
+    descriptor->NotifyWhenReadable(
         NewPermanentCallback(this, &WorkerThreadManagerTest::DoRead, tc));
-    if (timeout > 0) {
-      d->NotifyWhenTimedout(
-          timeout,
-          NewCallback(
-              this, &WorkerThreadManagerTest::DoTimeout, tc));
+    if (timeout > absl::ZeroDuration()) {
+      descriptor->NotifyWhenTimedout(
+          timeout, NewCallback(this, &WorkerThreadManagerTest::DoTimeout, tc));
     }
     AutoLock lock(&mu_);
     tc->num_read_ = 0;
-    tc->d_ = d;
+    tc->socket_descriptor_ = descriptor;
     cond_.Signal();
   }
 
   void DoRead(TestReadContext* tc) {
-    SocketDescriptor* d = nullptr;
+    SocketDescriptor* descriptor = nullptr;
     {
       AutoLock lock(&mu_);
       EXPECT_GE(tc->num_read_, 0);
-      EXPECT_EQ(tc->fd_, tc->d_->fd());
-      EXPECT_EQ(WorkerThreadManager::PRIORITY_HIGH, tc->d_->priority());
-      d = tc->d_;
+      EXPECT_EQ(tc->fd_, tc->socket_descriptor_->fd());
+      EXPECT_EQ(WorkerThread::PRIORITY_HIGH,
+                tc->socket_descriptor_->priority());
+      descriptor = tc->socket_descriptor_;
     }
     char buf[1] = { 42 };
-    int n = d->Read(buf, 1);
+    int n = descriptor->Read(buf, 1);
     if (n > 0) {
       EXPECT_EQ(1, n);
     } else {
-      d->StopRead();
+      descriptor->StopRead();
       wm_->RunClosureInThread(
           FROM_HERE,
           wm_->GetCurrentThreadId(),
           NewCallback(
               this, &WorkerThreadManagerTest::DoStopRead, tc),
-          WorkerThreadManager::PRIORITY_IMMEDIATE);
+          WorkerThread::PRIORITY_IMMEDIATE);
     }
     AutoLock lock(&mu_);
     ++tc->num_read_;
@@ -250,22 +254,23 @@ class WorkerThreadManagerTest : public ::testing::Test {
   }
 
   void DoTimeout(TestReadContext* tc) {
-    SocketDescriptor* d = nullptr;
+    SocketDescriptor* descriptor = nullptr;
     {
       AutoLock lock(&mu_);
-      EXPECT_EQ(tc->fd_, tc->d_->fd());
-      EXPECT_EQ(WorkerThreadManager::PRIORITY_HIGH, tc->d_->priority());
-      EXPECT_GT(tc->timeout_, 0.0);
+      EXPECT_EQ(tc->fd_, tc->socket_descriptor_->fd());
+      EXPECT_EQ(WorkerThread::PRIORITY_HIGH,
+                tc->socket_descriptor_->priority());
+      EXPECT_GT(tc->timeout_, absl::ZeroDuration());
       EXPECT_FALSE(tc->timeout_called_);
-      d = tc->d_;
+      descriptor = tc->socket_descriptor_;
     }
-    d->StopRead();
+    descriptor->StopRead();
     wm_->RunClosureInThread(
         FROM_HERE,
         wm_->GetCurrentThreadId(),
         NewCallback(
             this, &WorkerThreadManagerTest::DoStopRead, tc),
-        WorkerThreadManager::PRIORITY_IMMEDIATE);
+        WorkerThread::PRIORITY_IMMEDIATE);
     AutoLock lock(&mu_);
     tc->timeout_called_ = true;
     cond_.Signal();
@@ -273,27 +278,28 @@ class WorkerThreadManagerTest : public ::testing::Test {
 
   void DoStopRead(TestReadContext* tc) {
     int fd;
-    SocketDescriptor* d = nullptr;
+    SocketDescriptor* descriptor = nullptr;
     {
       AutoLock lock(&mu_);
-      EXPECT_EQ(tc->fd_, tc->d_->fd());
-      EXPECT_EQ(WorkerThreadManager::PRIORITY_HIGH, tc->d_->priority());
+      EXPECT_EQ(tc->fd_, tc->socket_descriptor_->fd());
+      EXPECT_EQ(WorkerThread::PRIORITY_HIGH,
+                tc->socket_descriptor_->priority());
       fd = tc->fd_;
-      d = tc->d_;
+      descriptor = tc->socket_descriptor_;
     }
-    d->ClearReadable();
-    d->ClearTimeout();
-    ScopedSocket sock(wm_->DeleteSocketDescriptor(d));
+    descriptor->ClearReadable();
+    descriptor->ClearTimeout();
+    ScopedSocket sock(wm_->DeleteSocketDescriptor(descriptor));
     EXPECT_EQ(fd, sock.get());
     sock.Close();
     AutoLock lock(&mu_);
-    tc->d_ = nullptr;
+    tc->socket_descriptor_ = nullptr;
     cond_.Signal();
   }
 
   void WaitTestReadFinish(TestReadContext* tc) {
     AutoLock lock(&mu_);
-    while (tc->d_ != nullptr) {
+    while (tc->socket_descriptor_ != nullptr) {
       cond_.Wait(&mu_);
     }
   }
@@ -303,7 +309,7 @@ class WorkerThreadManagerTest : public ::testing::Test {
       AutoLock lock(&mu_);
       EXPECT_GT(tc->fd_, 0);
       EXPECT_LT(tc->num_write_, 0);
-      EXPECT_TRUE(tc->d_ == nullptr);
+      EXPECT_TRUE(tc->socket_descriptor_ == nullptr);
     }
     return NewCallback(
         this, &WorkerThreadManagerTest::TestDescriptorWrite, tc);
@@ -314,48 +320,48 @@ class WorkerThreadManagerTest : public ::testing::Test {
     {
       AutoLock lock(&mu_);
       EXPECT_LT(tc->num_write_, 0);
-      EXPECT_TRUE(tc->d_ == nullptr);
+      EXPECT_TRUE(tc->socket_descriptor_ == nullptr);
       sock.reset(tc->fd_);
     }
-    SocketDescriptor* d =
-        wm_->RegisterSocketDescriptor(
-            std::move(sock), WorkerThreadManager::PRIORITY_HIGH);
-    d->NotifyWhenWritable(
+    SocketDescriptor* descriptor = wm_->RegisterSocketDescriptor(
+        std::move(sock), WorkerThread::PRIORITY_HIGH);
+    descriptor->NotifyWhenWritable(
         NewPermanentCallback(this, &WorkerThreadManagerTest::DoWrite, tc));
     AutoLock lock(&mu_);
     tc->num_write_ = 0;
-    tc->d_ = d;
+    tc->socket_descriptor_ = descriptor;
     cond_.Signal();
   }
 
   void DoWrite(TestWriteContext* tc) {
     int num_write = 0;
     int total_write = 0;
-    SocketDescriptor* d = nullptr;
+    SocketDescriptor* descriptor = nullptr;
     {
       AutoLock lock(&mu_);
       EXPECT_GE(tc->num_write_, 0);
-      EXPECT_EQ(tc->fd_, tc->d_->fd());
-      EXPECT_EQ(WorkerThreadManager::PRIORITY_HIGH, tc->d_->priority());
+      EXPECT_EQ(tc->fd_, tc->socket_descriptor_->fd());
+      EXPECT_EQ(WorkerThread::PRIORITY_HIGH,
+                tc->socket_descriptor_->priority());
       num_write = tc->num_write_;
       total_write = tc->total_write_;
-      d = tc->d_;
+      descriptor = tc->socket_descriptor_;
     }
     char buf[1] = { 42 };
-    int n = 0;
+    ssize_t write_size = 0;
     if (num_write < total_write) {
-      n = d->Write(buf, 1);
+      write_size = descriptor->Write(buf, 1);
     }
-    if (n > 0) {
-      EXPECT_EQ(1, n);
+    if (write_size > 0) {
+      EXPECT_EQ(1, write_size);
     } else {
-      d->StopWrite();
+      descriptor->StopWrite();
       wm_->RunClosureInThread(
           FROM_HERE,
           wm_->GetCurrentThreadId(),
           NewCallback(
               this, &WorkerThreadManagerTest::DoStopWrite, tc),
-          WorkerThreadManager::PRIORITY_IMMEDIATE);
+          WorkerThread::PRIORITY_IMMEDIATE);
       return;
     }
     AutoLock lock(&mu_);
@@ -372,31 +378,32 @@ class WorkerThreadManagerTest : public ::testing::Test {
 
   void DoStopWrite(TestWriteContext* tc) {
     int fd;
-    SocketDescriptor* d = nullptr;
+    SocketDescriptor* descriptor = nullptr;
     {
       AutoLock lock(&mu_);
-      EXPECT_EQ(tc->fd_, tc->d_->fd());
-      EXPECT_EQ(WorkerThreadManager::PRIORITY_HIGH, tc->d_->priority());
+      EXPECT_EQ(tc->fd_, tc->socket_descriptor_->fd());
+      EXPECT_EQ(WorkerThread::PRIORITY_HIGH,
+                tc->socket_descriptor_->priority());
       fd = tc->fd_;
-      d = tc->d_;
+      descriptor = tc->socket_descriptor_;
     }
-    d->ClearWritable();
-    ScopedSocket sock(wm_->DeleteSocketDescriptor(d));
+    descriptor->ClearWritable();
+    ScopedSocket sock(wm_->DeleteSocketDescriptor(descriptor));
     EXPECT_EQ(fd, sock.get());
     sock.Close();
     AutoLock lock(&mu_);
-    tc->d_ = nullptr;
+    tc->socket_descriptor_ = nullptr;
     cond_.Signal();
   }
 
   void WaitTestWriteFinish(TestWriteContext* tc) {
     AutoLock lock(&mu_);
-    while (tc->d_ != nullptr) {
+    while (tc->socket_descriptor_ != nullptr) {
       cond_.Wait(&mu_);
     }
   }
 
-  WorkerThreadManager::ThreadId test_threadid() const {
+  WorkerThread::ThreadId test_threadid() const {
     AutoLock lock(&mu_);
     return test_threadid_;
   }
@@ -416,7 +423,7 @@ class WorkerThreadManagerTest : public ::testing::Test {
 
  private:
   ConditionVariable cond_;
-  WorkerThreadManager::ThreadId test_threadid_;
+  WorkerThread::ThreadId test_threadid_;
   int num_test_threadid_;
   int periodic_counter_;
   DISALLOW_COPY_AND_ASSIGN(WorkerThreadManagerTest);
@@ -431,40 +438,40 @@ TEST_F(WorkerThreadManagerTest, NoRun) {
 TEST_F(WorkerThreadManagerTest, RunClosure) {
   wm_->Start(2);
   wm_->RunClosure(FROM_HERE, NewTestRun(),
-                  WorkerThreadManager::PRIORITY_LOW);
+                  WorkerThread::PRIORITY_LOW);
   WaitTestRun();
   wm_->Finish();
-  EXPECT_NE(test_threadid(), static_cast<WorkerThreadManager::ThreadId>(0));
+  EXPECT_NE(test_threadid(), static_cast<WorkerThread::ThreadId>(0));
   EXPECT_NE(test_threadid(), wm_->GetCurrentThreadId());
 }
 
 TEST_F(WorkerThreadManagerTest, Dispatch) {
   wm_->Start(1);
   wm_->RunClosure(FROM_HERE, NewTestDispatch(),
-                  WorkerThreadManager::PRIORITY_LOW);
+                  WorkerThread::PRIORITY_LOW);
   wm_->RunClosure(FROM_HERE, NewTestRun(),
-                  WorkerThreadManager::PRIORITY_LOW);
+                  WorkerThread::PRIORITY_LOW);
   WaitTestRun();
   wm_->Finish();
-  EXPECT_NE(test_threadid(), static_cast<WorkerThreadManager::ThreadId>(0));
+  EXPECT_NE(test_threadid(), static_cast<WorkerThread::ThreadId>(0));
   EXPECT_NE(test_threadid(), wm_->GetCurrentThreadId());
 }
 
 TEST_F(WorkerThreadManagerTest, RunClosureInThread) {
   wm_->Start(2);
   wm_->RunClosure(FROM_HERE, NewTestRun(),
-                  WorkerThreadManager::PRIORITY_LOW);
+                  WorkerThread::PRIORITY_LOW);
   WaitTestRun();
-  EXPECT_NE(test_threadid(), static_cast<WorkerThreadManager::ThreadId>(0));
+  EXPECT_NE(test_threadid(), static_cast<WorkerThread::ThreadId>(0));
   EXPECT_NE(test_threadid(), wm_->GetCurrentThreadId());
-  WorkerThreadManager::ThreadId id = test_threadid();
+  WorkerThread::ThreadId id = test_threadid();
   Reset();
   EXPECT_TRUE(!test_threadid());
   EXPECT_EQ(num_test_threadid(), 0);
   const int kNumTestThreadHandle = 100;
   for (int i = 0; i < kNumTestThreadHandle; ++i) {
     wm_->RunClosureInThread(FROM_HERE, id, NewTestThreadId(id),
-                          WorkerThreadManager::PRIORITY_LOW);
+                          WorkerThread::PRIORITY_LOW);
   }
   WaitTestThreadHandle(kNumTestThreadHandle);
   wm_->Finish();
@@ -478,28 +485,28 @@ TEST_F(WorkerThreadManagerTest, RunClosureInPool) {
   EXPECT_EQ(2U, wm_->num_threads());
 
   wm_->RunClosure(FROM_HERE, NewTestRun(),
-                  WorkerThreadManager::PRIORITY_LOW);
+                  WorkerThread::PRIORITY_LOW);
   WaitTestRun();
-  EXPECT_NE(test_threadid(), static_cast<WorkerThreadManager::ThreadId>(0));
+  EXPECT_NE(test_threadid(), static_cast<WorkerThread::ThreadId>(0));
   EXPECT_NE(test_threadid(), wm_->GetCurrentThreadId());
-  WorkerThreadManager::ThreadId free_id = test_threadid();
+  WorkerThread::ThreadId free_id = test_threadid();
   Reset();
   EXPECT_TRUE(!test_threadid());
 
   wm_->RunClosureInPool(FROM_HERE, pool, NewTestRun(),
-                        WorkerThreadManager::PRIORITY_LOW);
+                        WorkerThread::PRIORITY_LOW);
   WaitTestRun();
-  EXPECT_NE(test_threadid(), static_cast<WorkerThreadManager::ThreadId>(0));
+  EXPECT_NE(test_threadid(), static_cast<WorkerThread::ThreadId>(0));
   EXPECT_NE(test_threadid(), wm_->GetCurrentThreadId());
   EXPECT_NE(test_threadid(), free_id);
-  WorkerThreadManager::ThreadId pool_id = test_threadid();
+  WorkerThread::ThreadId pool_id = test_threadid();
   Reset();
   EXPECT_TRUE(!test_threadid());
   EXPECT_TRUE(!num_test_threadid());
   const int kNumTestThreadHandle = 100;
   for (int i = 0; i < kNumTestThreadHandle; ++i) {
     wm_->RunClosureInPool(FROM_HERE, pool, NewTestThreadId(pool_id),
-                          WorkerThreadManager::PRIORITY_LOW);
+                          WorkerThread::PRIORITY_LOW);
   }
   WaitTestThreadHandle(kNumTestThreadHandle);
   wm_->Finish();
@@ -509,26 +516,26 @@ TEST_F(WorkerThreadManagerTest, PeriodicClosure) {
   wm_->Start(1);
   SimpleTimer timer;
   PeriodicClosureId id = wm_->RegisterPeriodicClosure(
-      FROM_HERE, 100, NewPeriodicRun());
+      FROM_HERE, absl::Milliseconds(100), NewPeriodicRun());
   WaitTestPeriodicRun(2);
   wm_->UnregisterPeriodicClosure(id);
   wm_->Finish();
-  EXPECT_GE(timer.GetInMilliseconds(), 200);
+  EXPECT_GE(timer.GetDuration(), absl::Milliseconds(200));
 }
 
 TEST_F(WorkerThreadManagerTest, DescriptorReadable) {
   wm_->Start(1);
   int socks[2];
   ASSERT_EQ(0, OpenSocketPairForTest(socks));
-  TestReadContext tc(socks[0], 0.0);
+  TestReadContext tc(socks[0], absl::ZeroDuration());
   ScopedSocket s(socks[1]);
   wm_->RunClosure(FROM_HERE, NewTestDescriptorRead(&tc),
-                  WorkerThreadManager::PRIORITY_LOW);
+                  WorkerThread::PRIORITY_LOW);
   WaitTestRead(&tc, 0);
   {
     AutoLock lock(&mu_);
     EXPECT_EQ(0, tc.num_read_);
-    EXPECT_TRUE(tc.d_ != nullptr);
+    EXPECT_TRUE(tc.socket_descriptor_ != nullptr);
   }
   char buf[1] = { 42 };
   EXPECT_EQ(1, s.Write(buf, 1));
@@ -536,14 +543,14 @@ TEST_F(WorkerThreadManagerTest, DescriptorReadable) {
   {
     AutoLock lock(&mu_);
     EXPECT_EQ(1, tc.num_read_);
-    EXPECT_TRUE(tc.d_ != nullptr);
+    EXPECT_TRUE(tc.socket_descriptor_ != nullptr);
   }
   s.Close();
   WaitTestReadFinish(&tc);
   {
     AutoLock lock(&mu_);
     EXPECT_EQ(2, tc.num_read_);
-    EXPECT_TRUE(tc.d_ == nullptr);
+    EXPECT_TRUE(tc.socket_descriptor_ == nullptr);
   }
   wm_->Finish();
 }
@@ -557,12 +564,12 @@ TEST_F(WorkerThreadManagerTest, DescriptorWritable) {
   ScopedSocket s0(socks[0]);
   ScopedSocket s1(socks[1]);
   wm_->RunClosure(FROM_HERE, NewTestDescriptorWrite(&tc),
-                  WorkerThreadManager::PRIORITY_LOW);
+                  WorkerThread::PRIORITY_LOW);
   WaitTestWrite(&tc, 1);
   {
     AutoLock lock(&mu_);
     EXPECT_GE(tc.num_write_, 1);
-    EXPECT_TRUE(tc.d_ != nullptr);
+    EXPECT_TRUE(tc.socket_descriptor_ != nullptr);
   }
   char buf[1] = { 42 };
   int total_read = 0;
@@ -581,7 +588,7 @@ TEST_F(WorkerThreadManagerTest, DescriptorWritable) {
   WaitTestWriteFinish(&tc);
   {
     AutoLock lock(&mu_);
-    EXPECT_TRUE(tc.d_ == nullptr);
+    EXPECT_TRUE(tc.socket_descriptor_ == nullptr);
     EXPECT_EQ(kTotalWrite, tc.num_write_);
     EXPECT_EQ(kTotalWrite, total_read);
   }
@@ -593,15 +600,15 @@ TEST_F(WorkerThreadManagerTest, DescriptorTimeout) {
   wm_->Start(1);
   int socks[2];
   ASSERT_EQ(0, OpenSocketPairForTest(socks));
-  TestReadContext tc(socks[0], 0.5);
+  TestReadContext tc(socks[0], absl::Milliseconds(500));
   ScopedSocket s(socks[1]);
   wm_->RunClosure(FROM_HERE, NewTestDescriptorRead(&tc),
-                  WorkerThreadManager::PRIORITY_LOW);
+                  WorkerThread::PRIORITY_LOW);
   WaitTestRead(&tc, 0);
   {
     AutoLock lock(&mu_);
     EXPECT_EQ(0, tc.num_read_);
-    EXPECT_TRUE(tc.d_ != nullptr);
+    EXPECT_TRUE(tc.socket_descriptor_ != nullptr);
   }
   char buf[1] = { 42 };
   EXPECT_EQ(1, s.Write(buf, 1));
@@ -610,14 +617,14 @@ TEST_F(WorkerThreadManagerTest, DescriptorTimeout) {
     AutoLock lock(&mu_);
     EXPECT_EQ(1, tc.num_read_);
     EXPECT_FALSE(tc.timeout_called_);
-    EXPECT_TRUE(tc.d_ != nullptr);
+    EXPECT_TRUE(tc.socket_descriptor_ != nullptr);
   }
   WaitTestReadFinish(&tc);
   {
     AutoLock lock(&mu_);
     EXPECT_EQ(1, tc.num_read_);
     EXPECT_TRUE(tc.timeout_called_);
-    EXPECT_TRUE(tc.d_ == nullptr);
+    EXPECT_TRUE(tc.socket_descriptor_ == nullptr);
   }
   wm_->Finish();
 }

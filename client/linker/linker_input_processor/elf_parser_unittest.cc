@@ -96,9 +96,9 @@ TEST_F(ElfParserTest, UsrLib) {
   ASSERT_TRUE(ListDirectory("/usr/lib", &entries));
   int num = 0;
   SimpleTimer timer;
-  double elf_parser_p_time = 0;
-  double elf_parser_s_time = 0;
-  double objdump_time = 0;
+  absl::Duration elf_parser_p_time;
+  absl::Duration elf_parser_s_time;
+  absl::Duration objdump_time;
   for (size_t i = 0; i < entries.size(); ++i) {
     string name = entries[i].name;
     if (name == "." || name == "..")
@@ -122,7 +122,7 @@ TEST_F(ElfParserTest, UsrLib) {
     EXPECT_TRUE(parser->valid()) << fullname;
     parser->UseProgramHeader(true);
     EXPECT_TRUE(parser->ReadDynamicNeeded(&p_needed)) << fullname;
-    elf_parser_p_time += timer.GetInSeconds();
+    elf_parser_p_time += timer.GetDuration();
 
     std::vector<string> s_needed;
     timer.Start();
@@ -131,12 +131,12 @@ TEST_F(ElfParserTest, UsrLib) {
     EXPECT_TRUE(parser->valid()) << fullname;
     parser->UseProgramHeader(false);
     EXPECT_TRUE(parser->ReadDynamicNeeded(&s_needed)) << fullname;
-    elf_parser_s_time += timer.GetInSeconds();
+    elf_parser_s_time += timer.GetDuration();
 
     std::vector<string> expected_needed;
     timer.Start();
     GetObjdumpOutput(fullname, &expected_needed);
-    objdump_time += timer.GetInSeconds();
+    objdump_time += timer.GetDuration();
 
     EXPECT_EQ(expected_needed, p_needed) << fullname;
     EXPECT_EQ(expected_needed, s_needed) << fullname;

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "absl/memory/memory.h"
+#include "absl/time/time.h"
 #include "compiler_flags.h"
 #include "compiler_info.h"
 #include "cxx/cxx_compiler_info.h"
@@ -33,9 +34,9 @@
 using std::string;
 
 namespace {
-const int kDepsCacheAliveDuration = 3 * 24 * 3600;
-const int kDepsCacheThreshold = 10;
-const int kDepsCacheMaxProtoSizeInMB = 64;
+constexpr absl::Duration kDepsCacheAliveDuration = absl::Hours(3 * 24);
+constexpr int kDepsCacheThreshold = 10;
+constexpr int kDepsCacheMaxProtoSizeInMB = 64;
 }
 
 namespace devtools_goma {
@@ -84,9 +85,9 @@ class DepsCacheTest : public testing::Test {
   }
 
   bool UpdateLastUsedTime(const DepsCache::Identifier& identifier,
-                          time_t last_used_time) {
+                          absl::optional<absl::Time> last_used_time) {
     CHECK(identifier.has_value());
-    return dc_->UpdateLastUsedTime(identifier, last_used_time);
+    return dc_->UpdateLastUsedTime(identifier, std::move(last_used_time));
   }
 
   void UpdateGomaBuiltRevision() {
@@ -123,7 +124,7 @@ class DepsCacheTest : public testing::Test {
   }
 
   void UpdateIdentifierLastUsedTime(const DepsCache::Identifier& identifier,
-                                    time_t last_used_time) {
+                                    absl::Time last_used_time) {
     CHECK(identifier.has_value());
 
     const string& deps_path = file::JoinPath(tmpdir_->tmpdir(), ".goma_deps");
@@ -141,7 +142,7 @@ class DepsCacheTest : public testing::Test {
     for (int i = 0; i < table->record_size(); ++i) {
       GomaDependencyTableRecord* record = table->mutable_record(i);
       if (record->identifier() == identifier.value().ToHexString()) {
-        record->set_last_used_time(last_used_time);
+        record->set_last_used_time(absl::ToTimeT(last_used_time));
       }
     }
 
@@ -598,7 +599,8 @@ TEST_F(DepsCacheTest, RestartWithDirectiveHashUpdate) {
     // mtime might be the same as before (machine too fast).
     // So, we'd like to update mtime here to improve test stability.
     FileStat file_stat = file_stat_cache.Get(acc);
-    file_stat.mtime += 1;
+    ASSERT_TRUE(file_stat.mtime.has_value());
+    *file_stat.mtime += absl::Seconds(1);
     SetFileStat(&file_stat_cache, acc, file_stat);
 
     std::set<string> deps;
@@ -671,7 +673,7 @@ TEST_F(DepsCacheTest, RestartWithOldIdentifier) {
 
   // Change the last_used_time of identifier2
   {
-    time_t time_old_enough = 0;
+    const absl::Time time_old_enough = absl::UnixEpoch();
     ASSERT_TRUE(UpdateLastUsedTime(identifier2, time_old_enough));
   }
 
@@ -702,7 +704,7 @@ TEST_F(DepsCacheTest, RestartWithOldIdentifier) {
 
   // Update identifier1 last_used_time to time old enough.
   {
-    time_t time_old_enough = 0;
+    absl::Time time_old_enough = absl::FromTimeT(0);
     UpdateIdentifierLastUsedTime(identifier1, time_old_enough);
   }
 
@@ -729,7 +731,8 @@ TEST_F(DepsCacheTest, RestartWithOldIdentifierWithNegativeAliveDuration) {
   IncludeCache::Quit();
   IncludeCache::Init(32, true);
   DepsCache::Init(file::JoinPath(tmpdir_->tmpdir(), ".goma_deps"),
-                  -1, kDepsCacheThreshold, kDepsCacheMaxProtoSizeInMB);
+                  absl::nullopt, kDepsCacheThreshold,
+                  kDepsCacheMaxProtoSizeInMB);
   dc_ = DepsCache::instance();
 
   const DepsCache::Identifier identifier1 = MakeFreshIdentifier();
@@ -752,7 +755,7 @@ TEST_F(DepsCacheTest, RestartWithOldIdentifierWithNegativeAliveDuration) {
     ASSERT_TRUE(SetDependencies(identifier1, acc, deps, &file_stat_cache));
     ASSERT_TRUE(SetDependencies(identifier2, acc, deps, &file_stat_cache));
 
-    time_t time_old_enough = 0;
+    const absl::Time time_old_enough = absl::UnixEpoch();
     ASSERT_TRUE(UpdateLastUsedTime(identifier1, time_old_enough));
     ASSERT_TRUE(UpdateLastUsedTime(identifier2, time_old_enough));
   }
@@ -762,7 +765,8 @@ TEST_F(DepsCacheTest, RestartWithOldIdentifierWithNegativeAliveDuration) {
   IncludeCache::Quit();
   IncludeCache::Init(32, true);
   DepsCache::Init(file::JoinPath(tmpdir_->tmpdir(), ".goma_deps"),
-                  -1, kDepsCacheThreshold, kDepsCacheMaxProtoSizeInMB);
+                  absl::nullopt, kDepsCacheThreshold,
+                  kDepsCacheMaxProtoSizeInMB);
   dc_ = DepsCache::instance();
 
   // All identifiers should alive.
@@ -954,7 +958,9 @@ TEST_F(DepsCacheTest, RestartWithUpdatedFilesInSomeIdentifier) {
   {
     FileStatCache file_stat_cache;
     FileStat file_stat = file_stat_cache.Get(ah);
-    file_stat.mtime += 1;  // Ensure it's newer than the previous.
+    // Ensure it's newer than the previous.
+    ASSERT_TRUE(file_stat.mtime);
+    *file_stat.mtime += absl::Seconds(1);
     SetFileStat(&file_stat_cache, ah, file_stat);
 
     std::set<string> deps;

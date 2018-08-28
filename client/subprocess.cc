@@ -21,10 +21,10 @@
 
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
-#include "client_util.h"
 #include "compiler_flags.h"
 #include "compiler_specific.h"
 #include "env_flags.h"
+#include "file_path_util.h"
 #include "file_stat.h"
 #include "glog/logging.h"
 #include "mypath.h"

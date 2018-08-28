@@ -5,20 +5,6 @@
 
 #include "ioutil.h"
 
-#ifndef _WIN32
-#include <errno.h>
-#include <fcntl.h>
-#include <signal.h>
-#include <sys/select.h>
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <time.h>
-#include <unistd.h>
-#else
-# include "config_win.h"
-#endif
-
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -30,42 +16,18 @@
 #include <string>
 #include <vector>
 
+#include "absl/memory/memory.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_split.h"
 #include "basictypes.h"
-#include "file_dir.h"
-#include "filesystem.h"
 #include "glog/logging.h"
 #include "scoped_fd.h"
+#include "zlib.h"
 
 using std::string;
 
 namespace devtools_goma {
-
-void WriteStringToFileOrDie(const string &data, const string &filename,
-                            int permission) {
-  ScopedFd fd(ScopedFd::Create(filename, permission));
-  if (!fd.valid()) {
-    PLOG(FATAL) << "GOMA: failed to open " << filename;
-  }
-  if (fd.Write(data.c_str(), data.size()) !=
-      static_cast<ssize_t>(data.size())) {
-    PLOG(FATAL) << "GOMA: Cannot write to file " << filename;
-  }
-}
-
-void AppendStringToFileOrDie(const string &data, const string &filename,
-                             int permission) {
-  ScopedFd fd(ScopedFd::OpenForAppend(filename, permission));
-  if (!fd.valid()) {
-    PLOG(FATAL) << "GOMA: failed to open " << filename;
-  }
-  if (fd.Write(data.c_str(), data.size()) !=
-      static_cast<ssize_t>(data.size())) {
-    PLOG(FATAL) << "GOMA: Cannot write to file " << filename;
-  }
-}
 
 void WriteStdout(absl::string_view data) {
 #ifdef _WIN32
@@ -93,6 +55,92 @@ void WriteStderr(absl::string_view data) {
 #else
   std::cerr << data;
 #endif
+}
+
+class ScopedFdWriteCloser : public WriteCloser {
+ public:
+  explicit ScopedFdWriteCloser(ScopedFd&& fd) : fd_(std::move(fd)) {}
+  ~ScopedFdWriteCloser() override = default;
+
+  ssize_t Write(const void* ptr, size_t len) override {
+    return fd_.Write(ptr, len);
+  }
+  bool Close() override { return fd_.Close(); }
+
+ private:
+  ScopedFd fd_;
+};
+
+class GzipInflateWriteCloser : public WriteCloser {
+ public:
+  explicit GzipInflateWriteCloser(std::unique_ptr<WriteCloser> wr)
+      : wr_(std::move(wr)) {
+    zcontext_.state = Z_NULL;
+    zcontext_.zalloc = Z_NULL;
+    zcontext_.zfree = Z_NULL;
+    zcontext_.opaque = Z_NULL;
+    zcontext_.next_in = nullptr;
+    zcontext_.avail_in = 0;
+    zcontext_.total_in = 0;
+    output_buffer_ = absl::make_unique<char[]>(kDefaultBufSize);
+    zcontext_.next_out = reinterpret_cast<Bytef*>(&output_buffer_[0]);
+    zcontext_.avail_out = kDefaultBufSize;
+    zcontext_.total_out = 0;
+    const int kWindowBits = 15;
+    const int kWindowBitsFormat = 16;  // GZIP
+    zerror_ = inflateInit2(&zcontext_, kWindowBits | kWindowBitsFormat);
+  }
+  ~GzipInflateWriteCloser() override { inflateEnd(&zcontext_); }
+
+  ssize_t Write(const void* ptr, size_t len) override {
+    if (zerror_ != Z_OK) {
+      return -1;
+    }
+    DCHECK_GT(len, 0);
+    zcontext_.next_in = static_cast<const Bytef*>(ptr);
+    zcontext_.avail_in = len;
+    do {
+      zcontext_.next_out = reinterpret_cast<Bytef*>(&output_buffer_[0]);
+      zcontext_.avail_out = kDefaultBufSize;
+      zerror_ = inflate(&zcontext_, Z_NO_FLUSH);
+      if (zerror_ != Z_OK && zerror_ != Z_STREAM_END) {
+        return len - zcontext_.avail_in;
+      }
+      size_t wlen =
+          zcontext_.next_out - reinterpret_cast<Bytef*>(&output_buffer_[0]);
+      ssize_t written = wr_->Write(&output_buffer_[0], wlen);
+      if (written != wlen) {
+        return len - zcontext_.avail_in;
+      }
+    } while (zcontext_.avail_in > 0);
+    return len;
+  }
+
+  bool Close() override {
+    bool r = wr_->Close();
+    if (zerror_ != Z_STREAM_END) {
+      return false;
+    }
+    return r;
+  }
+
+ private:
+  static const int kDefaultBufSize = 65536;
+  std::unique_ptr<WriteCloser> wr_;
+  z_stream zcontext_;
+  int zerror_;
+  std::unique_ptr<char[]> output_buffer_;
+};
+
+/* static */
+std::unique_ptr<WriteCloser> WriteCloser::NewFromScopedFd(ScopedFd&& fd) {
+  return absl::make_unique<ScopedFdWriteCloser>(std::move(fd));
+}
+
+/* static */
+std::unique_ptr<WriteCloser> WriteCloser::NewGzipInflate(
+    std::unique_ptr<WriteCloser> wr) {
+  return absl::make_unique<GzipInflateWriteCloser>(std::move(wr));
 }
 
 void FlushLogFiles() {

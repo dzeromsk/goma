@@ -18,6 +18,7 @@
 #include "absl/strings/string_view.h"
 #include "lockhelper.h"
 #include "named_pipe_win.h"
+#include "worker_thread.h"
 #include "worker_thread_manager.h"
 
 namespace devtools_goma {
@@ -77,7 +78,7 @@ class NamedPipeServer {
   void ProcessFlushes();
 
   WorkerThreadManager* wm_;
-  WorkerThreadManager::ThreadId thread_id_;  // for Run
+  WorkerThread::ThreadId thread_id_;  // for Run
   Handler* handler_;
 
   ScopedNamedPipe pipe_;

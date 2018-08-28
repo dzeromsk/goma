@@ -356,8 +356,9 @@ bool ScopedSocket::Close() {
 }
 
 // Read. Return < 0 on error.
-ssize_t ScopedSocket::ReadWithTimeout(char *buf, size_t bufsize,
-                                      int timeout_sec) const {
+ssize_t ScopedSocket::ReadWithTimeout(char* buf,
+                                      size_t bufsize,
+                                      absl::Duration timeout) const {
   CHECK(buf);
   CHECK(valid());
   for (;;) {
@@ -369,17 +370,15 @@ ssize_t ScopedSocket::ReadWithTimeout(char *buf, size_t bufsize,
     MSVC_PUSH_DISABLE_WARNING_FOR_FD_SET();
     FD_SET(static_cast<SOCKET>(fd_), &fdset);
     MSVC_POP_WARNING();
-    TIMEVAL timeout;
-    timeout.tv_sec = timeout_sec;
-    timeout.tv_usec = 0;
+    TIMEVAL timeout_tv = absl::ToTimeval(timeout);
     // http://msdn.microsoft.com/en-us/library/windows/desktop/ms740141(v=vs.85).aspx
-    int r = select(fd_ + 1, &fdset, nullptr, nullptr, &timeout);
-    if (r == SOCKET_ERROR) {
+    int result = select(fd_ + 1, &fdset, nullptr, nullptr, &timeout_tv);
+    if (result == SOCKET_ERROR) {
       PLOG(ERROR) << "GOMA: read select error";
       return FAIL;
     }
-    if (r == 0) {
-      LOG(WARNING) << "GOMA: read select timeout (" << timeout_sec << "sec)";
+    if (result == 0) {
+      LOG(WARNING) << "GOMA: read select timeout " << timeout;
       return ERR_TIMEOUT;
     }
     CHECK(FD_ISSET(fd_, &fdset))
@@ -389,17 +388,18 @@ ssize_t ScopedSocket::ReadWithTimeout(char *buf, size_t bufsize,
     struct pollfd pfd;
     pfd.fd = fd_;
     pfd.events = POLLIN;
-    int r;
-    while ((r = poll(&pfd, 1, timeout_sec * 1000)) == -1) {
+    const int timeout_ms = static_cast<int>(absl::ToInt64Milliseconds(timeout));
+    int result;
+    while ((result = poll(&pfd, 1, timeout_ms)) == -1) {
       if (errno != EINTR)
         break;
     }
-    if (r == -1) {
+    if (result == -1) {
       PLOG(ERROR) << "GOMA: read poll error";
       return FAIL;
     }
-    if (r == 0) {
-      LOG(WARNING) << "GOMA: read poll timeout (" << timeout_sec << "sec)";
+    if (result == 0) {
+      LOG(WARNING) << "GOMA: read poll timeout " << timeout;
       return ERR_TIMEOUT;
     }
     CHECK(pfd.revents & POLLIN)
@@ -417,8 +417,9 @@ ssize_t ScopedSocket::ReadWithTimeout(char *buf, size_t bufsize,
   }
 }
 
-ssize_t ScopedSocket::WriteWithTimeout(const char* buf, size_t bufsize,
-                                       int timeout_sec) const {
+ssize_t ScopedSocket::WriteWithTimeout(const char* buf,
+                                       size_t bufsize,
+                                       absl::Duration timeout) const {
   CHECK(buf);
   CHECK(valid());
   for (;;) {
@@ -430,17 +431,15 @@ ssize_t ScopedSocket::WriteWithTimeout(const char* buf, size_t bufsize,
     MSVC_PUSH_DISABLE_WARNING_FOR_FD_SET();
     FD_SET(fd_, &fdset);
     MSVC_POP_WARNING();
-    TIMEVAL timeout;
-    timeout.tv_sec = timeout_sec;
-    timeout.tv_usec = 0;
+    TIMEVAL timeout_tv = absl::ToTimeval(timeout);
     // http://msdn.microsoft.com/en-us/library/windows/desktop/ms740141(v=vs.85).aspx
-    int r = select(fd_ + 1, nullptr, &fdset, nullptr, &timeout);
-    if (r == SOCKET_ERROR) {
+    int result = select(fd_ + 1, nullptr, &fdset, nullptr, &timeout_tv);
+    if (result == SOCKET_ERROR) {
       PLOG(ERROR) << "GOMA: write select error";
       return FAIL;
     }
-    if (r == 0) {
-      LOG(ERROR) << "GOMA: write select timeout (" << timeout_sec << "sec)";
+    if (result == 0) {
+      LOG(ERROR) << "GOMA: write select timeout " << timeout;
       return ERR_TIMEOUT;
     }
     CHECK(FD_ISSET(fd_, &fdset))
@@ -450,17 +449,18 @@ ssize_t ScopedSocket::WriteWithTimeout(const char* buf, size_t bufsize,
     struct pollfd pfd;
     pfd.fd = fd_;
     pfd.events = POLLOUT;
-    int r;
-    while ((r = poll(&pfd, 1, timeout_sec * 1000)) == -1) {
+    const int timeout_ms = static_cast<int>(absl::ToInt64Milliseconds(timeout));
+    int result;
+    while ((result = poll(&pfd, 1, timeout_ms)) == -1) {
       if (errno != EINTR)
         break;
     }
-    if (r == -1) {
+    if (result == -1) {
       PLOG(ERROR) << "GOMA: write poll error";
       return FAIL;
     }
-    if (r == 0) {
-      LOG(ERROR) << "GOMA: write poll timeout (" << timeout_sec << "sec)";
+    if (result == 0) {
+      LOG(ERROR) << "GOMA: write poll timeout" << timeout;
       return ERR_TIMEOUT;
     }
     CHECK(pfd.revents & POLLOUT)
@@ -480,11 +480,11 @@ ssize_t ScopedSocket::WriteWithTimeout(const char* buf, size_t bufsize,
 
 // Write string to socket. Return negative (Errno) on fail, OK on success.
 int ScopedSocket::WriteString(absl::string_view message,
-                              int timeout_sec) const {
+                              absl::Duration timeout) const {
   const char *p = message.data();
   int size = message.size();
   while (size > 0) {
-    int ret = WriteWithTimeout(p, size, timeout_sec);
+    int ret = WriteWithTimeout(p, size, timeout);
     if (ret < 0) {
       PLOG(ERROR) << "write failure: " << ret
                   << " written=" << (message.size() - size) << " size=" << size

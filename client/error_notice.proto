@@ -34,7 +34,7 @@ message ErrorNotice {
 // Message to store goma infrastructure status.
 // It includes status inside compiler_proxy, that of network to goma server,
 // and that in goma server.
-// NEXT ID TO USE: 16
+// NEXT ID TO USE: 17
 message InfraStatus {
   // CompilerInfo
   optional int32 num_compiler_info_miss = 1;
@@ -54,6 +54,7 @@ message InfraStatus {
   // CompileService
   optional int32 num_exec_fail_fallback = 10;
   optional int32 num_exec_compiler_proxy_failure = 11;
+  optional int32 num_active_tasks = 16;
 
   // error.
   optional int32 num_user_error = 14;

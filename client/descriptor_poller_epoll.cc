@@ -17,10 +17,12 @@
 
 #include "absl/base/call_once.h"
 #include "absl/memory/memory.h"
+#include "absl/time/time.h"
 #include "compiler_specific.h"
 #include "glog/logging.h"
 #include "scoped_fd.h"
 #include "socket_descriptor.h"
+#include "time_util.h"
 
 namespace devtools_goma {
 
@@ -51,11 +53,11 @@ class EpollDescriptorPoller : public DescriptorPollerBase {
     DCHECK(d->wait_writable() || d->wait_readable());
     struct epoll_event ev = {};
     ev.data.ptr = d;
-    if (type == kReadEvent || d->wait_readable()) {
+    if (type == DescriptorEventType::kReadEvent || d->wait_readable()) {
       DCHECK(d->wait_readable());
       ev.events |= EPOLLIN;
     }
-    if (type == kWriteEvent || d->wait_writable()) {
+    if (type == DescriptorEventType::kWriteEvent || d->wait_writable()) {
       DCHECK(d->wait_writable());
       ev.events |= EPOLLOUT;
     }
@@ -108,9 +110,9 @@ class EpollDescriptorPoller : public DescriptorPollerBase {
     last_nevents_ = nevents_;
   }
 
-  int PollEventsInternal(int timeout_millisec) override {
-    nfds_ = epoll_wait(epoll_fd_.fd(), events_.get(),
-                       nevents_, timeout_millisec);
+  int PollEventsInternal(absl::Duration timeout) override {
+    nfds_ = epoll_wait(epoll_fd_.fd(), events_.get(), nevents_,
+                       DurationToIntMs(timeout));
     return nfds_;
   }
 

@@ -9,13 +9,14 @@
 
 #include <string>
 
+#include "absl/time/time.h"
 #include "named_pipe_win.h"
 
 namespace devtools_goma {
 
 class NamedPipeFactory {
  public:
-  NamedPipeFactory(const std::string& name, int timeout_ms);
+  NamedPipeFactory(const std::string& name, absl::Duration timeout);
   ~NamedPipeFactory();
 
   NamedPipeFactory(const NamedPipeFactory&) = delete;
@@ -29,7 +30,7 @@ class NamedPipeFactory {
 
  private:
   const std::string name_;
-  const int timeout_ms_;
+  const absl::Duration timeout_;
 };
 
 }  // namespace devtools_goma

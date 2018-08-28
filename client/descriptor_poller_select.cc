@@ -20,6 +20,7 @@
 
 #include "absl/base/call_once.h"
 #include "absl/memory/memory.h"
+#include "absl/time/time.h"
 #include "counterz.h"
 #include "glog/logging.h"
 #include "socket_descriptor.h"
@@ -121,10 +122,8 @@ class SelectDescriptorPoller : public DescriptorPollerBase {
     }
   }
 
-  int PollEventsInternal(int timeout_millisec) override {
-    struct timeval tv;
-    tv.tv_sec = timeout_millisec / 1000;
-    tv.tv_usec = (timeout_millisec - (tv.tv_sec * 1000)) * 1000;
+  int PollEventsInternal(absl::Duration timeout) override {
+    struct timeval tv = absl::ToTimeval(timeout);
     return select(max_fd_ + 1, &read_fd_, &write_fd_, nullptr, &tv);
   }
 

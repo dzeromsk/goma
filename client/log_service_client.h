@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "absl/time/time.h"
 #include "basictypes.h"
 #include "lockhelper.h"
 #include "simple_timer.h"
@@ -28,7 +29,7 @@ class LogServiceClient {
   LogServiceClient(HttpRPC* http_rpc,
                    string save_log_path,
                    size_t max_log_in_req,
-                   int max_pending_ms,
+                   absl::Duration max_pending_duration,
                    WorkerThreadManager* wm);
   ~LogServiceClient();
 
@@ -60,7 +61,7 @@ class LogServiceClient {
   HttpRPC* http_rpc_;
   const string save_log_path_;
   const size_t max_log_in_req_;
-  const int max_pending_ms_;
+  const absl::Duration max_pending_duration_;
 
   PeriodicClosureId periodic_callback_id_;
 
@@ -72,8 +73,8 @@ class LogServiceClient {
   // Number of SaveLogJobs sending to the server.
   int num_save_log_job_ GUARDED_BY(mu_);
   SimpleTimer timer_;
-  // Time when Save*Log was called.
-  long long last_timestamp_ms_ GUARDED_BY(mu_);
+  // Duration after start of |timer_| when Save*Log was called.
+  absl::Duration last_timestamp_ GUARDED_BY(mu_);
 
   DISALLOW_COPY_AND_ASSIGN(LogServiceClient);
 };

@@ -15,7 +15,7 @@ namespace devtools_goma {
 
 ClangTidyFlags::ClangTidyFlags(const std::vector<string>& args,
                                const string& cwd)
-    : CompilerFlags(args, cwd), seen_hyphen_hyphen_(false) {
+    : CxxFlags(args, cwd), seen_hyphen_hyphen_(false) {
   if (!CompilerFlags::ExpandPosixArgs(cwd, args, &expanded_args_,
                                       &optional_input_filenames_)) {
     Fail("Unable to expand args", args);

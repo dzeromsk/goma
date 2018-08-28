@@ -1,0 +1,104 @@
+# Copyright 2018 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+static_library("fake_compiler_info_lib") {
+  sources = [
+    "fake_compiler_info.cc",
+    "fake_compiler_info.h",
+  ]
+
+  public_deps = [
+    "//client:compiler_info_lib",
+  ]
+}
+
+static_library("fake_compiler_type_specific") {
+  sources = [
+    "fake_compiler_type_specific.cc",
+    "fake_compiler_type_specific.h",
+  ]
+
+  public_deps = [
+    ":fake_compiler_info_builder_lib",
+    ":fake_include_processor_lib",
+    "//client:compiler_type_specific_lib",
+    "//lib:fake_specific",
+  ]
+}
+
+static_library("fake_compiler_info_builder_lib") {
+  sources = [
+    "fake_compiler_info_builder.cc",
+    "fake_compiler_info_builder.h",
+  ]
+  deps = [
+    "//client:common",
+    "//client:ioutil_lib",
+    "//lib:fake_specific",
+    "//third_party:glog",
+    "//third_party/abseil",
+  ]
+  public_deps = [
+    "//client:compiler_info_lib",
+    "//lib",
+  ]
+
+  public_configs = [ "//client:client_config" ]
+}
+
+static_library("fake_include_processor_lib") {
+  sources = [
+    "fake_include_processor.cc",
+    "fake_include_processor.h",
+  ]
+  public_deps = [
+    ":fake_compiler_info_lib",
+    "//client:compiler_info_lib",
+    "//lib",
+    "//lib:fake_specific",
+  ]
+}
+
+executable("fake_compiler_info_builder_unittest") {
+  testonly = true
+  sources = [
+    "fake_compiler_info_builder_unittest.cc",
+  ]
+
+  deps = [
+    ":fake_compiler_info_builder_lib",
+    ":fake_compiler_info_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:common",
+    "//client:compiler_info_lib",
+    "//client:goma_test_lib",
+    "//client:subprocess_lib",
+    "//lib:fake_specific",
+  ]
+
+  data_deps = [
+    "//client:fake_compiler",
+  ]
+}
+
+executable("fake_include_processor_unittest") {
+  testonly = true
+  sources = [
+    "fake_include_processor_unittest.cc",
+  ]
+
+  deps = [
+    ":fake_compiler_info_builder_lib",
+    ":fake_include_processor_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:common",
+    "//client:compiler_info_lib",
+    "//client:goma_test_lib",
+    "//client:subprocess_lib",
+  ]
+
+  data_deps = [
+    "//client:fake_compiler",
+  ]
+}

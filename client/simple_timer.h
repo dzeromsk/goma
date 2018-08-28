@@ -34,24 +34,13 @@ class SimpleTimer {
 
   void Start();
 
-  // Return elapsed time in seconds.
-  double GetInSeconds() const;
-
-  // Returns elapsed time in milliseconds for short interval.
-  // 2^31 / 1000 / 3600 / 24 ~= 24.8, so roughly it would round about 24 days.
-  int GetInIntMilliseconds() const;
-
-  // Return elapsed time in milliseconds.
-  long long GetInMilliseconds() const;
-
-  // Return elapsed time in nanoseconds.
-  long long GetInNanoseconds() const;
-
   // Returns elapsed time as absl::Duration.
-  // TODO: Remove the other Get* functions.
   absl::Duration GetDuration() const;
 
  private:
+  // Return elapsed time in nanoseconds.
+  int64_t GetInNanoSeconds() const;
+
 #ifdef _WIN32
   LARGE_INTEGER start_time_;
   LARGE_INTEGER frequency_;

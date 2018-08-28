@@ -12,28 +12,108 @@
 #include <vector>
 
 #include "absl/base/call_once.h"
+#include "absl/time/time.h"
+#include "absl/types/optional.h"
+#include "autolock_timer.h"
 #include "basictypes.h"
 #include "callback.h"
-#include "descriptor_poller.h"
+#include "descriptor_event_type.h"
 #include "lockhelper.h"
 #include "platform_thread.h"
 #include "scoped_fd.h"
 #include "simple_timer.h"
-#include "worker_thread_manager.h"
+
+// Note: __LINE__ need to be wrapped twice to make its number string.
+//       Otherwise, not a line number but string literal "__LINE__" would be
+//       shown.
+#define GOMA_WORKER_THREAD_STRINGFY(i) #i
+#define GOMA_WORKER_THREAD_STR(i) GOMA_WORKER_THREAD_STRINGFY(i)
+#define FROM_HERE __FILE__ ":" GOMA_WORKER_THREAD_STR(__LINE__)
 
 namespace devtools_goma {
 
 class AutoLockStat;
+class DescriptorPoller;
 class SocketDescriptor;
 
-class WorkerThreadManager::WorkerThread : public PlatformThread::Delegate {
+using PeriodicClosureId = int;
+constexpr PeriodicClosureId kInvalidPeriodicClosureId = -1;
+
+class WorkerThread : public PlatformThread::Delegate {
  public:
+  // Windows often pass back 0xfffffffe (pseudo handle) as thread handle.
+  // Therefore the reliable way of selecting a thread is to use the thread id.
+  // ThreadHandle is used for Join().
+  using ThreadHandle = PlatformThreadHandle;
+  using ThreadId = PlatformThreadId;
+
+  // We use SimpleTimer for monotonicity, which absl::Now() does not have. All
+  // timestamps are given as durations since the start of the thread.
+  using Timestamp = absl::Duration;
+
+  // Priority of closures and descriptors.
+  enum Priority {
+    PRIORITY_MIN = 0,
+    PRIORITY_LOW = 0,    // Used in compile_task.
+    PRIORITY_MED,        // Used in http rpc and subprocess ipc.
+    PRIORITY_HIGH,       // Used in http server (http and goma ipc serving)
+    PRIORITY_IMMEDIATE,  // Called without descriptor polling.
+                         // Used to clear notification closures of descriptor,
+                         // delayed closures, or periodic closures.
+    NUM_PRIORITIES
+  };
+
+  // Thread unsafe.  See RunDelayedClosureInThread.
+  class CancelableClosure {
+   public:
+    CancelableClosure(const char* const locaction, Closure* closure);
+    const char* location() const;
+    void Cancel();
+   protected:
+    virtual ~CancelableClosure();
+    Closure* closure_;
+   private:
+    const char* const location_;
+    DISALLOW_COPY_AND_ASSIGN(CancelableClosure);
+  };
+
+  // See UnregisterPeriodicClosure
+  class UnregisteredClosureData {
+   public:
+    UnregisteredClosureData() : done_(false), location_(nullptr) {}
+
+    bool Done() const {
+      AUTOLOCK(lock, &mu_);
+      return done_;
+    }
+    void SetDone(bool b) {
+      AUTOLOCK(lock, &mu_);
+      done_ = b;
+    }
+
+    const char* Location() const {
+      AUTOLOCK(lock, &mu_);
+      return location_;
+    }
+    void SetLocation(const char* location) {
+      AUTOLOCK(lock, &mu_);
+      location_ = location;
+    }
+
+   private:
+    mutable Lock mu_;
+    bool done_ GUARDED_BY(mu_);
+    const char* location_ GUARDED_BY(mu_);
+
+    DISALLOW_COPY_AND_ASSIGN(UnregisteredClosureData);
+  };
+
   class DelayedClosureImpl : public CancelableClosure {
    public:
     DelayedClosureImpl(const char* const location,
-                       double t, Closure* closure)
+                       Timestamp t, Closure* closure)
         : CancelableClosure(location, closure), time_(t) {}
-    double time() const { return time_; }
+    Timestamp time() const { return time_; }
     Closure* GetClosure() {
       Closure* closure = closure_;
       closure_ = NULL;
@@ -48,20 +128,19 @@ class WorkerThreadManager::WorkerThread : public PlatformThread::Delegate {
     // Run closure if it is still set, and destroy itself.
     void Run();
 
-    double time_;
+    Timestamp time_;
     DISALLOW_COPY_AND_ASSIGN(DelayedClosureImpl);
   };
 
   static void Initialize();
   static WorkerThread* GetCurrentWorker();
 
-  WorkerThread(WorkerThreadManager* wm, int pool, std::string name);
+  WorkerThread(int pool, std::string name);
   ~WorkerThread() override;
 
   int pool() const { return pool_; }
   ThreadId id() const { return id_; }
-  long long NowInNs();
-  double Now();
+  Timestamp NowCached();
   void Start();
 
   // Runs delayed closures as soon as possible.
@@ -80,26 +159,26 @@ class WorkerThreadManager::WorkerThread : public PlatformThread::Delegate {
 
   // Registers file descriptor fd in priority.
   SocketDescriptor* RegisterSocketDescriptor(
-      ScopedSocket&& fd, WorkerThreadManager::Priority priority);
+      ScopedSocket&& fd, Priority priority);
   ScopedSocket DeleteSocketDescriptor(SocketDescriptor* d);
 
-  void RegisterPollEvent(SocketDescriptor* d, DescriptorPoller::EventType);
-  void UnregisterPollEvent(SocketDescriptor* d, DescriptorPoller::EventType);
+  void RegisterPollEvent(SocketDescriptor* d, DescriptorEventType);
+  void UnregisterPollEvent(SocketDescriptor* d, DescriptorEventType);
   void RegisterTimeoutEvent(SocketDescriptor* d);
   void UnregisterTimeoutEvent(SocketDescriptor* d);
 
   void RegisterPeriodicClosure(PeriodicClosureId id,
                                const char* const location,
-                               int ms,
+                               absl::Duration period,
                                std::unique_ptr<PermanentClosure> closure);
-  void UnregisterPeriodicClosure(PeriodicClosureId id,
-                                 UnregisteredClosureData* data);
+  void UnregisterPeriodicClosure(
+      PeriodicClosureId id, UnregisteredClosureData* data);
 
-  void RunClosure(const char* const location,
-                  Closure* closure, Priority priority);
+  void RunClosure(const char* const location, Closure* closure,
+                  Priority priority);
   CancelableClosure* RunDelayedClosure(
       const char* const location,
-      int msec, Closure* closure);
+      absl::Duration delay, Closure* closure);
 
   size_t load() const;
   size_t pendings() const;
@@ -107,19 +186,20 @@ class WorkerThreadManager::WorkerThread : public PlatformThread::Delegate {
   bool IsIdle() const;
   string DebugString() const;
 
+  static string Priority_Name(Priority priority);
+
  private:
   struct ClosureData {
-    ClosureData(const char* const location_,
-                Closure* closure_,
+    ClosureData(const char* const location,
+                Closure* closure,
                 int queuelen,
                 int tick,
-                long long timestamp_ns);
-    ClosureData();
+                Timestamp timestamp);
     const char* location_;
     Closure* closure_;
     int queuelen_;
     int tick_;
-    long long timestamp_ns_;
+    Timestamp timestamp_;
   };
 
   class CompareDelayedClosureImpl {
@@ -145,30 +225,28 @@ class WorkerThreadManager::WorkerThread : public PlatformThread::Delegate {
   // Adds closure in priority.
   // Assert mu_ held.
   void AddClosure(const char* const location,
-                  WorkerThreadManager::Priority priority,
+                  Priority priority,
                   Closure* closure);
 
   // Gets closure in priority.
   // Assert mu_ held.
-  ClosureData GetClosure(WorkerThreadManager::Priority priority);
+  ClosureData GetClosure(Priority priority);
 
   static void InitializeWorkerKey();
 
-  WorkerThreadManager* wm_;
   int pool_;
   ThreadHandle handle_;
   ThreadId id_;
-  ClosureData current_;
+  absl::optional<ClosureData> current_closure_data_;
   SimpleTimer timer_;
   int tick_;
-  long long now_ns_;
+  absl::optional<Timestamp> now_cached_;
   bool shutting_down_;
   bool quit_;
 
   const std::string name_;
 
   mutable Lock mu_;
-  ConditionVariable cond_handle_;  // signaled when handle_ is ready.
   ConditionVariable cond_id_;      // signaled when id_ is ready.
   // These auto_lock_stat_* are owned by g_auto_lock_stats.
   AutoLockStat* auto_lock_stat_next_closure_;
@@ -176,7 +254,7 @@ class WorkerThreadManager::WorkerThread : public PlatformThread::Delegate {
 
   std::deque<ClosureData> pendings_[NUM_PRIORITIES];
   int max_queuelen_[NUM_PRIORITIES];
-  long long max_wait_time_ns_[NUM_PRIORITIES];
+  absl::Duration max_wait_time_[NUM_PRIORITIES];
 
   // delayed_pendings_ and periodic_closures_ are handled in PRIORITY_IMMEDIATE
   DelayedClosureQueue delayed_pendings_;
@@ -184,7 +262,7 @@ class WorkerThreadManager::WorkerThread : public PlatformThread::Delegate {
 
   std::map<int, std::unique_ptr<SocketDescriptor>> descriptors_;
   std::unique_ptr<DescriptorPoller> poller_;
-  int poll_interval_;
+  absl::Duration poll_interval_;
 
   static absl::once_flag key_worker_once_;
 #ifndef _WIN32

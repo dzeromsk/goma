@@ -7,7 +7,4 @@
 
 #if !__has_include(<iostream>)
 #error "__has_include(X) should include X as an input"
-// Add a directive so CppDirectiveParser doesn't delete this "dead" branch.
-// TODO(mostynb@vewd.com): fix the incorrect branch deletion.
-#define FOO
 #endif

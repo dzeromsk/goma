@@ -8,9 +8,8 @@
 #include <string>
 #include <vector>
 
-
-#include "compiler_flags.h"
-#include "gcc_flags.h"
+#include "lib/cxx_flags.h"
+#include "lib/gcc_flags.h"
 using std::string;
 
 namespace devtools_goma {
@@ -22,7 +21,7 @@ namespace devtools_goma {
 // When '--' is not given in the command line, compilation database
 // (compile_commands.json) is read. Otherwise, compilation database won't
 // be used.
-class ClangTidyFlags : public CompilerFlags {
+class ClangTidyFlags : public CxxFlags {
  public:
   ClangTidyFlags(const std::vector<string>& args, const string& cwd);
 
@@ -43,7 +42,7 @@ class ClangTidyFlags : public CompilerFlags {
   const std::vector<string>& root_includes() const;
   const std::vector<string>& framework_dirs() const;
   const std::vector<std::pair<string, bool>>& commandline_macros() const;
-  bool is_cplusplus() const;
+  bool is_cplusplus() const override;
   bool has_nostdinc() const;
 
   const string& build_path() const { return build_path_; }

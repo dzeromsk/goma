@@ -19,8 +19,8 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
+#include "file_helper.h"
 #include "filesystem.h"
-#include "ioutil.h"
 #include "mypath.h"
 #include "path.h"
 
@@ -67,7 +67,7 @@ string TmpdirUtil::FullPath(const string& path) const {
 
 void TmpdirUtil::CreateTmpFile(const string& path, const string& data) {
   MkdirForPath(path, false);
-  WriteStringToFileOrDie(data, FullPath(path), 0666);
+  ASSERT_TRUE(WriteStringToFile(data, FullPath(path)));
 }
 
 void TmpdirUtil::CreateEmptyFile(const string& path) {

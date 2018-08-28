@@ -75,7 +75,7 @@ class FileHashCache {
     FileStat file_stat;
     // time when hash key was stored in cache.
     // FileInfo represents valid hash key of local file if mtime < last_checked.
-    time_t last_checked;
+    absl::optional<absl::Time> last_checked;
 
     // time when file content was uploaded to backend, or downloaded from
     // backend.

@@ -24,12 +24,75 @@ using std::string;
 
 namespace devtools_goma {
 
+TEST(CompressUtilTest, ParseEncodingName) {
+  EXPECT_EQ(EncodingType::DEFLATE, ParseEncodingName("deflate"));
+  EXPECT_EQ(EncodingType::GZIP, ParseEncodingName("gzip"));
+  EXPECT_EQ(EncodingType::LZMA2, ParseEncodingName("lzma2"));
+
+  // TODO: better weight handling?
+  EXPECT_EQ(EncodingType::DEFLATE, ParseEncodingName("deflate;q=1.0"));
+  EXPECT_EQ(EncodingType::DEFLATE, ParseEncodingName("deflate;q=0"));
+}
+
+TEST(CompressUtilTest, ParseAcceptEncoding) {
+  EXPECT_EQ(std::vector<EncodingType>{EncodingType::DEFLATE},
+            ParseAcceptEncoding("deflate"));
+  EXPECT_EQ(std::vector<EncodingType>{EncodingType::GZIP},
+            ParseAcceptEncoding("gzip"));
+  EXPECT_EQ(std::vector<EncodingType>{EncodingType::LZMA2},
+            ParseAcceptEncoding("lzma2"));
+  EXPECT_EQ(std::vector<EncodingType>{},
+            ParseAcceptEncoding(""));
+  EXPECT_EQ(std::vector<EncodingType>{EncodingType::NO_ENCODING},
+            ParseAcceptEncoding("*"));
+  EXPECT_EQ(std::vector<EncodingType>{EncodingType::NO_ENCODING},
+            ParseAcceptEncoding("identity"));
+
+  std::vector<EncodingType> want{EncodingType::DEFLATE, EncodingType::GZIP};
+  EXPECT_EQ(want, ParseAcceptEncoding("deflate, gzip"));
+  EXPECT_EQ(want, ParseAcceptEncoding(" deflate,gzip "));
+  EXPECT_EQ(want, ParseAcceptEncoding("deflate;q=1,gzip"));
+  want = {EncodingType::GZIP, EncodingType::DEFLATE};
+  EXPECT_EQ(want, ParseAcceptEncoding("gzip, deflate"));
+}
+
+TEST(COmpressUtilTest, PickEncoding) {
+  std::vector<EncodingType> prefs = {EncodingType::DEFLATE};
+  EXPECT_EQ(EncodingType::NO_ENCODING,
+            PickEncoding(ParseAcceptEncoding(""), prefs));
+  EXPECT_EQ(EncodingType::DEFLATE,
+            PickEncoding(ParseAcceptEncoding("deflate"), prefs));
+  EXPECT_EQ(EncodingType::DEFLATE,
+            PickEncoding(ParseAcceptEncoding("deflate, gzip"), prefs));
+  EXPECT_EQ(EncodingType::DEFLATE,
+            PickEncoding(ParseAcceptEncoding("gzip, deflate"), prefs));
+  EXPECT_EQ(EncodingType::NO_ENCODING,
+            PickEncoding(ParseAcceptEncoding("gzip, lzma2"), prefs));
+  // TODO: fix this?
+  EXPECT_EQ(EncodingType::NO_ENCODING,
+            PickEncoding(ParseAcceptEncoding("*"), prefs));
+
+  prefs = {EncodingType::GZIP, EncodingType::DEFLATE};
+  EXPECT_EQ(EncodingType::DEFLATE,
+            PickEncoding(ParseAcceptEncoding("deflate"), prefs));
+  EXPECT_EQ(EncodingType::GZIP,
+            PickEncoding(ParseAcceptEncoding("deflate, gzip"), prefs));
+  EXPECT_EQ(EncodingType::GZIP,
+            PickEncoding(ParseAcceptEncoding("gzip, deflate"), prefs));
+  EXPECT_EQ(EncodingType::NO_ENCODING,
+            PickEncoding(ParseAcceptEncoding("lzma2"), prefs));
+
+}
+
 TEST(CompressUtilTest, GetEncodingFromHeader) {
-  EXPECT_EQ(ENCODING_DEFLATE, GetEncodingFromHeader("deflate"));
-  EXPECT_EQ(ENCODING_LZMA2, GetEncodingFromHeader("lzma2"));
-  EXPECT_EQ(ENCODING_LZMA2, GetEncodingFromHeader("deflate,lzma2"));
-  EXPECT_EQ(NO_ENCODING, GetEncodingFromHeader(""));
-  EXPECT_EQ(NO_ENCODING, GetEncodingFromHeader(nullptr));
+  EXPECT_EQ(EncodingType::DEFLATE, GetEncodingFromHeader("deflate"));
+  EXPECT_EQ(EncodingType::GZIP, GetEncodingFromHeader("gzip"));
+  EXPECT_EQ(EncodingType::GZIP, GetEncodingFromHeader("gzip, deflate"));
+  EXPECT_EQ(EncodingType::GZIP, GetEncodingFromHeader("deflate, gzip"));
+  EXPECT_EQ(EncodingType::LZMA2, GetEncodingFromHeader("lzma2"));
+  EXPECT_EQ(EncodingType::LZMA2, GetEncodingFromHeader("deflate,lzma2"));
+  EXPECT_EQ(EncodingType::NO_ENCODING, GetEncodingFromHeader(""));
+  EXPECT_EQ(EncodingType::NO_ENCODING, GetEncodingFromHeader(nullptr));
 }
 
 #ifdef ENABLE_LZMA

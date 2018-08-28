@@ -61,14 +61,6 @@ class DirectiveFilter {
   static size_t FilterOnlyDirectives(const char* src, const char* end,
                                      char* dst);
 
-  // Removes if/ifdef/ifndef/elif/else/endif/error/pragma directive lines
-  // that do not affect included files from |src|.
-  // It's OK if |src| and |dst| are the same.
-  // |dst| should points at least (end - src) bytes of memory.
-  // The size of copied byte is returned.
-  static size_t RemoveDeadDirectives(const char* src, const char* end,
-                                     char* dst);
-
   FRIEND_TEST(DirectiveFilterTest, SkipSpaces);
   FRIEND_TEST(DirectiveFilterTest, NextLineHead);
   DISALLOW_COPY_AND_ASSIGN(DirectiveFilter);

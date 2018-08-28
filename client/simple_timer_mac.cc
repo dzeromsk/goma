@@ -11,7 +11,7 @@
 #include "glog/logging.h"
 
 namespace {
-long long MachToNanoSec(uint64_t mach_diff_time) {
+int64_t MachToNanoSec(uint64_t mach_diff_time) {
   // code from chromium/src/base/time/time_mac.cc
 
   static mach_timebase_info_data_t timebase_info;
@@ -32,7 +32,7 @@ long long MachToNanoSec(uint64_t mach_diff_time) {
   uint64_t result = mach_diff_time;
   result *= timebase_info.numer;
   result /= timebase_info.denom;
-  return static_cast<long long>(result);
+  return static_cast<int64_t>(result);
 }
 }  // anonymous namespace
 
@@ -43,7 +43,7 @@ void SimpleTimer::Start() {
   start_time_ = mach_absolute_time();
 }
 
-long long SimpleTimer::GetInNanoseconds() const {
+int64_t SimpleTimer::GetInNanoSeconds() const {
   uint64_t end_time = mach_absolute_time();
 
   DCHECK_LE(start_time_, end_time);

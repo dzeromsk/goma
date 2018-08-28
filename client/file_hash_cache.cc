@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "absl/time/clock.h"
 #include "atomic_stats_counter.h"
 #include "autolock_timer.h"
 #include "env_flags.h"
@@ -55,8 +56,8 @@ bool FileHashCache::GetFileCacheKey(const string& filename,
     num_cache_hit_.Add(1);
   }
 
-  // found in cache.  Verify (reasonably) that it is the one we
-  // are looking for, using lightweight information.
+  // found in cache.  Verify (reasonably) that it is the one that are looking
+  // for, using lightweight information.
   if (file_stat == info.file_stat) {
     *cache_key = info.cache_key;
     bool valid = true;
@@ -68,9 +69,14 @@ bool FileHashCache::GetFileCacheKey(const string& filename,
                         << " uploaded="
                         << OptionalToString(info.last_uploaded_timestamp);
     }
-    if (valid && info.last_checked > info.file_stat.mtime) {
-      // We are reasonably confident that this was the right
-      // information we found.
+    // As of this comment, |info.file_stat.mtime| is guaranteed to have a valid
+    // value because of the call to file_stat.IsValid() earlier. However, if
+    // that changes in the future, we would like to catch it and add a
+    // has_value() check to here as well.
+    DCHECK(info.file_stat.mtime.has_value());
+    if (valid && info.last_checked.has_value() &&
+        *info.last_checked > *info.file_stat.mtime) {
+      // We are reasonably confident that we found the right information.
       return true;
     }
     VLOG(1) << "might be obsolete cache: " << filename << " " << *cache_key;
@@ -108,7 +114,7 @@ bool FileHashCache::StoreFileCacheKey(const string& filename,
     FileInfo info;
     info.cache_key = cache_key;
     info.file_stat = file_stat;
-    info.last_checked = time(nullptr);
+    info.last_checked = absl::Now();
     info.last_uploaded_timestamp = upload_timestamp;
 
     AUTO_EXCLUSIVE_LOCK(lock, &file_cache_mutex_);
@@ -154,7 +160,13 @@ string FileHashCache::DebugString() {
   for (const auto& it : file_cache_) {
     ss << "filename:" << it.first << " key:" << it.second.cache_key
        << " file_size:" << it.second.file_stat.size
-       << " mtime:" << it.second.file_stat.mtime << std::endl;
+       << " mtime:";
+    if (it.second.file_stat.mtime.has_value()) {
+      ss << *it.second.file_stat.mtime;
+    } else {
+      ss << "(unknown)";
+    }
+    ss << std::endl;
   }
   return ss.str();
 }

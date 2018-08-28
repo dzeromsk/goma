@@ -8,8 +8,10 @@
 #include <memory>
 #include <string>
 
+#include "absl/strings/string_view.h"
 #include "content.h"
 #include "cpp_directive.h"
+#include "cpp_input_stream.h"
 #include "cpp_tokenizer.h"
 
 using std::string;
@@ -31,6 +33,14 @@ class CppDirectiveParser {
   bool Parse(const Content& content,
              const string& filename,
              CppDirectiveList* result);
+
+  bool has_unknown_directives() const { return has_unknown_directives_; }
+
+ private:
+  std::unique_ptr<CppDirective> ParseDirective(absl::string_view directive,
+                                               CppInputStream* stream);
+
+  bool has_unknown_directives_ = false;
 };
 
 }  // namespace devtools_goma

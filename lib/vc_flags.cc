@@ -87,7 +87,7 @@ string VCFlags::compiler_name() const {
 }
 
 VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
-    : CompilerFlags(args, cwd),
+    : CxxFlags(args, cwd),
       is_cplusplus_(true),
       ignore_stdinc_(false),
       has_Brepro_(false),

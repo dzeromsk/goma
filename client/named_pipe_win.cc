@@ -43,16 +43,15 @@ void IOCompletionRoutine(
 }
 
 ssize_t WaitAsyncOp(HANDLE handle, ssize_t bufsize,
-                    LPOVERLAPPED op, int timeout_sec) {
-  int timeout_millisec = timeout_sec*1000;
-  SimpleTimer t;
+                    LPOVERLAPPED op, absl::Duration timeout) {
+  SimpleTimer timer;
   DWORD w = ERROR_TIMEOUT;
-  while (timeout_millisec >= 0) {
-    t.Start();
-    w = WaitForSingleObjectEx(handle, timeout_millisec, TRUE);
+  while (timeout >= absl::ZeroDuration()) {
+    timer.Start();
+    w = WaitForSingleObjectEx(handle, absl::ToInt64Milliseconds(timeout), TRUE);
     switch (w) {
       case WAIT_OBJECT_0:
-        timeout_millisec -= t.GetInIntMilliseconds();
+        timeout -= timer.GetDuration();
         {
           DWORD num_bytes = 0;
           if (GetOverlappedResult(handle, op, &num_bytes, FALSE)) {
@@ -70,7 +69,7 @@ ssize_t WaitAsyncOp(HANDLE handle, ssize_t bufsize,
         }
 
       case WAIT_IO_COMPLETION:
-        timeout_millisec -= t.GetInIntMilliseconds();
+        timeout -= timer.GetDuration();
         continue;
 
       case WAIT_TIMEOUT:
@@ -118,7 +117,7 @@ ssize_t WaitAsyncOp(HANDLE handle, ssize_t bufsize,
 }  // anonymous namespace
 
 ssize_t ScopedNamedPipe::ReadWithTimeout(
-    char* buf, size_t bufsize, int timeout_sec) const {
+    char* buf, size_t bufsize, absl::Duration timeout) const {
   OVERLAPPED op;
   memset(&op, 0, sizeof op);
   BOOL ret = ReadFileEx(handle_, buf, bufsize, &op,
@@ -127,11 +126,11 @@ ssize_t ScopedNamedPipe::ReadWithTimeout(
     LOG_SYSRESULT(GetLastError());
     return FAIL;
   }
-  return WaitAsyncOp(handle_, bufsize, &op, timeout_sec);
+  return WaitAsyncOp(handle_, bufsize, &op, timeout);
 }
 
 ssize_t ScopedNamedPipe::WriteWithTimeout(
-    const char* buf, size_t bufsize, int timeout_sec) const {
+    const char* buf, size_t bufsize, absl::Duration timeout) const {
   OVERLAPPED op;
   memset(&op, 0, sizeof op);
   BOOL ret = WriteFileEx(handle_, buf, bufsize, &op,
@@ -140,10 +139,11 @@ ssize_t ScopedNamedPipe::WriteWithTimeout(
     LOG_SYSRESULT(GetLastError());
     return FAIL;
   }
-  return WaitAsyncOp(handle_, bufsize, &op, timeout_sec);
+  return WaitAsyncOp(handle_, bufsize, &op, timeout);
 }
 
-int ScopedNamedPipe::WriteString(absl::string_view message, int timeout) const {
+int ScopedNamedPipe::WriteString(absl::string_view message,
+                                 absl::Duration timeout) const {
   const char* p = message.data();
   int size = message.size();
   while (size > 0) {

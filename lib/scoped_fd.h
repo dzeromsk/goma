@@ -21,6 +21,7 @@
 
 
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
 #include "basictypes.h"
 using std::string;
 
@@ -111,14 +112,15 @@ class IOChannel {
 
   virtual ssize_t Read(void* ptr, size_t len) const = 0;
   virtual ssize_t Write(const void* ptr, size_t len) const = 0;
-  virtual ssize_t ReadWithTimeout(char *buf,
+  virtual ssize_t ReadWithTimeout(char* buf,
                                   size_t bufsize,
-                                  int timeout_sec) const = 0;
+                                  absl::Duration timeout) const = 0;
   virtual ssize_t WriteWithTimeout(const char* buf,
                                    size_t bufsize,
-                                   int timeout_sec) const = 0;
+                                   absl::Duration timeout) const = 0;
   // Write string to socket. Return negative on fail (Errno). OK on success.
-  virtual int WriteString(absl::string_view message, int timeout) const = 0;
+  virtual int WriteString(absl::string_view message,
+                          absl::Duration timeout) const = 0;
 
   // Returns the last error message. Valid when called just after
   // Write(), Read(), etc.
@@ -155,13 +157,14 @@ class ScopedSocket : public IOChannel {
 
   ssize_t Read(void* ptr, size_t len) const override;
   ssize_t Write(const void* ptr, size_t len) const override;
-  ssize_t ReadWithTimeout(char *buf,
+  ssize_t ReadWithTimeout(char* buf,
                           size_t bufsize,
-                          int timeout_sec) const override;
+                          absl::Duration timeout) const override;
   ssize_t WriteWithTimeout(const char* buf,
                            size_t bufsize,
-                           int timeout_sec) const override;
-  int WriteString(absl::string_view message, int timeout) const override;
+                           absl::Duration timeout) const override;
+  int WriteString(absl::string_view message,
+                  absl::Duration timeout) const override;
 
   // Returns the last error message. Valid when called just after
   // Write(), Read(), etc.

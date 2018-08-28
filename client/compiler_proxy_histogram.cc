@@ -15,6 +15,8 @@
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_stats.pb.h"
 MSVC_POP_WARNING()
+#include "time_util.h"
+#include "util.h"
 
 namespace devtools_goma {
 
@@ -89,28 +91,34 @@ void CompilerProxyHistogram::UpdateThreadpoolHttpServerStat(
   AUTOLOCK(lock, &mu_);
   histogram_[THSReqSize].Add(stat.req_size);
   histogram_[THSRespSize].Add(stat.resp_size);
-  histogram_[THSWaitingTime].Add(stat.waiting_time_msec);
-  histogram_[THSReadReqTime].Add(stat.read_req_time_msec);
-  histogram_[THSHandlerTime].Add(stat.handler_time_msec);
-  histogram_[THSWriteRespTime].Add(stat.write_resp_time_msec);
+  histogram_[THSWaitingTime].AddTimeAsMilliseconds(stat.waiting_time);
+  histogram_[THSReadReqTime].AddTimeAsMilliseconds(stat.read_req_time);
+  histogram_[THSHandlerTime].AddTimeAsMilliseconds(stat.handler_time);
+  histogram_[THSWriteRespTime].AddTimeAsMilliseconds(stat.write_resp_time);
 }
 
 void CompilerProxyHistogram::UpdateCompileStat(const CompileStats& stats) {
   AUTOLOCK(lock, &mu_);
-  if (stats.pending_time())
-    histogram_[PendingTime].Add(stats.pending_time());
-  if (stats.compiler_info_process_time())
-    histogram_[CompilerInfoProcessTime].Add(stats.compiler_info_process_time());
-  if (stats.include_preprocess_time())
-    histogram_[IncludePreprocessTime].Add(stats.include_preprocess_time());
-  if (stats.include_processor_wait_time()) {
-    histogram_[IncludeProcessorWaitTime].Add(
-        stats.include_processor_wait_time());
+  if (stats.pending_time > absl::ZeroDuration())
+    histogram_[PendingTime].AddTimeAsMilliseconds(stats.pending_time);
+  if (stats.compiler_info_process_time > absl::ZeroDuration())
+    histogram_[CompilerInfoProcessTime].AddTimeAsMilliseconds(
+        stats.compiler_info_process_time);
+  if (stats.include_preprocess_time > absl::ZeroDuration())
+    histogram_[IncludePreprocessTime].AddTimeAsMilliseconds(
+        stats.include_preprocess_time);
+  if (stats.include_processor_wait_time > absl::ZeroDuration()) {
+    histogram_[IncludeProcessorWaitTime].AddTimeAsMilliseconds(
+        stats.include_processor_wait_time);
   }
-  if (stats.include_processor_run_time())
-    histogram_[IncludeProcessorRunTime].Add(stats.include_processor_run_time());
-  if (stats.include_fileload_time())
-    histogram_[IncludeFileloadTime].Add(stats.include_fileload_time());
+  if (stats.include_processor_run_time > absl::ZeroDuration()) {
+    histogram_[IncludeProcessorRunTime].AddTimeAsMilliseconds(
+        stats.include_processor_run_time);
+  }
+  if (stats.include_fileload_time > absl::ZeroDuration()) {
+    histogram_[IncludeFileloadTime].AddTimeAsMilliseconds(
+        stats.include_fileload_time);
+  }
   if (stats.num_uploading_input_file_size() > 0) {
     histogram_[UploadingInputFile].Add(
         SumRepeatedInt32(stats.num_uploading_input_file()));
@@ -120,12 +128,17 @@ void CompilerProxyHistogram::UpdateCompileStat(const CompileStats& stats) {
         SumRepeatedInt32(stats.num_missing_input_file()));
   }
 
-  if (stats.rpc_call_time_size() > 0)
-    histogram_[RPCCallTime].Add(SumRepeatedInt32(stats.rpc_call_time()));
-  if (stats.file_response_time())
-    histogram_[FileResponseTime].Add(stats.file_response_time());
-  if (stats.handler_time())
-    histogram_[CompilerProxyHandlerTime].Add(stats.handler_time());
+  if (stats.total_rpc_call_time > absl::ZeroDuration()) {
+    histogram_[RPCCallTime].AddTimeAsMilliseconds(stats.total_rpc_call_time);
+  }
+  if (stats.file_response_time > absl::ZeroDuration()) {
+    histogram_[FileResponseTime].AddTimeAsMilliseconds(
+        stats.file_response_time);
+  }
+  if (stats.handler_time > absl::ZeroDuration()) {
+    histogram_[CompilerProxyHandlerTime].AddTimeAsMilliseconds(
+        stats.handler_time);
+  }
   if (stats.gomacc_req_size)
     histogram_[GomaccReqSize].Add(stats.gomacc_req_size);
   if (stats.gomacc_resp_size)
@@ -145,19 +158,19 @@ void CompilerProxyHistogram::UpdateCompileStat(const CompileStats& stats) {
           100 * rpc_req_size / rpc_raw_req_size);
     }
   }
-  if (stats.rpc_req_build_time_size() > 0) {
-    histogram_[ExecReqBuildTime].Add(
-        SumRepeatedInt32(stats.rpc_req_build_time()));
+  if (stats.total_rpc_req_build_time > absl::ZeroDuration()) {
+    histogram_[ExecReqBuildTime].AddTimeAsMilliseconds(
+        stats.total_rpc_req_build_time);
   }
-  if (stats.rpc_req_send_time_size() > 0) {
-    int64_t rpc_req_send_time = SumRepeatedInt32(stats.rpc_req_send_time());
-    histogram_[ExecReqTime].Add(rpc_req_send_time);
-    if (rpc_req_send_time > 0) {
-      histogram_[ExecReqKbps].Add(rpc_req_size / rpc_req_send_time);
-    }
+  if (stats.total_rpc_req_send_time > absl::ZeroDuration()) {
+    histogram_[ExecReqTime].AddTimeAsMilliseconds(
+        stats.total_rpc_req_send_time);
+    histogram_[ExecReqKbps].Add(
+        ComputeDataRateInKBps(rpc_req_size, stats.total_rpc_req_send_time));
   }
-  if (stats.rpc_wait_time_size() > 0)
-    histogram_[ExecWaitTime].Add(SumRepeatedInt32(stats.rpc_wait_time()));
+  if (stats.total_rpc_wait_time > absl::ZeroDuration()) {
+    histogram_[ExecWaitTime].AddTimeAsMilliseconds(stats.total_rpc_wait_time);
+  }
 
   int64_t rpc_resp_size = 0;
   if (stats.rpc_resp_size_size() > 0) {
@@ -172,15 +185,15 @@ void CompilerProxyHistogram::UpdateCompileStat(const CompileStats& stats) {
           100 * rpc_resp_size / rpc_raw_resp_size);
     }
   }
-  if (stats.rpc_resp_recv_time_size() > 0) {
-    int64_t rpc_resp_recv_time = SumRepeatedInt32(stats.rpc_resp_recv_time());
-    histogram_[ExecRespTime].Add(rpc_resp_recv_time);
-    if (rpc_resp_recv_time > 0)
-      histogram_[ExecRespKbps].Add(rpc_resp_size / rpc_resp_recv_time);
+  if (stats.total_rpc_resp_recv_time > absl::ZeroDuration()) {
+    histogram_[ExecRespTime].AddTimeAsMilliseconds(
+        stats.total_rpc_resp_recv_time);
+    histogram_[ExecRespKbps].Add(
+        ComputeDataRateInKBps(rpc_resp_size, stats.total_rpc_resp_recv_time));
   }
-  if (stats.rpc_resp_parse_time_size() > 0) {
-    histogram_[ExecRespParseTime].Add(
-        SumRepeatedInt32(stats.rpc_resp_parse_time()));
+  if (stats.total_rpc_resp_parse_time > absl::ZeroDuration()) {
+    histogram_[ExecRespParseTime].AddTimeAsMilliseconds(
+        stats.total_rpc_resp_parse_time);
   }
   // Look into protobuf response.
 
@@ -202,16 +215,15 @@ void CompilerProxyHistogram::UpdateCompileStat(const CompileStats& stats) {
     histogram_[InputFileReqCompressionRatio].Add(
         100 * stats.input_file_rpc_size / stats.input_file_rpc_raw_size);
   }
-  int64_t output_file_time = 0;
-  if (stats.output_file_time_size() > 0) {
-    output_file_time = SumRepeatedInt32(stats.output_file_time());
-    histogram_[OutputFileTime].Add(output_file_time);
+  if (stats.output_file_time > absl::ZeroDuration()) {
+    histogram_[OutputFileTime].AddTimeAsMilliseconds(stats.output_file_time);
   }
   if (stats.output_file_size_size() > 0) {
     int64_t output_file_size = SumRepeatedInt32(stats.output_file_size());
     histogram_[OutputFileSize].Add(output_file_size);
-    if (output_file_time > 0) {
-      histogram_[OutputFileKbps].Add(output_file_size / output_file_time);
+    if (stats.output_file_time > absl::ZeroDuration()) {
+      histogram_[OutputFileKbps].Add(
+          ComputeDataRateInKBps(output_file_size, stats.output_file_time));
     }
   }
   if (stats.output_file_rpc_raw_size > 0) {
@@ -222,17 +234,18 @@ void CompilerProxyHistogram::UpdateCompileStat(const CompileStats& stats) {
   if (stats.chunk_resp_size_size() > 0)
     histogram_[ChunkRespSize].Add(SumRepeatedInt32(stats.chunk_resp_size()));
 
-  if (stats.local_delay_time() > 0)
-    histogram_[LocalDelayTime].Add(stats.local_delay_time());
-  if (stats.local_pending_time() > 0)
-    histogram_[LocalPendingTime].Add(stats.local_pending_time());
-  if (stats.local_run_time() > 0)
-    histogram_[LocalRunTime].Add(stats.local_run_time());
+  if (stats.local_delay_time > absl::ZeroDuration())
+    histogram_[LocalDelayTime].AddTimeAsMilliseconds(stats.local_delay_time);
+  if (stats.local_pending_time > absl::ZeroDuration())
+    histogram_[LocalPendingTime].AddTimeAsMilliseconds(
+        stats.local_pending_time);
+  if (stats.local_run_time > absl::ZeroDuration())
+    histogram_[LocalRunTime].AddTimeAsMilliseconds(stats.local_run_time);
   if (stats.local_mem_kb() > 0)
     histogram_[LocalMemSize].Add(stats.local_mem_kb());
   if (stats.local_output_file_time_size() > 0) {
-    histogram_[LocalOutputFileTime].Add(SumRepeatedInt32(
-        stats.local_output_file_time()));
+    histogram_[LocalOutputFileTime].AddTimeAsMilliseconds(
+        stats.total_local_output_file_time);
   }
   if (stats.local_output_file_size_size() > 0) {
     histogram_[LocalOutputFileSize].Add(SumRepeatedInt32(

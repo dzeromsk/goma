@@ -92,4 +92,11 @@ string ToShortNodename(const string& nodename) {
   return absl::AsciiStrToLower(entries[0]);
 }
 
+int64_t SumRepeatedInt32(
+    const google::protobuf::RepeatedField<google::protobuf::int32>& input) {
+  int64_t sum = 0;
+  for (int32_t input_value : input) { sum += input_value; }
+  return sum;
+}
+
 }  // namespace devtools_goma

@@ -26,6 +26,10 @@ static_library("cxx_compiler_type_specific_lib") {
   public_deps = [
     "//client:compiler_type_specific_lib",
   ]
+
+  deps = [
+    "//client/cxx/include_processor:cpp_include_processor_lib",
+  ]
 }
 
 static_library("clang_compiler_info_builder_helper_lib") {
@@ -104,6 +108,11 @@ static_library("gcc_compiler_type_specific") {
   public_deps = [
     ":cxx_compiler_type_specific_lib",
     ":gcc_compiler_info_builder_lib",
+  ]
+
+  deps = [
+    "//client/linker/linker_input_processor:linker_input_processor_lib",
+    "//client/linker/linker_input_processor:thinlto_import_processor_lib",
   ]
 }
 

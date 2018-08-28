@@ -34,9 +34,6 @@ std::unique_ptr<Content> DirectiveFilter::MakeFilteredContent(
   length = RemoveEscapedNewLine(buffer.get(), buffer.get() + length,
                                 buffer.get());
 
-  length = RemoveDeadDirectives(buffer.get(), buffer.get() + length,
-                                buffer.get());
-
   return Content::CreateFromBuffer(buffer.get(), length);
 }
 
@@ -233,67 +230,6 @@ size_t DirectiveFilter::FilterOnlyDirectives(
     } else {
       src = DirectiveFilter::NextLineHead(src, end);
     }
-  }
-
-  return dst - original_dst;
-}
-
-// static
-size_t DirectiveFilter::RemoveDeadDirectives(
-    const char* src, const char* end, char* dst) {
-  const char* const original_dst = dst;
-  std::vector<absl::string_view> directive_stack;
-
-  while (src != end) {
-    const char* next_line_head = DirectiveFilter::NextLineHead(src, end);
-    absl::string_view current_directive_line(src, next_line_head - src);
-
-    src = next_line_head;
-
-    // Drop "#error" support for performance.
-    // We assume "#error" almost never happens,
-    // so let compiler detect #error failure instead of goma preprocessor.
-    if (absl::StartsWith(current_directive_line, "#error")) {
-      continue;
-    }
-
-    // Drop pragma support other than once.
-    // "#pragma once" is only supported pragma in goma preprocessor.
-    if (absl::StartsWith(current_directive_line, "#pragma") &&
-        current_directive_line.find("once") == absl::string_view::npos) {
-      continue;
-    }
-
-    // Drop #else and #elif until we see something else because
-    // such #else of #elif does not change control flow.
-    // e.g. code like following is removed because it has no effect
-    // to included files.
-    // #if USE_STDERR
-    //   std::cerr << "some error" << std::endl;
-    // #else
-    //   std::cout << "some error" << std::endl;
-    // #endif
-    if (absl::StartsWith(current_directive_line, "#endif")) {
-      while (!directive_stack.empty() &&
-             (absl::StartsWith(directive_stack.back(), "#else") ||
-              absl::StartsWith(directive_stack.back(), "#elif"))) {
-        directive_stack.pop_back();
-      }
-
-      if (!directive_stack.empty() &&
-          absl::StartsWith(directive_stack.back(), "#if")) {
-        directive_stack.pop_back();
-      } else {
-        directive_stack.push_back(current_directive_line);
-      }
-    } else {
-      directive_stack.push_back(current_directive_line);
-    }
-  }
-
-  for (const auto& directive : directive_stack) {
-    memmove(dst, directive.begin(), directive.size());
-    dst += directive.size();
   }
 
   return dst - original_dst;

@@ -28,23 +28,37 @@ namespace devtools_goma {
 using google::protobuf::int64;
 using google::protobuf::io::ArrayInputStream;
 using google::protobuf::io::ConcatenatingInputStream;
-using google::protobuf::io::GzipInputStream;
 using google::protobuf::io::ZeroCopyInputStream;
 using google::protobuf::io::ZeroCopyOutputStream;
 using std::string;
 
-enum EncodingType {
-  NO_ENCODING = 0,
-  ENCODING_DEFLATE,
-  ENCODING_LZMA2,
-  NUM_ENCODINGS
+enum class EncodingType {
+  NO_ENCODING,
+  DEFLATE,
+  GZIP,
+  LZMA2,
 };
 
 const char* GetEncodingName(EncodingType type);
 
-// Gets encoding type from |header|. If multiple encodings are found,
+// Parse encoding name.
+// Note: it ignores weight.
+EncodingType ParseEncodingName(absl::string_view s);
+
+// Parse encoding in header field value.
+// Note: it ignores weight, and can't handle '*'.
+std::vector<EncodingType> ParseAcceptEncoding(absl::string_view field);
+
+// Pick preferred encodings from accepts.
+EncodingType PickEncoding(const std::vector<EncodingType>& accepts,
+                          const std::vector<EncodingType>& prefs);
+
+// Gets encoding type from |header| field value.
+// If multiple encodings are found,
 // this function returns the preferred one.
+ABSL_DEPRECATED("Use ParseEncodingName, ParseAcceptEncoding and PickEncoding")
 EncodingType GetEncodingFromHeader(absl::string_view header);
+
 
 #ifdef ENABLE_LZMA
 class LZMAInputStream : public ZeroCopyInputStream {

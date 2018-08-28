@@ -25,19 +25,20 @@
 
 #include "absl/base/thread_annotations.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
+#include "absl/types/optional.h"
 #include "basictypes.h"
 #include "base/compiler_specific.h"
 #include "compress_util.h"
 #include "gtest/gtest_prod.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "google/protobuf/io/zero_copy_stream.h"
-#include "google/protobuf/io/zero_copy_stream_impl.h"
-#include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 MSVC_POP_WARNING()
 #include "http_util.h"
 #include "lockhelper.h"
 #include "luci_context.h"
 #include "oauth2.h"
+#include "scoped_fd.h"
 #include "tls_engine.h"
 #include "worker_thread_manager.h"
 
@@ -74,10 +75,10 @@ class HttpClient {
     bool use_ssl;
     string ssl_extra_cert;
     string ssl_extra_cert_data;
-    int ssl_crl_max_valid_duration;
-    double socket_read_timeout_sec;
-    int min_retry_backoff_ms;
-    int max_retry_backoff_ms;
+    absl::optional<absl::Duration> ssl_crl_max_valid_duration;
+    absl::Duration socket_read_timeout;
+    absl::Duration min_retry_backoff;
+    absl::Duration max_retry_backoff;
 
     OAuth2Config oauth2_config;
     string gce_service_account;
@@ -85,7 +86,7 @@ class HttpClient {
     LuciContextAuth luci_context_auth;
 
     bool fail_fast;
-    int network_error_margin;
+    absl::Duration network_error_margin;
     int network_error_threshold_percent;
 
     // Allows throttling if this is true.
@@ -148,7 +149,11 @@ class HttpClient {
 
     // If true, timeout is treated as http error (default).
     bool timeout_should_be_http_error;
-    std::deque<int> timeout_secs;
+
+    // timeouts from when connection becomes ready to when start receiving
+    // response.  Once start receiving response, timeout would be controlled
+    // by http_client's options socket_read_timeout.
+    std::deque<absl::Duration> timeouts;
 
     // Whether connect() was successful for this request.
     bool connect_success;
@@ -176,14 +181,13 @@ class HttpClient {
     size_t raw_req_size;
     size_t raw_resp_size;
 
-    // in milliseconds.
-    int throttle_time;
-    int pending_time;
-    int req_build_time;
-    int req_send_time;
-    int wait_time;
-    int resp_recv_time;
-    int resp_parse_time;
+    absl::Duration throttle_time;
+    absl::Duration pending_time;
+    absl::Duration req_build_time;
+    absl::Duration req_send_time;
+    absl::Duration wait_time;
+    absl::Duration resp_recv_time;
+    absl::Duration resp_parse_time;
 
     int num_retry;
     int num_throttled;
@@ -450,10 +454,11 @@ class HttpClient {
   // Use GetOAuth2Config above.
   const Options& options() const { return options_; }
 
-  // Calculate next backoff msec.
-  // prev_backoff_msec must be positive.
-  static int BackoffMsec(
-      const Options& option, int prev_backoff_msec, bool in_error);
+  // Calculate next backoff duration.
+  // prev_backoff_duration must be positive.
+  static absl::Duration GetNextBackoff(
+      const Options& option, absl::Duration prev_backoff_duration,
+      bool in_error);
 
   // public for HttpRPC ping.
   void IncNumActive();
@@ -463,19 +468,17 @@ class HttpClient {
   void WaitNoActive();
 
   int UpdateHealthStatusMessageForPing(
-      const Status& status, int round_trip_time);
+      const Status& status, absl::optional<absl::Duration> round_trip_time);
 
   // NetworkErrorStartedTime return a time network error started.
-  // Returns 0 if no error occurred recently.
+  // Returns absl::nullopt if no error occurred recently.
   // The time will be set on fatal http error (302, 401, 403) and when
   // no socket in socket pool is available to connect to the host.
   // The time will be cleared when HttpClient get 2xx response.
-  time_t NetworkErrorStartedTime() const;
+  absl::optional<absl::Time> NetworkErrorStartedTime() const;
 
   // Takes the ownership.
   void SetMonitor(std::unique_ptr<NetworkErrorMonitor> monitor);
-
-  static const char kGomaLength[];
 
  private:
   class Task;
@@ -495,59 +498,61 @@ class HttpClient {
   // Thread-unsafe, must be guarded by mutex.
   class NetworkErrorStatus {
    public:
-    explicit NetworkErrorStatus(int margin)
-        : error_recover_margin_(margin),
-          error_started_time_(0),
-          error_until_(0) {}
+    explicit NetworkErrorStatus(absl::Duration margin)
+        : error_recover_margin_(margin) {}
 
     // Returns the network error started time.
-    // 0 if network is not in the error state.
-    time_t NetworkErrorStartedTime() const { return error_started_time_; }
-    time_t NetworkErrorUntil() const { return error_until_; }
+    absl::optional<absl::Time> NetworkErrorStartedTime() const {
+      return error_started_time_;
+    }
+    absl::optional<absl::Time> NetworkErrorUntil() const {
+      return error_until_;
+    }
 
     // Call this when the network access was error.
     // Returns true if a new network error is detected.
     // This will convert level trigger to edge trigger.
-    bool OnNetworkErrorDetected(time_t now);
+    bool OnNetworkErrorDetected(absl::Time now);
 
     // Call this when network access was not error.
     // Even this called, we keep the error until |error_until_|.
     // Returns true if the network is really recovered.
     // This will convert level trigger to edge trigger.
-    bool OnNetworkRecovered(time_t now);
+    bool OnNetworkRecovered(absl::Time now);
 
    private:
-    const int error_recover_margin_;
-    // 0 if network is not in the error state. Otherwise, time when the network
-    // error has started.
-    time_t error_started_time_;
+    // Timeout to recover from error.
+    const absl::Duration error_recover_margin_;
+    // Unset if network is not in the error state. Otherwise, time when the
+    // network error has started.
+    absl::optional<absl::Time> error_started_time_;
     // Even we get the 2xx http status, we consider the network is still
     // in the error state until this time.
-    time_t error_until_;
+    absl::optional<absl::Time> error_until_;
   };
 
   // |may_retry| is provided for initial ping.
   Descriptor* NewDescriptor();
   void ReleaseDescriptor(Descriptor* d, ConnectionCloseState close_state);
 
-  double EstimatedRecvTime(size_t bytes);
+  absl::Duration EstimatedRecvTime(size_t bytes);
 
   string GetOAuth2Authorization() const;
   bool ShouldRefreshOAuth2AccessToken() const;
   void RunAfterOAuth2AccessTokenGetReady(
-      WorkerThreadManager::ThreadId thread_id,
+      WorkerThread::ThreadId thread_id,
       OneshotClosure* callback);
 
   void UpdateBackoffUnlocked(bool in_error) EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   // Returns time to wait in the queue. If returns 0, no need to wait.
-  int TryStart();
+  absl::Duration TryStart();
 
   void IncNumPending();
   void DecNumPending();
 
-  // Returns milliseconds time to wait in the queue on error.
-  int GetRandomizeBackoffTimeInMs();
+  // Returns randomized duration to wait in the queue on error.
+  absl::Duration GetRandomizedBackoff() const;
 
   // return true if shutting_down or disabled.
   bool failnow() const;
@@ -577,7 +582,8 @@ class HttpClient {
   ConditionVariable cond_;  // signaled when num_active_ is 0.
   string health_status_ GUARDED_BY(mu_);
   bool shutting_down_ GUARDED_BY(mu_);
-  std::deque<std::pair<time_t, int>> recent_http_status_code_ GUARDED_BY(mu_);
+  std::deque<std::pair<absl::Time, int>>
+      recent_http_status_code_ GUARDED_BY(mu_);
   size_t bad_status_num_in_recent_http_ GUARDED_BY(mu_);
 
   std::unique_ptr<NetworkErrorMonitor> monitor_ GUARDED_BY(mu_);
@@ -606,26 +612,25 @@ class HttpClient {
   std::unique_ptr<Histogram> write_size_ GUARDED_BY(mu_);
 
   size_t total_resp_byte_ GUARDED_BY(mu_);
-  long total_resp_time_ GUARDED_BY(mu_);  // msec.
+  absl::Duration total_resp_time_ GUARDED_BY(mu_);  // msec.
 
   int ping_http_return_code_ GUARDED_BY(mu_);
-  int ping_round_trip_time_ms_ GUARDED_BY(mu_);
+  absl::optional<absl::Duration> ping_round_trip_time_ GUARDED_BY(mu_);
 
   std::map<int, int> num_http_status_code_ GUARDED_BY(mu_);
   TrafficHistory traffic_history_ GUARDED_BY(mu_);
   PeriodicClosureId traffic_history_closure_id_ GUARDED_BY(mu_);
-  int retry_backoff_ms_;
-  // if enabled_from_ > 0,
-  //   t < enabled_from, then it will be disabled,
-  //   enabled_from <= t, then it is in ramp up period
-  // where t=time().
-  // if enabled_from_ == 0, it is enabled (without checking time()).
-  time_t enabled_from_ GUARDED_BY(mu_);
+  absl::Duration retry_backoff_;
+  // if enabled_from_ is set:
+  //   if now < *enabled_from: it will be disabled,
+  //   if enabled_from <= now: it is in ramp up period
+  // if enabled_from_ is not set: it is enabled (without checking time()).
+  absl::optional<absl::Time> enabled_from_ GUARDED_BY(mu_);
 
   int num_network_error_ GUARDED_BY(mu_);
   int num_network_recovered_ GUARDED_BY(mu_);
 
-  FRIEND_TEST(NetworkErrorStatus, BasicTest);
+  FRIEND_TEST(NetworkErrorStatusTest, Basic);
   DISALLOW_COPY_AND_ASSIGN(HttpClient);
 };
 
@@ -635,7 +640,6 @@ class HttpRequest : public HttpClient::Request {
   HttpRequest();
   ~HttpRequest() override;
 
-  // TODO: set body stream producer instead of string.
   void SetBody(const string& body);
   std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>
     NewStream() const override;
@@ -648,6 +652,28 @@ class HttpRequest : public HttpClient::Request {
   string body_;
 
   DISALLOW_ASSIGN(HttpRequest);
+};
+
+// HttpFileUploadRequest is a request to upload a file.
+class HttpFileUploadRequest : public HttpClient::Request {
+ public:
+  HttpFileUploadRequest() = default;
+  ~HttpFileUploadRequest() override = default;
+
+  void operator=(const HttpFileUploadRequest&) = delete;
+
+  void SetBodyFile(string filename, size_t size) {
+    filename_ = std::move(filename);
+    size_ = size;
+  }
+  std::unique_ptr<google::protobuf::io::ZeroCopyInputStream> NewStream()
+      const override;
+
+  std::unique_ptr<HttpClient::Request> Clone() const override;
+
+ private:
+  string filename_;
+  size_t size_ = 0;
 };
 
 // HttpResponse is a response of HTTP transaction.
@@ -704,52 +730,52 @@ class HttpResponse : public HttpClient::Response {
   DISALLOW_COPY_AND_ASSIGN(HttpResponse);
 };
 
-// StringInputStream is helper for ArrayInputStream.
-// It owns input string, so no need for caller to own the string
-// along with input stream.
-class StringInputStream : public google::protobuf::io::ZeroCopyInputStream {
+// HttpFileDownloadResponse is a response of HTTP file downloading.
+class HttpFileDownloadResponse : public HttpClient::Response {
  public:
-  explicit StringInputStream(string data);
-  ~StringInputStream() override = default;
+  class Body : public HttpClient::Response::Body {
+   public:
+    Body(ScopedFd&& fd,
+         size_t content_length, bool is_chunked, EncodingType encoding_type);
+    ~Body() override = default;
 
-  bool Next(const void** data, int* size) override {
-    return stream_->Next(data, size);
-  }
-  void BackUp(int count) override { stream_->BackUp(count); }
-  bool Skip(int count) override { return stream_->Skip(count); }
-  google::protobuf::int64 ByteCount() const override {
-    return stream_->ByteCount();
-  }
+    void Next(char** buf, int* buf_size) override;
+    State Process(int data_size) override;
+    size_t ByteCount() const override { return len_; }
+
+   private:
+    bool Write(absl::string_view data);
+    State Close();
+
+    ScopedFd fd_;
+    const size_t content_length_;
+    std::unique_ptr<HttpChunkParser> chunk_parser_;
+    const EncodingType encoding_type_;
+
+    char buf_[kNetworkBufSize] = {};
+    size_t len_ = 0;
+  };
+
+  HttpFileDownloadResponse(std::string filename, int mode);
+  ~HttpFileDownloadResponse() override;
+
+  HttpFileDownloadResponse(const HttpFileDownloadResponse&) = delete;
+  HttpFileDownloadResponse(HttpFileDownloadResponse&&) = delete;
+  HttpFileDownloadResponse& operator=(const HttpFileDownloadResponse&) = delete;
+  HttpFileDownloadResponse& operator=(HttpFileDownloadResponse&&) = delete;
+
+  HttpClient::Response::Body* NewBody(
+      size_t content_length, bool is_chunked,
+      EncodingType encoding_type) override;
+
+ protected:
+  // ParseBody sets result_ to OK.
+  void ParseBody() override;
 
  private:
-  const string data_;
-  std::unique_ptr<google::protobuf::io::ArrayInputStream> stream_;
-};
-
-// ChainedInputStream is similar with ContatinatingInputStream,
-// but it owns all underlying input streams.
-class ChainedInputStream
-    : public google::protobuf::io::ZeroCopyInputStream {
- public:
-  explicit ChainedInputStream(
-      std::vector<
-      std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>> s);
-  ~ChainedInputStream() override = default;
-
-  bool Next(const void** data, int* size) override {
-    return stream_->Next(data, size);
-  }
-  void BackUp(int count) override { stream_->BackUp(count); }
-  bool Skip(int count) override { return stream_->Skip(count); }
-  google::protobuf::int64 ByteCount() const override {
-    return stream_->ByteCount();
-  }
-
- private:
-  std::vector<std::unique_ptr<google::protobuf::io::ZeroCopyInputStream>>
-    streams_;
-  std::vector<google::protobuf::io::ZeroCopyInputStream*> streams_array_;
-  std::unique_ptr<google::protobuf::io::ConcatenatingInputStream> stream_;
+  const std::string filename_;
+  const int mode_;
+  std::unique_ptr<Body> response_body_;
 };
 
 }  // namespace devtools_goma

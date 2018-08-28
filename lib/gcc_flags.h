@@ -14,13 +14,13 @@
 
 
 #include "absl/strings/string_view.h"
-#include "compiler_flags.h"
+#include "cxx_flags.h"
 #include "flag_parser.h"
 using std::string;
 
 namespace devtools_goma {
 
-class GCCFlags : public CompilerFlags {
+class GCCFlags : public CxxFlags {
  public:
   enum Mode { PREPROCESS, COMPILE, LINK };
 
@@ -51,7 +51,7 @@ class GCCFlags : public CompilerFlags {
   //                    I know ThinLTO is also supported on clang-cl.
   const string& thinlto_index() const { return thinlto_index_; }
 
-  bool is_cplusplus() const { return is_cplusplus_; }
+  bool is_cplusplus() const override { return is_cplusplus_; }
   bool has_nostdinc() const { return has_nostdinc_; }
   bool has_no_integrated_as() const { return has_no_integrated_as_; }
   bool has_pipe() const { return has_pipe_; }

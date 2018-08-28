@@ -19,6 +19,10 @@ bool FakeTLSEngine::IsIOPending() const {
   return false;
 }
 
+bool FakeTLSEngine::IsReady() const {
+  return true;
+}
+
 int FakeTLSEngine::GetDataToSendTransport(string *data) {
   if (broken_ == FAKE_TLS_GET_BROKEN) {
     execute_broken_ = true;

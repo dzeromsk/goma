@@ -8,24 +8,25 @@
 
 #include <memory>
 
+#include "absl/types/optional.h"
 #include "basictypes.h"
-#include "scoped_fd.h"
-#include "worker_thread_manager.h"
 #include "descriptor.h"
+#include "scoped_fd.h"
+#include "worker_thread.h"
 
 namespace devtools_goma {
 
 class SocketDescriptor : public Descriptor {
  public:
   SocketDescriptor(ScopedSocket&& fd,
-                   WorkerThreadManager::Priority priority,
-                   WorkerThreadManager::WorkerThread* worker);
+                   WorkerThread::Priority priority,
+                   WorkerThread* worker);
   ~SocketDescriptor() override;
 
   virtual int fd() const { return fd_.get(); }
   virtual const IOChannel* wrapper() const { return &fd_; }
   ScopedSocket ReleaseFd() { return std::move(fd_); }
-  virtual WorkerThreadManager::Priority priority() const { return priority_; }
+  virtual WorkerThread::Priority priority() const { return priority_; }
   SocketDescriptor* socket_descriptor() override { return this; }
   // closure must be permanent closure.
   void NotifyWhenReadable(
@@ -36,9 +37,9 @@ class SocketDescriptor : public Descriptor {
   virtual void ClearReadable();
   void ClearWritable() override;
   // closure must be one-shot closure.
-  void NotifyWhenTimedout(double timeout,
+  void NotifyWhenTimedout(absl::Duration timeout,
                           OneshotClosure* closure) override;
-  void ChangeTimeout(double timeout) override;
+  void ChangeTimeout(absl::Duration timeout) override;
   virtual void ClearTimeout();
   ssize_t Read(void* ptr, size_t len) override;
   ssize_t Write(const void* ptr, size_t len) override;
@@ -86,20 +87,20 @@ class SocketDescriptor : public Descriptor {
   void UpdateLastErrorStatus();
 
   ScopedSocket fd_;
-  const WorkerThreadManager::Priority priority_;
-  WorkerThreadManager::WorkerThread* worker_;
+  const WorkerThread::Priority priority_;
+  WorkerThread* worker_;
   // permanent closure.
   std::unique_ptr<PermanentClosure> readable_closure_;
   // permanent closure.
   std::unique_ptr<PermanentClosure> writable_closure_;
-  double timeout_;
-  double last_time_;
+  absl::optional<absl::Duration> timeout_;
+  WorkerThread::Timestamp last_time_;
 
   // permanent to TimeoutClosure()
   std::unique_ptr<PermanentClosure> timeout_run_closure_;
   // single shot specified by NotifyWhenTimeout.
   std::unique_ptr<OneshotClosure> timeout_closure_;
-  WorkerThreadManager::ThreadId thread_;
+  WorkerThread::ThreadId thread_;
   bool read_in_queue_;
   bool write_in_queue_;
   bool timeout_in_queue_;

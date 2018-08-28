@@ -31,6 +31,7 @@
 #include "subprocess_option_setter.h"
 #include "threadpool_http_server.h"
 #include "watchdog.h"
+#include "worker_thread.h"
 #include "worker_thread_manager.h"
 
 using std::string;
@@ -154,13 +155,13 @@ class CompileService {
     void RequestClosed();
 
     WorkerThreadManager* wm_;
-    WorkerThreadManager::ThreadId caller_thread_id_;
+    WorkerThread::ThreadId caller_thread_id_;
     ThreadpoolHttpServer::HttpServerRequest* http_server_request_;
     mutable Lock mu_;
     std::vector<RpcController*> rpcs_;
     std::unique_ptr<MultiExecResp> resp_;
     OneshotClosure* closed_callback_;
-    std::vector<std::pair<WorkerThreadManager::ThreadId, OneshotClosure*>>
+    std::vector<std::pair<WorkerThread::ThreadId, OneshotClosure*>>
         closed_callbacks_;
 
     size_t gomacc_req_size_;
@@ -172,7 +173,7 @@ class CompileService {
     GetCompilerInfoParam()
         : flags(nullptr), cache_hit(false), updated(false) {}
     // request
-    WorkerThreadManager::ThreadId thread_id;
+    WorkerThread::ThreadId thread_id;
     string trace_id;
     CompilerInfoCache::Key key;
     const CompilerFlags* flags;
@@ -214,15 +215,12 @@ class CompileService {
   }
   void SetCompilerProxyIdPrefix(const string& prefix);
 
-  // Takes ownership of option_setter.
   void SetSubProcessOptionSetter(
       std::unique_ptr<SubProcessOptionSetter> option_setter);
 
-  // Takes ownership of http_client.
   void SetHttpClient(std::unique_ptr<HttpClient> http_client);
   HttpClient* http_client() const { return http_client_.get(); }
 
-  // Takes ownership of http_rpc.
   void SetHttpRPC(std::unique_ptr<HttpRPC> http_rpc);
   HttpRPC* http_rpc() const { return http_rpc_.get(); }
 
@@ -232,16 +230,13 @@ class CompileService {
     return exec_service_client_.get();
   }
 
-  // Takes ownership of multi_file_store.
   void SetMultiFileStore(std::unique_ptr<MultiFileStore> multi_file_store);
   MultiFileStore* multi_file_store() const {
     return multi_file_store_.get();
   }
 
-  // Takes ownership of file_service.
   void SetFileServiceHttpClient(
       std::unique_ptr<FileServiceHttpClient> file_service);
-  FileServiceHttpClient* file_service() const;
   BlobClient* blob_client() const;
 
   FileHashCache* file_hash_cache() const { return file_hash_cache_.get(); }
@@ -250,15 +245,12 @@ class CompileService {
   void StartIncludeProcessorWorkers(int num_threads);
   int include_processor_pool() const { return include_processor_pool_; }
 
-  // Takes ownership of log_service_client.
   void SetLogServiceClient(
       std::unique_ptr<LogServiceClient> log_service_client);
   LogServiceClient* log_service() const { return log_service_client_.get(); }
 
-  // Takes ownership of auto_updater.
   void SetAutoUpdater(std::unique_ptr<AutoUpdater> auto_updater);
 
-  // Takes ownership of watchdog.
   void SetWatchdog(std::unique_ptr<Watchdog> watchdog,
                    const std::vector<string>& goma_ipc_env);
 
@@ -271,10 +263,12 @@ class CompileService {
   }
   bool need_to_send_content() const { return need_to_send_content_; }
 
-  void SetNewFileThreshold(int threshold) {
-    new_file_threshold_ = threshold;
+  void SetNewFileThresholdDuration(absl::Duration threshold) {
+    new_file_threshold_duration_ = threshold;
   }
-  int new_file_threshold() const { return new_file_threshold_; }
+  absl::Duration new_file_threshold_duration() const {
+    return new_file_threshold_duration_;
+  }
 
   void SetEnableGchHack(bool enable) { enable_gch_hack_ = enable;  }
   bool enable_gch_hack() const { return enable_gch_hack_; }
@@ -374,7 +368,7 @@ class CompileService {
   // ExecService API.
   // Starts new CompileTask.  done will be called on the same thread.
   void Exec(RpcController* rpc,
-            const ExecReq* exec_req,
+            const ExecReq& exec_req,
             ExecResp* exec_resp,
             OneshotClosure* done);
 
@@ -474,7 +468,7 @@ class CompileService {
   typedef std::vector<CompilerInfoWaiter> CompilerInfoWaiterList;
 
   // Called when reply from Exec.
-  void ExecDone(WorkerThreadManager::ThreadId thread_id, OneshotClosure* done);
+  void ExecDone(WorkerThread::ThreadId thread_id, OneshotClosure* done);
 
   bool FindLocalCompilerPathUnlocked(const string& key,
                                      const string& key_cwd,
@@ -565,7 +559,7 @@ class CompileService {
   std::unique_ptr<Watchdog> watchdog_;
 
   bool need_to_send_content_;
-  int new_file_threshold_;
+  absl::Duration new_file_threshold_duration_;
   std::vector<absl::Duration> timeouts_;
   bool enable_gch_hack_;
   bool use_relative_paths_in_argv_;
@@ -637,8 +631,8 @@ class CompileService {
 
   int num_include_processor_total_files_;
   int num_include_processor_skipped_files_;
-  int64_t include_processor_total_wait_time_;  // might not fit in int32.
-  int64_t include_processor_total_run_time_;  // might not fit in int32.
+  absl::Duration include_processor_total_wait_time_;
+  absl::Duration include_processor_total_run_time_;
 
   size_t cur_sum_output_size_ GUARDED_BY(buf_mu_);
   size_t max_sum_output_size_ GUARDED_BY(buf_mu_);
@@ -650,7 +644,7 @@ class CompileService {
 
   int num_active_fail_fallback_tasks_;
   int max_active_fail_fallback_tasks_;
-  absl::optional<absl::Duration> allowed_max_active_fail_fallback_duration_;
+  absl::Duration allowed_max_active_fail_fallback_duration_;
   absl::optional<absl::Time> reached_max_active_fail_fallback_time_;
 
   int num_forced_fallback_in_setup_[kNumForcedFallbackReasonInSetup];

@@ -8,18 +8,16 @@
 
 namespace devtools_goma {
 
-// smoke test to ensure SimpleTimer does not return minus value.
-TEST(SimpleTimer, smoke) {
+// Smoke test to ensure SimpleTimer does not return a negative value.
+TEST(SimpleTimer, Smoke) {
   SimpleTimer st(SimpleTimer::START);
 
   for (int i = 0; i < 1000; ++i) {
-    EXPECT_GE(st.GetInNanoseconds(), 0);
-    EXPECT_GE(st.GetInSeconds(), 0.0);
     EXPECT_GE(st.GetDuration(), absl::ZeroDuration());
 
     // The second call should have a larger time.
-    long long t1 = st.GetInNanoseconds();
-    long long t2 = st.GetInNanoseconds();
+    absl::Duration t1 = st.GetDuration();
+    absl::Duration t2 = st.GetDuration();
     EXPECT_GE(t2, t1);
   }
 }

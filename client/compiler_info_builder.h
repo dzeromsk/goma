@@ -24,7 +24,7 @@ using std::string;
 namespace devtools_goma {
 
 // CompilerInfoBuilder provides methods to construct CompilerInfoData.
-// For general use, use CompilerInfoBuilderFacade instead of calling this.
+// For each compiler type, derive own CompilerInfoBuilder from this class.
 class CompilerInfoBuilder {
  public:
   virtual ~CompilerInfoBuilder() = default;

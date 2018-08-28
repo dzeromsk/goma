@@ -12,8 +12,6 @@ namespace devtools_goma {
 
 AutoLockStats* g_auto_lock_stats;
 
-static const double kNanosecondsPerSecond = 1000000000;
-
 AutoLockStat* AutoLockStats::NewStat(const char* name) {
   AutoLock lock(&mu_);
   std::unique_ptr<AutoLockStat> statp(new AutoLockStat(name));
@@ -27,8 +25,7 @@ void AutoLockStats::TextReport(std::ostringstream* ss) {
     const char* name;
     int count;
 
-    // nanoseconds
-    int64_t total_wait, max_wait, total_hold, max_hold;
+    absl::Duration total_wait, max_wait, total_hold, max_hold;
   };
 
   std::vector<Stat> stats;
@@ -54,18 +51,12 @@ void AutoLockStats::TextReport(std::ostringstream* ss) {
   for (const auto& s : stats) {
     (*ss) << s.name
           << " count: " << s.count
-          << " total-wait: "
-          << s.total_wait / kNanosecondsPerSecond
-          << " max-wait: "
-          << s.max_wait / kNanosecondsPerSecond
-          << " ave-wait: "
-          << s.total_wait / kNanosecondsPerSecond / std::max(s.count, 1)
-          << " total-hold: "
-          << s.total_hold / kNanosecondsPerSecond
-          << " max-hold: "
-          << s.max_hold / kNanosecondsPerSecond
-          << " ave-hold: "
-          << s.total_hold / kNanosecondsPerSecond / std::max(s.count, 1)
+          << " total-wait: " << s.total_wait
+          << " max-wait: " << s.max_wait
+          << " ave-wait: " << s.total_wait / std::max(s.count, 1)
+          << " total-hold: " << s.total_hold
+          << " max-hold: " << s.max_hold
+          << " ave-hold: " << s.total_hold / std::max(s.count, 1)
           << "\n";
   }
 }
@@ -102,26 +93,26 @@ void AutoLockStats::Report(std::ostringstream* ss,
       }
 
       int count = 0;
-      int64_t total_wait_time_ns = 0;
-      int64_t max_wait_time_ns = 0;
-      int64_t total_hold_time_ns = 0;
-      int64_t max_hold_time_ns = 0;
-      stat->GetStats(&count, &total_wait_time_ns, &max_wait_time_ns,
-                     &total_hold_time_ns, &max_hold_time_ns);
+      absl::Duration total_wait_time;
+      absl::Duration max_wait_time;
+      absl::Duration total_hold_time;
+      absl::Duration max_hold_time;
+      stat->GetStats(&count, &total_wait_time, &max_wait_time, &total_hold_time,
+                     &max_hold_time);
       (*ss) << "<tr><td>" << stat->name << "</td>"
             << "<td class=\"count\">" << count << "</td>"
             << "<td class=\"total-wait\">"
-            << total_wait_time_ns / kNanosecondsPerSecond << "</td>"
+            << total_wait_time << "</td>"
             << "<td class=\"max-wait\">"
-            << max_wait_time_ns / kNanosecondsPerSecond << "</td>"
+            << max_wait_time << "</td>"
             << "<td class=\"ave-wait\">"
-            << total_wait_time_ns / count / kNanosecondsPerSecond << "</td>"
+            << total_wait_time / count << "</td>"
             << "<td class=\"total-hold\">"
-            << total_hold_time_ns / kNanosecondsPerSecond << "</td>"
+            << total_hold_time << "</td>"
             << "<td class=\"max-hold\">"
-            << max_hold_time_ns / kNanosecondsPerSecond << "</td>"
+            << max_hold_time << "</td>"
             << "<td class=\"ave-hold\">"
-            << total_hold_time_ns / count / kNanosecondsPerSecond << "</td>"
+            << total_hold_time / count << "</td>"
             << "</tr>\n";
     }
   }

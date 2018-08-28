@@ -54,14 +54,13 @@
 #include "simple_timer.h"
 #include "trustedipsmanager.h"
 #include "util.h"
-#include "worker_thread_manager.h"
 
 #define BACKLOG 128
 
 namespace devtools_goma {
 
 // TODO: make it flag?
-const int kDefaultTimeoutSec = 900;
+constexpr absl::Duration kDefaultTimeout = absl::Minutes(15);
 
 ThreadpoolHttpServer::ThreadpoolHttpServer(string listen_addr,
                                            int port,
@@ -319,7 +318,7 @@ bool ThreadpoolHttpServer::RequestFromNamedPipe::CheckCredential() {
 }
 
 void ThreadpoolHttpServer::RequestFromNamedPipe::Start() {
-  stat_.waiting_time_msec = stat_.timer.GetInIntMilliseconds();
+  stat_.waiting_time = stat_.timer.GetDuration();
   stat_.timer.Start();
   thread_id_ = wm_->GetCurrentThreadId();
 
@@ -351,7 +350,7 @@ void ThreadpoolHttpServer::RequestFromNamedPipe::Start() {
     server_->HandleIncoming(this);
     return;
   }
-  stat_.read_req_time_msec = stat_.timer.GetInIntMilliseconds();
+  stat_.read_req_time = stat_.timer.GetDuration();
   if (!ParseRequestLine(request_,
                         &method_, &req_path_, &query_)) {
     LOG(ERROR) << "parse request line failed";
@@ -366,7 +365,7 @@ void ThreadpoolHttpServer::RequestFromNamedPipe::Start() {
 
 void ThreadpoolHttpServer::RequestFromNamedPipe::SendReply(
     const string& response) {
-  stat_.handler_time_msec = stat_.timer.GetInIntMilliseconds();
+  stat_.handler_time = stat_.timer.GetDuration();
   stat_.resp_size = response.size();
   stat_.timer.Start();
   req_->SendReply(response);
@@ -405,7 +404,7 @@ class ThreadpoolHttpServer::RequestFromSocket : public HttpServerRequest {
   ~RequestFromSocket() override;
 
   void NotifyWhenClosedInternal(
-      WorkerThreadManager::ThreadId thread_id,
+      WorkerThread::ThreadId thread_id,
       OneshotClosure* callback);
   void DoRead();
   void DoWrite();
@@ -419,7 +418,7 @@ class ThreadpoolHttpServer::RequestFromSocket : public HttpServerRequest {
 
   ScopedSocket sock_;
   SocketType socket_type_;
-  SocketDescriptor* d_;
+  SocketDescriptor* socket_descriptor_;
   bool request_is_chunked_;
   size_t response_written_;
   TrustedIpsManager* trustedipsmanager_;
@@ -432,7 +431,7 @@ class ThreadpoolHttpServer::RequestFromSocket : public HttpServerRequest {
   // In other words, callback to Finish on the fly in worker thread manager.
   bool timed_out_;
 
-  WorkerThreadManager::ThreadId closed_thread_id_;
+  WorkerThread::ThreadId closed_thread_id_;
   OneshotClosure* closed_callback_;
 };
 
@@ -446,7 +445,7 @@ ThreadpoolHttpServer::RequestFromSocket::RequestFromSocket(
     : HttpServerRequest(wm, server, stat, monitor),
       sock_(std::move(sock)),
       socket_type_(socket_type),
-      d_(nullptr),
+      socket_descriptor_(nullptr),
       response_written_(0),
       trustedipsmanager_(trustedipsmanager),
       read_finished_(false),
@@ -457,8 +456,8 @@ ThreadpoolHttpServer::RequestFromSocket::RequestFromSocket(
 
 ThreadpoolHttpServer::RequestFromSocket::~RequestFromSocket() {
   delete closed_callback_;
-  ScopedSocket fd(wm_->DeleteSocketDescriptor(d_));
-  d_ = nullptr;
+  ScopedSocket fd(wm_->DeleteSocketDescriptor(socket_descriptor_));
+  socket_descriptor_ = nullptr;
   server_->RemoveAccept(socket_type_);
 }
 
@@ -466,16 +465,16 @@ bool ThreadpoolHttpServer::RequestFromSocket::CheckCredential() {
   if (socket_type_ != SOCKET_IPC) {
     return false;
   }
-  if (d_ == nullptr) {
+  if (socket_descriptor_ == nullptr) {
     return false;
   }
-  return CheckGomaIPCPeer(d_->wrapper(), &peer_pid_);
+  return CheckGomaIPCPeer(socket_descriptor_->wrapper(), &peer_pid_);
 }
 
 bool ThreadpoolHttpServer::RequestFromSocket::IsTrusted() {
   if (trustedipsmanager_ == nullptr)
     return true;
-  if (d_ == nullptr) {
+  if (socket_descriptor_ == nullptr) {
     return false;
   }
   union {
@@ -483,8 +482,9 @@ bool ThreadpoolHttpServer::RequestFromSocket::IsTrusted() {
     struct sockaddr_in in;
   } addr;
   socklen_t addrlen = sizeof(addr);
-  int r = getpeername(d_->fd(), reinterpret_cast<sockaddr*>(&addr), &addrlen);
-  if (r != 0) {
+  int result = getpeername(socket_descriptor_->fd(),
+                           reinterpret_cast<sockaddr*>(&addr), &addrlen);
+  if (result != 0) {
     PLOG(WARNING) << "getpeername";
     return false;
   }
@@ -511,16 +511,17 @@ bool ThreadpoolHttpServer::RequestFromSocket::IsTrusted() {
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::Start() {
-  stat_.waiting_time_msec = stat_.timer.GetInIntMilliseconds();
+  stat_.waiting_time = stat_.timer.GetDuration();
   stat_.timer.Start();
   thread_id_ = wm_->GetCurrentThreadId();
-  d_ = wm_->RegisterSocketDescriptor(std::move(sock_),
-                                     WorkerThreadManager::PRIORITY_HIGH);
+  socket_descriptor_ =
+      wm_->RegisterSocketDescriptor(std::move(sock_),
+                                    WorkerThread::PRIORITY_HIGH);
 
-  d_->NotifyWhenReadable(NewPermanentCallback(
+  socket_descriptor_->NotifyWhenReadable(NewPermanentCallback(
       this, &ThreadpoolHttpServer::RequestFromSocket::DoRead));
-  d_->NotifyWhenTimedout(
-      kDefaultTimeoutSec,
+  socket_descriptor_->NotifyWhenTimedout(
+      kDefaultTimeout,
       NewCallback(
           this, &ThreadpoolHttpServer::RequestFromSocket::DoTimeout));
 }
@@ -538,23 +539,23 @@ void ThreadpoolHttpServer::RequestFromSocket::NotifyWhenClosed(
           &ThreadpoolHttpServer::RequestFromSocket::NotifyWhenClosedInternal,
           wm_->GetCurrentThreadId(),
           callback),
-      WorkerThreadManager::PRIORITY_HIGH);
+      WorkerThread::PRIORITY_HIGH);
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::NotifyWhenClosedInternal(
-    WorkerThreadManager::ThreadId thread_id,
+    WorkerThread::ThreadId thread_id,
     OneshotClosure* callback) {
   CHECK(closed_callback_ == nullptr);
   CHECK(callback != nullptr);
   CHECK(read_finished_);
   closed_thread_id_ = thread_id;
   closed_callback_ = callback;
-  d_->NotifyWhenReadable(NewPermanentCallback(
+  socket_descriptor_->NotifyWhenReadable(NewPermanentCallback(
       this, &ThreadpoolHttpServer::RequestFromSocket::DoCheckClosed));
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::DoRead() {
-  CHECK(d_);
+  CHECK(socket_descriptor_);
   // If it already got timed out, do nothing.  Eventually, Finish() will be
   // called.
   if (timed_out_)
@@ -575,21 +576,21 @@ void ThreadpoolHttpServer::RequestFromSocket::DoRead() {
       << " request_.size=" << request_.size()
       << " offset=" << request_offset_
       << " content_length=" << request_content_length_;
-  int r = d_->Read(buf, buf_size);
-  if (r <= 0) {  // EOF or error
-    if (d_->NeedRetry())
+  ssize_t read_size = socket_descriptor_->Read(buf, buf_size);
+  if (read_size <= 0) {  // EOF or error
+    if (socket_descriptor_->NeedRetry())
       return;
-    d_->StopRead();
+    socket_descriptor_->StopRead();
     read_finished_ = true;
     wm_->RunClosureInThread(
         FROM_HERE,
         thread_id_,
         NewCallback(
             this, &ThreadpoolHttpServer::RequestFromSocket::ReadFinished),
-        WorkerThreadManager::PRIORITY_IMMEDIATE);
+        WorkerThread::PRIORITY_IMMEDIATE);
     return;
   }
-  request_len_ += r;
+  request_len_ += read_size;
   absl::string_view req(request_.data(), request_len_);
   if (found_header ||
       FindContentLengthAndBodyOffset(
@@ -599,23 +600,23 @@ void ThreadpoolHttpServer::RequestFromSocket::DoRead() {
     if (request_is_chunked_) {  // treat this as error.
       LOG(ERROR) << "request is encoded with chunked transfer coding:"
                  << req;
-      d_->StopRead();
+      socket_descriptor_->StopRead();
       read_finished_ = true;
       wm_->RunClosureInThread(
           FROM_HERE,
           thread_id_,
           NewCallback(
               this, &ThreadpoolHttpServer::RequestFromSocket::ReadFinished),
-          WorkerThreadManager::PRIORITY_IMMEDIATE);
+          WorkerThread::PRIORITY_IMMEDIATE);
       return;
     }
     if (request_len_ < request_offset_ + request_content_length_) {
       // not fully received yet.
       return;
     }
-    stat_.read_req_time_msec = stat_.timer.GetInIntMilliseconds();
+    stat_.read_req_time = stat_.timer.GetDuration();
     if (ParseRequestLine(req, &method_, &req_path_, &query_)) {
-      d_->StopRead();
+      socket_descriptor_->StopRead();
       stat_.req_size = request_len_;
       read_finished_ = true;
       parsed_valid_http_request_ = true;
@@ -624,38 +625,38 @@ void ThreadpoolHttpServer::RequestFromSocket::DoRead() {
           thread_id_,
           NewCallback(
               this, &ThreadpoolHttpServer::RequestFromSocket::ReadFinished),
-          WorkerThreadManager::PRIORITY_IMMEDIATE);
+          WorkerThread::PRIORITY_IMMEDIATE);
     }
   }
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::DoWrite() {
-  DCHECK(d_);
-  int n = d_->Write(
+  DCHECK(socket_descriptor_);
+  ssize_t write_size = socket_descriptor_->Write(
       response_.data() + response_written_,
       response_.size() - response_written_);
-  if (n <= 0) {
-    if (d_->NeedRetry())
+  if (write_size <= 0) {
+    if (socket_descriptor_->NeedRetry())
       return;
-    d_->StopWrite();
+    socket_descriptor_->StopWrite();
     wm_->RunClosureInThread(
         FROM_HERE,
         thread_id_,
         NewCallback(
             this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
-        WorkerThreadManager::PRIORITY_HIGH);
+        WorkerThread::PRIORITY_HIGH);
     return;
   }
-  response_written_ += n;
+  response_written_ += write_size;
   if (response_written_ == response_.size()) {
-    d_->StopWrite();
-    stat_.write_resp_time_msec = stat_.timer.GetInIntMilliseconds();
+    socket_descriptor_->StopWrite();
+    stat_.write_resp_time = stat_.timer.GetDuration();
     wm_->RunClosureInThread(
         FROM_HERE,
         thread_id_,
         NewCallback(
             this, &ThreadpoolHttpServer::RequestFromSocket::WriteFinished),
-        WorkerThreadManager::PRIORITY_IMMEDIATE);
+        WorkerThread::PRIORITY_IMMEDIATE);
   }
 }
 
@@ -664,35 +665,35 @@ void ThreadpoolHttpServer::RequestFromSocket::DoTimeout() {
   // will be called.
   if (read_finished_)
     return;
-  d_->StopRead();
-  d_->StopWrite();
+  socket_descriptor_->StopRead();
+  socket_descriptor_->StopWrite();
   timed_out_ = true;
   wm_->RunClosureInThread(
       FROM_HERE,
       thread_id_,
       NewCallback(
           this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
-      WorkerThreadManager::PRIORITY_HIGH);
+      WorkerThread::PRIORITY_HIGH);
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::DoCheckClosed() {
-  d_->StopRead();
-  d_->StopWrite();
-  if (!d_->IsReadable() && closed_callback_ != nullptr) {
-    VLOG(1) << "closed=" << d_->fd();
+  socket_descriptor_->StopRead();
+  socket_descriptor_->StopWrite();
+  if (!socket_descriptor_->IsReadable() && closed_callback_ != nullptr) {
+    VLOG(1) << "closed=" << socket_descriptor_->fd();
   } else {
-    PLOG(WARNING) << "readable after request? fd=" << d_->fd();
+    PLOG(WARNING) << "readable after request? fd=" << socket_descriptor_->fd();
   }
   wm_->RunClosureInThread(
       FROM_HERE,
       thread_id_,
       NewCallback(
           this, &ThreadpoolHttpServer::RequestFromSocket::DoClosed),
-      WorkerThreadManager::PRIORITY_IMMEDIATE);
+      WorkerThread::PRIORITY_IMMEDIATE);
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::DoClosed() {
-  d_->ClearReadable();
+  socket_descriptor_->ClearReadable();
   OneshotClosure* callback = closed_callback_;
   closed_callback_ = nullptr;
   if (callback != nullptr) {
@@ -700,52 +701,53 @@ void ThreadpoolHttpServer::RequestFromSocket::DoClosed() {
         FROM_HERE,
         closed_thread_id_,
         NewCallback(static_cast<Closure*>(callback), &Closure::Run),
-        WorkerThreadManager::PRIORITY_HIGH);
+        WorkerThread::PRIORITY_HIGH);
   }
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::ReadFinished() {
   CHECK(read_finished_);
   stat_.timer.Start();
-  d_->ClearReadable();
-  d_->ClearTimeout();
+  socket_descriptor_->ClearReadable();
+  socket_descriptor_->ClearTimeout();
 
   server_->HandleIncoming(this);
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::WriteFinished() {
-  CHECK(d_);
-  d_->ClearWritable();
+  CHECK(socket_descriptor_);
+  socket_descriptor_->ClearWritable();
 
-  d_->ShutdownForSend();
+  socket_descriptor_->ShutdownForSend();
   // Wait for readable, and expecting Read()==0 (EOF).
-  d_->NotifyWhenReadable(NewPermanentCallback(
+  socket_descriptor_->NotifyWhenReadable(NewPermanentCallback(
       this, &ThreadpoolHttpServer::RequestFromSocket::DoReadEOF));
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::DoReadEOF() {
-  CHECK(d_);
+  CHECK(socket_descriptor_);
   char buf[1];
-  int r = d_->Read(buf, sizeof buf);
-  if (r == 0) {
+  ssize_t read_size = socket_descriptor_->Read(buf, sizeof buf);
+  if (read_size == 0) {
     // EOF
-    VLOG(1) << d_->fd() << " EOF";
-  } else if (r < 0) {
-    const string err = d_->GetLastErrorMessage();
+    VLOG(1) << socket_descriptor_->fd() << " EOF";
+  } else if (read_size < 0) {
+    const string err = socket_descriptor_->GetLastErrorMessage();
     // client may have closed once it had received all response message,
     // before server ack EOF.
-    VLOG(1) << "shutdown error? fd=" << d_->fd() << ":" << err;
+    VLOG(1) << "shutdown error? fd=" << socket_descriptor_->fd() << ":" << err;
   } else {
     // unexpected receiving data?
-    LOG(WARNING) << "unexpected data after shutdown fd=" << d_->fd();
+    LOG(WARNING) << "unexpected data after shutdown"
+                 << " fd=" << socket_descriptor_->fd();
   }
-  d_->StopRead();
+  socket_descriptor_->StopRead();
   wm_->RunClosureInThread(
       FROM_HERE,
       thread_id_,
       NewCallback(
           this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
-      WorkerThreadManager::PRIORITY_HIGH);
+      WorkerThread::PRIORITY_HIGH);
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::Finish() {
@@ -757,10 +759,10 @@ void ThreadpoolHttpServer::RequestFromSocket::Finish() {
 void ThreadpoolHttpServer::RequestFromSocket::SendReply(
     const string& response) {
   response_ = response;
-  stat_.handler_time_msec = stat_.timer.GetInIntMilliseconds();
+  stat_.handler_time = stat_.timer.GetDuration();
   stat_.resp_size = response.size();
   stat_.timer.Start();
-  d_->NotifyWhenWritable(
+  socket_descriptor_->NotifyWhenWritable(
       NewPermanentCallback(
           this, &ThreadpoolHttpServer::RequestFromSocket::DoWrite));
 }
@@ -878,7 +880,7 @@ void ThreadpoolHttpServer::UpdateSocketIdleUnlocked(SocketType socket_type) {
                   << " idle_counter=" << idle_counter_[socket_type];
         wm_->RunClosure(FROM_HERE,
                         idle_closure->closure(),
-                        WorkerThreadManager::PRIORITY_MIN);
+                        WorkerThread::PRIORITY_MIN);
       }
     }
   }
@@ -1119,7 +1121,7 @@ void ThreadpoolHttpServer::SendNamedPipeJobToWorkerThread(
       NewCallback(
           http_server_request,
           &ThreadpoolHttpServer::RequestFromNamedPipe::Start),
-      WorkerThreadManager::PRIORITY_HIGH);
+      WorkerThread::PRIORITY_HIGH);
 }
 #endif
 void ThreadpoolHttpServer::SendJobToWorkerThread(
@@ -1134,7 +1136,7 @@ void ThreadpoolHttpServer::SendJobToWorkerThread(
       NewCallback(
           http_server_request,
           &ThreadpoolHttpServer::RequestFromSocket::Start),
-      WorkerThreadManager::PRIORITY_HIGH);
+      WorkerThread::PRIORITY_HIGH);
 }
 
 }  // namespace devtools_goma

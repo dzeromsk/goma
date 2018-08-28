@@ -9,7 +9,7 @@ package devtools_goma;
 
 // CompilerInfoData is a serializable format of CompilerInfo.
 //
-// NEXT ID TO USE: 40
+// NEXT ID TO USE: 41
 message CompilerInfoData {
   // Type of file in ResouceInfo.
   enum ResourceType {
@@ -127,6 +127,8 @@ message CompilerInfoData {
     JavacCompilerInfoData javac = 38;
     // Java extension
     JavaCompilerInfoData java = 39;
+    // Fake extension
+    FakeCompilerInfoData fake = 40;
   }
 
   reserved 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 26, 27, 31, 33;
@@ -175,9 +177,15 @@ message JavacCompilerInfoData {
   // currently no extension
 }
 
-// JavaCompilerInfoData contains Javac related CompilerInfoData.
+// JavaCompilerInfoData contains Java related CompilerInfoData.
 // NEXT ID TO USE: 1
 message JavaCompilerInfoData {
+  // currently no extension
+}
+
+// FakeCompilerInfoData contains Fake related CompilerInfoData.
+// NEXT ID TO USE: 1
+message FakeCompilerInfoData {
   // currently no extension
 }
 

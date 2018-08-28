@@ -7,9 +7,14 @@
 
 #include <string>
 
+#include "absl/time/time.h"
+
 namespace devtools_goma {
 
 std::string GetRandomAlphanumeric(size_t length);
+
+// Returns a pseudorandomized duration value in the range [min, max].
+absl::Duration RandomDuration(absl::Duration min, absl::Duration max);
 
 }  // namespace devtools_goma
 

@@ -9,9 +9,14 @@
 #include <string.h>
 
 #include "absl/memory/memory.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
+#include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "glog/logging.h"
+
+
+using google::protobuf::io::GzipInputStream;
 
 namespace {
 
@@ -23,29 +28,60 @@ const size_t kDefaultLZMAOutputBufSize = 65536;
 
 namespace devtools_goma {
 
-const char* const kEncodingNames[NUM_ENCODINGS] = {
-  "no encoding",
-  "deflate",
-  "lzma2",
-};
-
 const char* GetEncodingName(EncodingType type) {
-  DCHECK_GE(type, NO_ENCODING);
-  DCHECK_LT(type, NUM_ENCODINGS);
-  return kEncodingNames[type];
+  switch (type) {
+    case EncodingType::NO_ENCODING:
+      return "no encoding";
+    case EncodingType::DEFLATE:
+      return "deflate";
+    case EncodingType::GZIP:
+      return "gzip";
+    case EncodingType::LZMA2:
+      return "lzma2";
+  }
+}
+
+EncodingType ParseEncodingName(absl::string_view s) {
+  if (absl::StartsWith(s, "deflate")) {
+    return EncodingType::DEFLATE;
+  }
+  if (absl::StartsWith(s, "gzip")) {
+    return EncodingType::GZIP;
+  }
+  if (absl::StartsWith(s, "lzma2")) {
+    return EncodingType::LZMA2;
+  }
+  return EncodingType::NO_ENCODING;
+}
+
+std::vector<EncodingType> ParseAcceptEncoding(absl::string_view field) {
+  std::vector<EncodingType> ret;
+  for (const auto& coding :
+           absl::StrSplit(field, ',', absl::SkipWhitespace())) {
+    ret.push_back(ParseEncodingName(absl::StripAsciiWhitespace(coding)));
+  }
+  return ret;
+}
+
+EncodingType PickEncoding(const std::vector<EncodingType>& accepts,
+                          const std::vector<EncodingType>& prefs) {
+  for (const auto& encoding : prefs) {
+    for (const auto& e : accepts) {
+      if (encoding == e) {
+        return encoding;
+      }
+    }
+  }
+  return EncodingType::NO_ENCODING;
 }
 
 EncodingType GetEncodingFromHeader(absl::string_view header) {
-  if (header.empty()) {
-    return NO_ENCODING;
-  }
-  if (absl::StrContains(header, "lzma2")) {
-    return ENCODING_LZMA2;
-  }
-  if (absl::StrContains(header, "deflate")) {
-    return ENCODING_DEFLATE;
-  }
-  return NO_ENCODING;
+  std::vector<EncodingType> prefs = {
+    EncodingType::LZMA2,
+    EncodingType::GZIP,
+    EncodingType::DEFLATE,
+  };
+  return PickEncoding(ParseAcceptEncoding(header), prefs);
 }
 
 #ifdef ENABLE_LZMA

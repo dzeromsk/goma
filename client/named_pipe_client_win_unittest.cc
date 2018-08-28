@@ -19,7 +19,7 @@ namespace devtools_goma {
 
 namespace {
 
-const int kNamedPipeWaitTimeoutMs = 13000;
+constexpr absl::Duration kNamedPipeWaitTimeout = absl::Seconds(13);
 
 }  // anonymous namespace
 
@@ -70,7 +70,7 @@ TEST(NamedPipeClientTest, Simple) {
   server.Start(kName);
 
   LOG(INFO) << "pipe clients starts";
-  NamedPipeFactory factory(kName, kNamedPipeWaitTimeoutMs);
+  NamedPipeFactory factory(kName, kNamedPipeWaitTimeout);
   ScopedNamedPipe pipe = factory.New();
   if (!pipe.valid()) {
     LOG_SYSRESULT(GetLastError());
@@ -78,13 +78,15 @@ TEST(NamedPipeClientTest, Simple) {
   ASSERT_TRUE(pipe.valid());
 
   LOG(INFO) << "send message " << kReq;
-  ssize_t num_written = pipe.WriteWithTimeout(kReq, strlen(kReq), 5);
+  ssize_t num_written =
+      pipe.WriteWithTimeout(kReq, strlen(kReq), absl::Seconds(5));
   EXPECT_EQ(strlen(kReq), num_written);
 
   LOG(INFO) << "wait for response...";
   std::string buf;
   buf.resize(1024);
-  ssize_t num_read = pipe.ReadWithTimeout(&buf[0], buf.size(), 5);
+  ssize_t num_read =
+      pipe.ReadWithTimeout(&buf[0], buf.size(), absl::Seconds(5));
   EXPECT_EQ(strlen(kResp), num_read);
   buf.resize(num_read);
   LOG(INFO) << "response=" << buf;
@@ -116,7 +118,7 @@ TEST(NamedPipeClientTest, LargeResponse) {
   server.Start(kName);
 
   LOG(INFO) << "pipe clients starts";
-  NamedPipeFactory factory(kName, kNamedPipeWaitTimeoutMs);
+  NamedPipeFactory factory(kName, kNamedPipeWaitTimeout);
   ScopedNamedPipe pipe = factory.New();
   if (!pipe.valid()) {
     LOG_SYSRESULT(GetLastError());
@@ -124,7 +126,8 @@ TEST(NamedPipeClientTest, LargeResponse) {
   ASSERT_TRUE(pipe.valid());
 
   LOG(INFO) << "send message " << kReq;
-  ssize_t num_written = pipe.WriteWithTimeout(kReq, strlen(kReq), 5);
+  ssize_t num_written =
+      pipe.WriteWithTimeout(kReq, strlen(kReq), absl::Seconds(5));
   EXPECT_EQ(strlen(kReq), num_written);
 
   LOG(INFO) << "wait for response...";
@@ -134,7 +137,8 @@ TEST(NamedPipeClientTest, LargeResponse) {
               << " try read=" << kBufsize;
     std::string buf;
     buf.resize(kBufsize);
-    ssize_t num_read = pipe.ReadWithTimeout(&buf[0], buf.size(), 5);
+    ssize_t num_read =
+        pipe.ReadWithTimeout(&buf[0], buf.size(), absl::Seconds(5));
     if (num_read == 0) {
       break;
     }
@@ -178,7 +182,7 @@ TEST(NamedPipeClientTest, LargeResponseThanOutputBuffer) {
   server.Start(kName);
 
   LOG(INFO) << "pipe clients starts";
-  NamedPipeFactory factory(kName, kNamedPipeWaitTimeoutMs);
+  NamedPipeFactory factory(kName, kNamedPipeWaitTimeout);
   ScopedNamedPipe pipe = factory.New();
   if (!pipe.valid()) {
     LOG_SYSRESULT(GetLastError());
@@ -186,7 +190,8 @@ TEST(NamedPipeClientTest, LargeResponseThanOutputBuffer) {
   ASSERT_TRUE(pipe.valid());
 
   LOG(INFO) << "send message " << kReq;
-  ssize_t num_written = pipe.WriteWithTimeout(kReq, strlen(kReq), 5);
+  ssize_t num_written =
+      pipe.WriteWithTimeout(kReq, strlen(kReq), absl::Seconds(5));
   EXPECT_EQ(strlen(kReq), num_written);
 
   LOG(INFO) << "wait for response...";
@@ -200,7 +205,8 @@ TEST(NamedPipeClientTest, LargeResponseThanOutputBuffer) {
     buf.resize(bufsize);
     LOG(INFO) << "received=" << received.size()
               << " try read=" << bufsize;
-    ssize_t num_read = pipe.ReadWithTimeout(&buf[0], buf.size(), 5);
+    ssize_t num_read =
+        pipe.ReadWithTimeout(&buf[0], buf.size(), absl::Seconds(5));
     if (num_read == 0) {
       break;
     }
@@ -241,7 +247,7 @@ TEST(NamedPipeClientTest, Timeout) {
   server.Start(kName);
 
   LOG(INFO) << "pipe clients starts";
-  NamedPipeFactory factory(kName, kNamedPipeWaitTimeoutMs);
+  NamedPipeFactory factory(kName, kNamedPipeWaitTimeout);
   ScopedNamedPipe pipe = factory.New();
   if (!pipe.valid()) {
     LOG_SYSRESULT(GetLastError());
@@ -249,7 +255,8 @@ TEST(NamedPipeClientTest, Timeout) {
   ASSERT_TRUE(pipe.valid());
 
   LOG(INFO) << "send message " << kReq;
-  ssize_t num_written = pipe.WriteWithTimeout(kReq, strlen(kReq), 5);
+  ssize_t num_written =
+      pipe.WriteWithTimeout(kReq, strlen(kReq), absl::Seconds(5));
   EXPECT_EQ(strlen(kReq), num_written);
 
   LOG(INFO) << "wait for response...";
@@ -260,7 +267,8 @@ TEST(NamedPipeClientTest, Timeout) {
     buf.resize(kBufsize);
     LOG(INFO) << "received=" << received.size()
               << " try read=" << buf.size();
-    ssize_t num_read = pipe.ReadWithTimeout(&buf[0], buf.size(), 1);
+    ssize_t num_read =
+        pipe.ReadWithTimeout(&buf[0], buf.size(), absl::Seconds(1));
     if (num_read == 0) {
       break;
     }

@@ -21,8 +21,12 @@ config("protobuf_config") {
 config("protobuf_warnings") {
   cflags = []
   if (is_clang) {
-    # protobuf-3 contains a few functions that are unused.
-    cflags += [ "-Wno-unused-function" ]
+    cflags += [
+      # protobuf-3 contains a few functions that are unused.
+      "-Wno-unused-function",
+
+      "-Wno-inconsistent-missing-override",
+    ]
   }
 }
 
@@ -66,20 +70,6 @@ config("using_proto") {
 }
 
 nobase_include_headers = [
-  "protobuf/src/google/protobuf/stubs/atomic_sequence_num.h",
-  "protobuf/src/google/protobuf/stubs/atomicops.h",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_power.h",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_ppc_gcc.h",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_arm64_gcc.h",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_arm_gcc.h",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_arm_qnx.h",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_generic_c11_atomic.h",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_generic_gcc.h",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_mips_gcc.h",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_solaris.h",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_tsan.h",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_x86_gcc.h",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_x86_msvc.h",
   "protobuf/src/google/protobuf/stubs/callback.h",
   "protobuf/src/google/protobuf/stubs/bytestream.h",
   "protobuf/src/google/protobuf/stubs/casts.h",
@@ -92,14 +82,11 @@ nobase_include_headers = [
   "protobuf/src/google/protobuf/stubs/once.h",
   "protobuf/src/google/protobuf/stubs/platform_macros.h",
   "protobuf/src/google/protobuf/stubs/port.h",
-  "protobuf/src/google/protobuf/stubs/scoped_ptr.h",
-  "protobuf/src/google/protobuf/stubs/shared_ptr.h",
   "protobuf/src/google/protobuf/stubs/singleton.h",
   "protobuf/src/google/protobuf/stubs/status.h",
   "protobuf/src/google/protobuf/stubs/stl_util.h",
   "protobuf/src/google/protobuf/stubs/stringpiece.h",
   "protobuf/src/google/protobuf/stubs/template_util.h",
-  "protobuf/src/google/protobuf/stubs/type_traits.h",
   "protobuf/src/google/protobuf/any.pb.h",
   "protobuf/src/google/protobuf/api.pb.h",
   "protobuf/src/google/protobuf/any.h",
@@ -120,12 +107,13 @@ nobase_include_headers = [
   "protobuf/src/google/protobuf/generated_message_table_driven.h",
   "protobuf/src/google/protobuf/generated_message_util.h",
   "protobuf/src/google/protobuf/has_bits.h",
+  "protobuf/src/google/protobuf/implicit_weak_message.h",
+  "protobuf/src/google/protobuf/map.h",
   "protobuf/src/google/protobuf/map_entry.h",
   "protobuf/src/google/protobuf/map_entry_lite.h",
   "protobuf/src/google/protobuf/map_field.h",
   "protobuf/src/google/protobuf/map_field_inl.h",
   "protobuf/src/google/protobuf/map_field_lite.h",
-  "protobuf/src/google/protobuf/map.h",
   "protobuf/src/google/protobuf/map_type_handler.h",
   "protobuf/src/google/protobuf/message.h",
   "protobuf/src/google/protobuf/message_lite.h",
@@ -163,7 +151,6 @@ nobase_include_headers = [
   "protobuf/src/google/protobuf/compiler/csharp/csharp_names.h",
   "protobuf/src/google/protobuf/compiler/java/java_generator.h",
   "protobuf/src/google/protobuf/compiler/java/java_names.h",
-  "protobuf/src/google/protobuf/compiler/javanano/javanano_generator.h",
   "protobuf/src/google/protobuf/compiler/js/js_generator.h",
   "protobuf/src/google/protobuf/compiler/js/well_known_types_embed.h",
   "protobuf/src/google/protobuf/compiler/objectivec/objectivec_generator.h",
@@ -184,8 +171,6 @@ nobase_include_headers = [
 
 # libprotobuf_lite_la_SOURCES of Makefile.am in protobuf/protobuf/src.
 protobuf_lite_sources = [
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_x86_gcc.cc",
-  "protobuf/src/google/protobuf/stubs/atomicops_internals_x86_msvc.cc",
   "protobuf/src/google/protobuf/stubs/bytestream.cc",
   "protobuf/src/google/protobuf/stubs/bytestream.h",
   "protobuf/src/google/protobuf/stubs/common.cc",
@@ -196,8 +181,6 @@ protobuf_lite_sources = [
   "protobuf/src/google/protobuf/stubs/io_win32.h",
   "protobuf/src/google/protobuf/stubs/map_util.h",
   "protobuf/src/google/protobuf/stubs/mathutil.h",
-  "protobuf/src/google/protobuf/stubs/once.cc",
-  "protobuf/src/google/protobuf/stubs/shared_ptr.h",
   "protobuf/src/google/protobuf/stubs/status.cc",
   "protobuf/src/google/protobuf/stubs/status.h",
   "protobuf/src/google/protobuf/stubs/status_macros.h",
@@ -206,20 +189,21 @@ protobuf_lite_sources = [
   "protobuf/src/google/protobuf/stubs/stringpiece.cc",
   "protobuf/src/google/protobuf/stubs/stringpiece.h",
   "protobuf/src/google/protobuf/stubs/stringprintf.cc",
+  "protobuf/src/google/protobuf/arena.cc",
+  "protobuf/src/google/protobuf/arenastring.cc",
+  "protobuf/src/google/protobuf/extension_set.cc",
+  "protobuf/src/google/protobuf/generated_message_table_driven_lite.cc",
+  "protobuf/src/google/protobuf/generated_message_table_driven_lite.h",
+  "protobuf/src/google/protobuf/generated_message_util.cc",
+  "protobuf/src/google/protobuf/implicit_weak_message.cc",
+  "protobuf/src/google/protobuf/message_lite.cc",
+  "protobuf/src/google/protobuf/repeated_field.cc",
   "protobuf/src/google/protobuf/stubs/stringprintf.h",
   "protobuf/src/google/protobuf/stubs/structurally_valid.cc",
   "protobuf/src/google/protobuf/stubs/strutil.cc",
   "protobuf/src/google/protobuf/stubs/strutil.h",
   "protobuf/src/google/protobuf/stubs/time.cc",
   "protobuf/src/google/protobuf/stubs/time.h",
-  "protobuf/src/google/protobuf/arena.cc",
-  "protobuf/src/google/protobuf/arenastring.cc",
-  "protobuf/src/google/protobuf/extension_set.cc",
-  "protobuf/src/google/protobuf/generated_message_util.cc",
-  "protobuf/src/google/protobuf/generated_message_table_driven_lite.h",
-  "protobuf/src/google/protobuf/generated_message_table_driven_lite.cc",
-  "protobuf/src/google/protobuf/message_lite.cc",
-  "protobuf/src/google/protobuf/repeated_field.cc",
   "protobuf/src/google/protobuf/wire_format_lite.cc",
   "protobuf/src/google/protobuf/io/coded_stream.cc",
   "protobuf/src/google/protobuf/io/coded_stream_inl.h",
@@ -518,32 +502,9 @@ static_library("protoc_lib") {
     "protobuf/src/google/protobuf/compiler/java/java_string_field.h",
     "protobuf/src/google/protobuf/compiler/java/java_string_field_lite.cc",
     "protobuf/src/google/protobuf/compiler/java/java_string_field_lite.h",
-
-    # "protobuf/src/google/protobuf/compiler/js/well_known_types_embed.cc",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_enum.cc",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_enum.h",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_enum_field.cc",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_enum_field.h",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_extension.cc",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_extension.h",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_field.cc",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_field.h",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_file.cc",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_file.h",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_generator.cc",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_generator.h",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_helpers.cc",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_helpers.h",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_map_field.cc",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_map_field.h",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_message.cc",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_message.h",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_message_field.cc",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_message_field.h",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_params.h",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_primitive_field.cc",
-    "protobuf/src/google/protobuf/compiler/javanano/javanano_primitive_field.h",
     "protobuf/src/google/protobuf/compiler/js/js_generator.cc",
+    "protobuf/src/google/protobuf/compiler/js/well_known_types_embed.cc",
+    "protobuf/src/google/protobuf/compiler/js/well_known_types_embed.h",
     "protobuf/src/google/protobuf/compiler/objectivec/objectivec_enum.cc",
     "protobuf/src/google/protobuf/compiler/objectivec/objectivec_enum.h",
     "protobuf/src/google/protobuf/compiler/objectivec/objectivec_enum_field.cc",
@@ -576,9 +537,6 @@ static_library("protoc_lib") {
     "protobuf/src/google/protobuf/compiler/subprocess.h",
     "protobuf/src/google/protobuf/compiler/zip_writer.cc",
     "protobuf/src/google/protobuf/compiler/zip_writer.h",
-
-    # generated files
-    "$target_gen_dir/well_known_types_embed.cc",
   ]
 
   configs -= [ "//build/config/compiler:goma_code" ]
@@ -597,10 +555,6 @@ static_library("protoc_lib") {
   public_configs = [ ":protobuf_config" ]
 
   cflags = protobuf_lite_cflags
-
-  deps = [
-    ":generate_js_well_known_types_embed",
-  ]
 
   public_deps = [
     ":protobuf_full",
@@ -625,47 +579,5 @@ executable("protoc") {
     # "//build/win:default_exe_manifest",
 
     "//build/config:exe_and_shlib_deps",
-  ]
-}
-
-executable("js_embed") {
-  sources = [
-    "protobuf/src/google/protobuf/compiler/js/embed.cc",
-  ]
-
-  configs -= [ "//build/config/compiler:goma_code" ]
-  configs += [ "//build/config/compiler:no_goma_code" ]
-
-  deps = [
-    "//build/config:exe_and_shlib_deps",
-  ]
-  cflags = protobuf_lite_cflags
-}
-
-action("generate_js_well_known_types_embed") {
-  script = "js_embed.py"
-  sources = [
-    "protobuf/src/google/protobuf/compiler/js/well_known_types/any.js",
-    "protobuf/src/google/protobuf/compiler/js/well_known_types/struct.js",
-    "protobuf/src/google/protobuf/compiler/js/well_known_types/timestamp.js",
-  ]
-  outputs = [
-    "$target_gen_dir/well_known_types_embed.cc",
-  ]
-  args = [
-    "--generator",
-    rebase_path("$root_out_dir/js_embed"),
-    "--output-path",
-    rebase_path("$target_gen_dir/well_known_types_embed.cc"),
-    rebase_path(
-        "protobuf/src/google/protobuf/compiler/js/well_known_types/any.js"),
-    rebase_path(
-        "protobuf/src/google/protobuf/compiler/js/well_known_types/struct.js"),
-    rebase_path(
-        "protobuf/src/google/protobuf/compiler/js/well_known_types/timestamp.js"),
-  ]
-
-  deps = [
-    ":js_embed",
   ]
 }

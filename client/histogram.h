@@ -13,6 +13,8 @@
 #include <map>
 #include <string>
 
+#include "absl/time/time.h"
+
 using std::string;
 
 namespace devtools_goma {
@@ -35,6 +37,10 @@ class Histogram {
   void Reset();
 
   void Add(int64_t value);
+
+  void AddTimeAsMilliseconds(absl::Duration duration) {
+    Add(absl::ToInt64Milliseconds(duration));
+  }
 
   // Log base can be modified before adding the first value.
   void SetLogBase(float logbase);

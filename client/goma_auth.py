@@ -135,7 +135,7 @@ def HttpGetRequest(url):
   Returns:
     a response from the server.
   """
-  cmd = [GOMA_FETCH, '--no-auth', url]
+  cmd = [GOMA_FETCH, '--noauth', url]
   return subprocess.check_output(cmd)
 
 
@@ -150,7 +150,7 @@ def HttpPostRequest(url, post_dict):
     a response from the server.
   """
   body = urllib.urlencode(post_dict)
-  cmd = [GOMA_FETCH, '--no-auth', '--post', url, '--data', body]
+  cmd = [GOMA_FETCH, '--noauth', '--post', url, '--data', body]
   return subprocess.check_output(cmd)
 
 
@@ -189,8 +189,8 @@ class AuthorizationCodeHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
   def do_GET(self):
     """A handler to receive authorization code."""
-    if self.address_string() != 'localhost':
-      raise Error('should be localhost but %s' % self.client_address)
+    if self.client_address[0] not in ('127.0.0.1', '::1'):
+      raise Error('should be localhost but %s' % self.client_address[0])
     form = urlparse.parse_qs(urlparse.urlparse(self.path).query)
     server_state = form.get('state', [''])[0]
     if server_state != self.state:
@@ -198,6 +198,14 @@ class AuthorizationCodeHandler(BaseHTTPServer.BaseHTTPRequestHandler):
           server_state, self.state))
     self._SetCode(form.get('code'))
     self.send_response(200, "OK")
+    self.send_header('Content-type', 'text/html')
+    self.end_headers()
+    self.wfile.write('<html><head><title>Authentication Status</title></head>')
+    self.wfile.write('<body><p>The authentication flow has completed.</p>')
+    self.wfile.write('</body></html>')
+
+  def log_message(self, _format, *args):
+    """Do not log messages to stdout while running as command line program."""
 
 
 def _RandomString(length):

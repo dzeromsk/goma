@@ -85,6 +85,7 @@ void VCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
   // Ensure cxx exists.
   (void)data->mutable_cxx();
 
+  const VCFlags& vc_flags = static_cast<const VCFlags&>(flags);
   if (VCFlags::IsClangClCommand(local_compiler_path)) {
     const VCFlags& vc_flags = static_cast<const VCFlags&>(flags);
     const string& lang_flag = vc_flags.is_cplusplus() ? "/TP" : "/TC";
@@ -114,7 +115,7 @@ void VCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     string vcflags_path = GetMyDirectory();
     vcflags_path += "\\vcflags.exe";
     data->mutable_cxx()->set_predefined_macros(data->cxx().predefined_macros() +
-                                               flags.implicit_macros());
+                                               vc_flags.implicit_macros());
     if (!VCCompilerInfoBuilder::GetVCVersion(
             abs_local_compiler_path, compiler_info_envs, flags.cwd(),
             data->mutable_version(), data->mutable_target())) {

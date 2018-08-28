@@ -35,13 +35,13 @@
 #include "absl/strings/str_split.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "client_util.h"
 #include "compiler_flags.h"
 #include "compiler_flags_parser.h"
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
 #include "env_flags.h"
 #include "file_helper.h"
+#include "file_path_util.h"
 #include "file_stat.h"
 #include "gcc_flags.h"
 #include "glog/logging.h"
@@ -78,8 +78,8 @@ namespace devtools_goma {
 // TODO: move it into goma_ipc, and use it in goma_ipc_unittest.cc?
 class GomaIPCNamedPipeFactory : public GomaIPC::ChanFactory {
  public:
-  GomaIPCNamedPipeFactory(const string& name, int timeout_ms)
-      : factory_(name, timeout_ms) {
+  GomaIPCNamedPipeFactory(const string& name, absl::Duration timeout)
+      : factory_(name, timeout) {
   }
   ~GomaIPCNamedPipeFactory() override {}
 
@@ -148,8 +148,9 @@ int GetCompilerProxyPort(GomaIPC::Status* status) {
                                         FLAGS_COMPILER_PROXY_SOCKET_NAME))));
 #else
   GomaIPC goma_ipc(std::unique_ptr<GomaIPC::ChanFactory>(
-      new GomaIPCNamedPipeFactory(FLAGS_COMPILER_PROXY_SOCKET_NAME,
-                                  FLAGS_NAMEDPIPE_WAIT_TIMEOUT_MS)));
+      new GomaIPCNamedPipeFactory(
+              FLAGS_COMPILER_PROXY_SOCKET_NAME,
+              absl::Milliseconds(FLAGS_NAMEDPIPE_WAIT_TIMEOUT_MS))));
 #endif
   devtools_goma::EmptyMessage req;
   devtools_goma::HttpPortResponse resp;
@@ -364,8 +365,9 @@ GomaClient::GomaClient(int id,
                                         FLAGS_COMPILER_PROXY_SOCKET_NAME)))),
 #else
     : goma_ipc_(std::unique_ptr<GomaIPC::ChanFactory>(
-          new GomaIPCNamedPipeFactory(FLAGS_COMPILER_PROXY_SOCKET_NAME,
-                                      FLAGS_NAMEDPIPE_WAIT_TIMEOUT_MS))),
+          new GomaIPCNamedPipeFactory(
+                  FLAGS_COMPILER_PROXY_SOCKET_NAME,
+                  absl::Milliseconds(FLAGS_NAMEDPIPE_WAIT_TIMEOUT_MS)))),
 #endif
       id_(id),
       flags_(std::move(flags)),
@@ -540,8 +542,9 @@ GomaClient::Result GomaClient::WaitIPC() {
   if (goma_ipc_.Wait(std::move(ipc_chan_), resp, &status_) != OK)
     return IPC_FAIL;
 
-  req_send_time_ = status_.req_send_time;
-  resp_recv_time_ = status_.resp_recv_time;
+  absl::Duration req_send_time = status_.req_send_time;
+  absl::Duration resp_recv_time = status_.resp_recv_time;
+  absl::Duration resp_write_time;
 
   SimpleTimer timer;
   if (FLAGS_DUMP_RESPONSE) {
@@ -552,7 +555,7 @@ GomaClient::Result GomaClient::WaitIPC() {
   }
 
   if (FLAGS_DUMP_TIME) {
-    resp_write_time_ = timer.GetInSeconds();
+    resp_write_time = timer.GetDuration();
   }
   // TODO: check output files are written?
 
@@ -560,9 +563,9 @@ GomaClient::Result GomaClient::WaitIPC() {
   if (FLAGS_DUMP_TIME) {
     std::cerr << "GOMA:" << name_
               << " send/recv/write="
-              << req_send_time_ << "/"
-              << resp_recv_time_ << "/"
-              << resp_write_time_ << std::endl;
+              << req_send_time << "/"
+              << resp_recv_time << "/"
+              << resp_write_time << std::endl;
     // TODO: show more time metrics.
   }
   return IPC_OK;
@@ -690,8 +693,8 @@ bool GomaClient::PrepareExecRequest(const CompilerFlags& flags, ExecReq* req) {
       for (const auto& input : gcc_flags.input_filenames()) {
         if (file::Stem(input) == "conftest") {
           FileStat file_stat(input);
-          time_t now = time(nullptr);
-          if (!file_stat.IsValid() || file_stat.mtime + 10 > now) {
+          if (!file_stat.IsValid() ||
+              *file_stat.mtime + absl::Seconds(10) > absl::Now()) {
             // probably conftest.c, force fallback.
             requester_env->add_fallback_input_file(input);
           }

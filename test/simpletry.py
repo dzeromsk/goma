@@ -392,6 +392,8 @@ class CompilerProxyManager(object):
     self._tmpdir = tempfile.mkdtemp()
     print 'GOMA_TMP_DIR: %s' % self._tmpdir
     os.environ['GOMA_TMP_DIR'] = self._tmpdir
+    os.environ['TEST_TMPDIR'] = self._tmpdir
+    os.environ['TMPDIR'] = self._tmpdir
     os.environ['TMP'] = self._tmpdir
     os.environ['GOMA_DEPS_CACHE_FILE'] = 'deps_cache'
     assert self._module._GetLogDirectory() == self._tmpdir

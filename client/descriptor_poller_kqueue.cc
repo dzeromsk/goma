@@ -12,6 +12,7 @@
 
 #include "absl/base/call_once.h"
 #include "absl/memory/memory.h"
+#include "absl/time/time.h"
 #include "glog/logging.h"
 #include "scoped_fd.h"
 #include "socket_descriptor.h"
@@ -43,10 +44,10 @@ class KqueueDescriptorPoller : public DescriptorPollerBase {
     DCHECK(d->wait_writable() || d->wait_readable());
     struct kevent kev;
     short filter = 0;
-    if (type == kReadEvent) {
+    if (type == EventType::kReadEvent) {
       DCHECK(d->wait_readable());
       filter = EVFILT_READ;
-    } else if (type == kWriteEvent) {
+    } else if (type == EventType::kWriteEvent) {
       DCHECK(d->wait_writable());
       filter = EVFILT_WRITE;
     }
@@ -58,7 +59,7 @@ class KqueueDescriptorPoller : public DescriptorPollerBase {
 
   void UnregisterPollEvent(SocketDescriptor* d, EventType type) override {
     struct kevent kev;
-    short filter = (type == kReadEvent) ? EVFILT_READ : EVFILT_WRITE;
+    short filter = (type == EventType::kReadEvent) ? EVFILT_READ : EVFILT_WRITE;
     EV_SET(&kev, d->fd(), filter, EV_DELETE, 0, 0, nullptr);
     int r = kevent(kqueue_fd_.fd(), &kev, 1, nullptr, 0, nullptr);
     PCHECK(r != -1 || errno == ENOENT)
@@ -94,10 +95,8 @@ class KqueueDescriptorPoller : public DescriptorPollerBase {
     eventlist_.resize(descriptors.size() + 1);
   }
 
-  int PollEventsInternal(int timeout_millisec) override {
-    struct timespec tv;
-    tv.tv_sec = timeout_millisec / 1000;
-    tv.tv_nsec = (timeout_millisec - (tv.tv_sec * 1000)) * 1000000;
+  int PollEventsInternal(absl::Duration timeout) override {
+    struct timespec tv = absl::ToTimespec(timeout);
     nevents_ = kevent(kqueue_fd_.fd(), nullptr, 0,
         &eventlist_[0], eventlist_.size(), &tv);
     return nevents_;

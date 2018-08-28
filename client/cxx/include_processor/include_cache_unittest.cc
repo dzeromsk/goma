@@ -10,6 +10,8 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
+#include "absl/strings/str_cat.h"
+#include "absl/time/time.h"
 #include "content.h"
 #include "file_stat.h"
 #include "file_stat_cache.h"
@@ -23,34 +25,17 @@ namespace devtools_goma {
 class IncludeCacheTest : public testing::Test {
  protected:
   void SetUp() override {
-    IncludeCache::Init(1, true);  // 1MB
+    IncludeCache::Init(2, true);  // can keep only 2 items.
   }
 
   void TearDown() override {
     IncludeCache::Quit();
   }
 
-  // Makes a string that consists of only valid directives.
-  // string size is at least |size| bytes (might be more than |size|).
-  string MakeDirectiveOnlyStringWithAtLeastSize(int size) {
-    string result = "#define foo x";
-    result.reserve(size + 1);
-
-    while (result.size() < size) {
-      result += 'x';
-    }
-    result += '\n';
-
-    return result;
-  }
-
   int Size(IncludeCache* include_cache) const {
     return include_cache->cache_items_.size();
   }
 
-  size_t CacheSize(IncludeCache* include_cache) const {
-    return include_cache->current_cache_size_;
-  }
   size_t HitCount(IncludeCache* include_cache) const {
     return include_cache->hit_count_.value();
   }
@@ -69,7 +54,7 @@ TEST_F(IncludeCacheTest, GetDirectiveList) {
 
   FileStat file_stat;
   file_stat.size = content.size();
-  file_stat.mtime = 100;
+  file_stat.mtime = absl::FromTimeT(100);
 
   size_t hit_count_0 = HitCount(ic);
   size_t missed_count_0 = MissedCount(ic);
@@ -84,7 +69,7 @@ TEST_F(IncludeCacheTest, GetDirectiveList) {
   EXPECT_EQ(missed_count_0 + 1, MissedCount(ic));
 
   // Reload with mtime
-  file_stat.mtime = 105;
+  file_stat.mtime = absl::FromTimeT(105);
   (void)ic->GetIncludeItem(ah, file_stat);
   EXPECT_EQ(hit_count_0 + 1, HitCount(ic));
   EXPECT_EQ(missed_count_0 + 2, MissedCount(ic));
@@ -104,7 +89,7 @@ TEST_F(IncludeCacheTest, SetGetIfMaxSizeIsZero) {
 
   FileStat file_stat;
   file_stat.size = content.size();
-  file_stat.mtime = 100;
+  file_stat.mtime = absl::FromTimeT(100);
 
   size_t hit_count_0 = HitCount(ic);
   size_t missed_count_0 = MissedCount(ic);
@@ -119,37 +104,58 @@ TEST_F(IncludeCacheTest, SetGetIfMaxSizeIsZero) {
   EXPECT_EQ(missed_count_0 + 2, MissedCount(ic));
 
   // Reload with mtime
-  file_stat.mtime = 105;
+  file_stat.mtime = absl::FromTimeT(105);
   (void)ic->GetIncludeItem(ah, file_stat);
   EXPECT_EQ(hit_count_0, HitCount(ic));
   EXPECT_EQ(missed_count_0 + 3, MissedCount(ic));
 }
 
 TEST_F(IncludeCacheTest, ExceedMemory) {
-  const size_t kFileSize = 2 * 1024 * 1024;  // (> 1MB)
-
   IncludeCache* ic = IncludeCache::instance();
 
   TmpdirUtil tmpdir("includecache");
-  string ah = tmpdir.FullPath("a.h");
-  string content = MakeDirectiveOnlyStringWithAtLeastSize(kFileSize);
-  tmpdir.CreateTmpFile("a.h", content);
 
-  FileStat file_stat;
-  file_stat.size = content.size();
-  file_stat.mtime = 100;
+  std::vector<string> paths;
+  std::vector<string> contents;
+  std::vector<FileStat> file_stats;
+  for (size_t i = 0; i < 3; ++i) {
+    string filename = absl::StrCat("a", i, ".h");
+    string path = tmpdir.FullPath(filename);
+    string content = "content";
+    tmpdir.CreateTmpFile(filename, content);
+
+    FileStat file_stat;
+    file_stat.size = content.size();
+    file_stat.mtime = absl::FromTimeT(100);
+
+    paths.push_back(std::move(path));
+    contents.push_back(std::move(content));
+    file_stats.push_back(std::move(file_stat));
+  }
 
   size_t hit_count_0 = HitCount(ic);
   size_t missed_count_0 = MissedCount(ic);
 
-  (void)ic->GetIncludeItem(ah, file_stat);
+  (void)ic->GetIncludeItem(paths[0], file_stats[0]);
   EXPECT_EQ(hit_count_0, HitCount(ic));
   EXPECT_EQ(missed_count_0 + 1, MissedCount(ic));
+  EXPECT_EQ(1, Size(ic));
 
-  // Reload (evicted due to large file)
-  (void)ic->GetIncludeItem(ah, file_stat);
+  (void)ic->GetIncludeItem(paths[1], file_stats[1]);
   EXPECT_EQ(hit_count_0, HitCount(ic));
   EXPECT_EQ(missed_count_0 + 2, MissedCount(ic));
+  EXPECT_EQ(2, Size(ic));
+
+  (void)ic->GetIncludeItem(paths[2], file_stats[2]);
+  EXPECT_EQ(hit_count_0, HitCount(ic));
+  EXPECT_EQ(missed_count_0 + 3, MissedCount(ic));
+  EXPECT_EQ(2, Size(ic));
+
+  // Reload [0]. It must have been evicted.
+  (void)ic->GetIncludeItem(paths[0], file_stats[0]);
+  EXPECT_EQ(hit_count_0, HitCount(ic));
+  EXPECT_EQ(missed_count_0 + 4, MissedCount(ic));
+  EXPECT_EQ(2, Size(ic));
 }
 
 TEST_F(IncludeCacheTest, GetDirectiveHash)
@@ -218,6 +224,14 @@ TEST_F(IncludeCacheTest, GetDirectiveHash)
     size_t hit_count_after = HitCount(ic);
     EXPECT_EQ(hit_count_before + 1, hit_count_after);
   }
+}
+
+TEST_F(IncludeCacheTest, DumpEmpty) {
+  IncludeCache* ic = IncludeCache::instance();
+
+  std::ostringstream ss;
+  // CHECK should not be triggered.
+  ic->Dump(&ss);
 }
 
 }  // namespace devtools_goma

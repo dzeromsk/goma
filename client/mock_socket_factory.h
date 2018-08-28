@@ -10,6 +10,7 @@
 
 #include "absl/time/time.h"
 #include "basictypes.h"
+#include "lockhelper.h"
 #include "scoped_fd.h"
 #include "socket_factory.h"
 
@@ -129,6 +130,10 @@ class MockSocketServer {
 
   WorkerThreadManager* wm_;
   int pool_;
+
+  Lock mu_;
+  ConditionVariable cond_;
+  int actions_ GUARDED_BY(mu_);
 
   DISALLOW_COPY_AND_ASSIGN(MockSocketServer);
 };

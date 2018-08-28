@@ -15,6 +15,7 @@
 
 #include "absl/memory/memory.h"
 #include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "compiler_flags.h"
 #include "compiler_flags_parser.h"
 #include "compiler_info_state.h"
@@ -623,7 +624,7 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
 {
   const std::string valid_hash = "valid_hash";
   FileStat valid_filestat;
-  valid_filestat.mtime = 1234567;
+  valid_filestat.mtime = absl::FromTimeT(1234567);
 
   HashCheckingCompilerInfoValidator* validator =
         new HashCheckingCompilerInfoValidator();
@@ -658,7 +659,9 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
     std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
     cid->set_last_used_at(absl::ToTimeT(absl::Now()));
     cid->set_found(true);
-    cid->mutable_local_compiler_stat()->set_mtime(valid_filestat.mtime);
+    ASSERT_TRUE(valid_filestat.mtime.has_value());
+    cid->mutable_local_compiler_stat()->set_mtime(
+        absl::ToTimeT(*valid_filestat.mtime));
     cid->mutable_local_compiler_stat()->set_size(valid_filestat.size);
     cid->set_local_compiler_hash(valid_hash);
     cid->set_hash(valid_hash);
@@ -674,7 +677,9 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
     // created 31 days ago
     cid->set_last_used_at(absl::ToTimeT(absl::Now() - absl::Hours(24 * 31)));
     cid->set_found(true);
-    cid->mutable_local_compiler_stat()->set_mtime(valid_filestat.mtime);
+    ASSERT_TRUE(valid_filestat.mtime.has_value());
+    cid->mutable_local_compiler_stat()->set_mtime(
+        absl::ToTimeT(*valid_filestat.mtime));
     cid->mutable_local_compiler_stat()->set_size(valid_filestat.size);
     cid->set_local_compiler_hash(valid_hash);
     cid->set_hash(valid_hash);
@@ -698,7 +703,8 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
   {
     // Change local compiler FileStat. (= changed local file timestamp.)
     FileStat changed_filestat(valid_filestat);
-    changed_filestat.mtime += 1000;
+    ASSERT_TRUE(valid_filestat.mtime.has_value());
+    *changed_filestat.mtime += absl::Seconds(1000);
     validator->SetLocalCompilerFileStat(changed_filestat);
 
     // Even FileStat is changed, file hash is the same, CompilerInfo
@@ -712,7 +718,8 @@ TEST_F(CompilerInfoCacheTest, UpdateOlderCompilerInfo)
   {
     // Change FileStat & Hash
     FileStat changed_filestat(valid_filestat);
-    changed_filestat.mtime += 2000;
+    ASSERT_TRUE(valid_filestat.mtime.has_value());
+    *changed_filestat.mtime += absl::Seconds(2000);
     validator->SetLocalCompilerFileStat(changed_filestat);
     validator->SetLocalCompilerHash("unexpected_hash");
 

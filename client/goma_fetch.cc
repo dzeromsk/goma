@@ -10,6 +10,8 @@
 #include <memory>
 #include <sstream>
 
+#include "absl/memory/memory.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
@@ -17,6 +19,8 @@
 #include "callback.h"
 #include "compiler_specific.h"
 #include "env_flags.h"
+#include "file_helper.h"
+#include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "goma_init.h"
 #include "http.h"
@@ -41,29 +45,28 @@ namespace {
 class Fetcher {
  public:
   // Takes ownership of HttpClient.
-  Fetcher(string method, string body, std::unique_ptr<HttpClient> client)
-      : method_(std::move(method)),
-        body_(std::move(body)),
-        client_(std::move(client)) {
+  Fetcher(std::unique_ptr<HttpClient> client,
+          string method,
+          HttpClient::Request* req,
+          HttpClient::Response* resp)
+      : client_(std::move(client)),
+        method_(std::move(method)),
+        req_(req),
+        resp_(resp) {
   }
   ~Fetcher() {
   }
 
   void Run() {
-    int backoff_ms = client_->options().min_retry_backoff_ms;
+    absl::Duration backoff = client_->options().min_retry_backoff;
 
     string err_messages;
-    req_.AddHeader("Connection", "close");
     for (int i = 0; i < FLAGS_FETCH_RETRY; ++i) {
-      client_->InitHttpRequest(&req_, method_, "");
-      if (!body_.empty()) {
-        // TODO: make it flag?
-        req_.SetContentType("application/x-www-form-urlencoded");
-        req_.SetBody(body_);
-      }
+      client_->InitHttpRequest(req_, method_, "");
+      resp_->Reset();
       err_messages += status_.err_message + " ";
       status_ = HttpClient::Status();
-      client_->Do(&req_, &resp_, &status_);
+      client_->Do(req_, resp_, &status_);
       if (!status_.err) {
         if (status_.http_return_code >= 400 && status_.http_return_code < 500) {
           break;
@@ -78,10 +81,9 @@ class Fetcher {
                      << " err=" << status_.err
                      << " http code:" << status_.http_return_code
                      << " " << status_.err_message;
-        backoff_ms = HttpClient::BackoffMsec(client_->options(),
-                                             backoff_ms, true);
-        LOG(INFO) << "backoff " << backoff_ms << "msec";
-        absl::SleepFor(absl::Milliseconds(backoff_ms));
+        backoff = HttpClient::GetNextBackoff(client_->options(), backoff, true);
+        LOG(INFO) << "backoff: " << backoff;
+        absl::SleepFor(backoff);
       }
     }
     status_.err_message = err_messages + status_.err_message;
@@ -94,77 +96,68 @@ class Fetcher {
     return status_;
   }
 
-  const devtools_goma::HttpResponse& resp() const {
-    return resp_;
-  }
-
  private:
-  const string method_;
-  const string body_;
   std::unique_ptr<HttpClient> client_;
-  devtools_goma::HttpRequest req_;
-  devtools_goma::HttpResponse resp_;
+  const string method_;
+  HttpClient::Request* req_;
+  HttpClient::Response* resp_;
   HttpClient::Status status_;
 
   DISALLOW_COPY_AND_ASSIGN(Fetcher);
 };
 
-void usage(const char* prog) {
-  std::cerr << "usage: " << prog << "[--no-auth] url" << std::endl;
-  std::cerr << "usage: " << prog << "[--no-auth] --head url" << std::endl;
-  std::cerr << "usage: " << prog << "[--no-auth] --post url [--data body]"
-            << std::endl;
-}
+DEFINE_bool(auth, true, "Enable Authentication.");
+DEFINE_string(output, "", "Output filename.");
+DEFINE_bool(head, false, "Do a request with HEAD method.");
+DEFINE_bool(post, false, "Do a request with POST method.");
+DEFINE_string(data, "", "Message body of POST request.");
+DEFINE_string(data_file, "", "A file that has message body of POST request.");
+DEFINE_string(content_type, "application/x-www-form-urlencoded",
+              "content-type header used for POST request.");
 
 }  // anonymous namespace
 
 int main(int argc, char* argv[], const char* envp[]) {
   devtools_goma::Init(argc, argv, envp);
+  const string usage = absl::StrCat(
+      "An HTTP client for goma.\n",
+      "Usage: ", argv[0], " [options...] <url>");
+  gflags::SetUsageMessage(usage);
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   if (argc < 2) {
-    usage(argv[0]);
+    gflags::ShowUsageWithFlags(argv[0]);
     exit(1);
   }
+
   // Initialize rand.
   srand(static_cast<unsigned int>(time(nullptr)));
   devtools_goma::InitLogging(argv[0]);
 
-  // TODO: use gflags?
-  bool use_goma_auth = true;
+  bool use_goma_auth = FLAGS_auth;
   absl::string_view method = "GET";
+  absl::string_view output = "";
   absl::string_view url = argv[1];
-  absl::string_view body = "";
-  int argi = 1;
-  if (strcmp(argv[argi], "--no-auth") == 0) {
-    argi++;
-    use_goma_auth = false;
-  }
-  if (argi >= argc) {
-    usage(argv[0]);
+  string body = "";
+  if (FLAGS_head && FLAGS_post) {
+    std::cerr << "You must not set both --head and --post at once."
+              << std::endl;
     exit(1);
-  }
-  if (strcmp(argv[argi], "--head") == 0) {
-    argi++;
+  } else if (FLAGS_head) {
     method = "HEAD";
-  } else if (strcmp(argv[argi], "--post") == 0) {
-    argi++;
+  } else if (FLAGS_post) {
     method = "POST";
   }
-  if (argi >= argc) {
-    usage(argv[0]);
+  output = FLAGS_output;
+  if (!FLAGS_data.empty() && !FLAGS_data_file.empty()) {
+    std::cerr << "You must not set both --data and --data_file at once."
+              << std::endl;
     exit(1);
-  }
-  url = argv[argi];
-  argi++;
-  if (method == "POST") {
-    if (argi == argc) {
-      // --post <url>
-    } else if (argi + 2 == argc && strcmp(argv[argi], "--data") == 0) {
-      // --post <url> --data <body>
-      argi++;
-      body = argv[argi];
-      argi++;
-    } else {
-      usage(argv[0]);
+  } else if (!FLAGS_data.empty()) {
+    body = FLAGS_data;
+  } else if (!FLAGS_data_file.empty()) {
+    if (!devtools_goma::ReadFileToString(FLAGS_data_file, &body)) {
+      std::cerr << "Failed to read a data file. "
+                << FLAGS_data_file;
       exit(1);
     }
   }
@@ -197,18 +190,39 @@ int main(int argc, char* argv[], const char* envp[]) {
   }
   LOG(INFO) << "fetch " << method << " " << url;
 
-  std::unique_ptr<HttpClient> client(new HttpClient(
+  std::unique_ptr<HttpClient> client(
+      absl::make_unique<HttpClient>(
       HttpClient::NewSocketFactoryFromOptions(http_options),
       HttpClient::NewTLSEngineFactoryFromOptions(http_options),
       http_options, &wm));
 
+  HttpClient::Request* req = nullptr;
+  auto httpreq(absl::make_unique<devtools_goma::HttpRequest>());
+  httpreq->AddHeader("Connection", "close");
+  if (!body.empty()) {
+    httpreq->SetContentType(FLAGS_content_type);
+    httpreq->SetBody(body);
+  }
+  req = httpreq.get();
+
+  HttpClient::Response* resp = nullptr;
+  std::unique_ptr<devtools_goma::HttpResponse> httpresp;
+  std::unique_ptr<devtools_goma::HttpFileDownloadResponse> fileresp;
+  if (output.empty()) {
+    httpresp = absl::make_unique<devtools_goma::HttpResponse>();
+    resp = httpresp.get();
+  } else {
+    fileresp = absl::make_unique<devtools_goma::HttpFileDownloadResponse>(
+        string(output), 0644);
+    resp = fileresp.get();
+  }
+
   std::unique_ptr<Fetcher> fetcher(
-      new Fetcher(string(method),
-                  string(body),
-                  std::move(client)));
+      absl::make_unique<Fetcher>(std::move(client),
+                                 string(method), req, resp));
 
   std::unique_ptr<WorkerThreadRunner> fetch(
-      new WorkerThreadRunner(
+      absl::make_unique<WorkerThreadRunner>(
           &wm, FROM_HERE,
           devtools_goma::NewCallback(
               fetcher.get(),
@@ -229,14 +243,21 @@ int main(int argc, char* argv[], const char* envp[]) {
     return 1;
   }
   LOG(INFO) << status.DebugString();
-  absl::string_view received_body = fetcher->resp().parsed_body();
+  int exit_code = 0;
   if (status.http_return_code != 200 && status.http_return_code != 204) {
     LOG(ERROR) << "fetch " << method << " " << url
                << " http code:" << status.http_return_code
                << " " << status.err_message;
-    LOG(INFO) << received_body;
-    return 1;
+    exit_code = 1;
   }
-  devtools_goma::WriteStdout(received_body);
-  return 0;
+  if (httpresp) {
+    absl::string_view received_body = httpresp->parsed_body();
+    if (exit_code) {
+      LOG(INFO) << received_body;
+      return exit_code;
+    }
+    devtools_goma::WriteStdout(received_body);
+    return 0;
+  }
+  return exit_code;
 }

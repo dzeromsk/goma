@@ -6,7 +6,7 @@
 
 namespace devtools_goma {
 
-// Ok means IncludeProcessor run correctly.
+// static
 CompilerTypeSpecific::IncludeProcessorResult
 CompilerTypeSpecific::IncludeProcessorResult::Ok(
     std::set<string> required_files) {
@@ -16,10 +16,7 @@ CompilerTypeSpecific::IncludeProcessorResult::Ok(
   return result;
 }
 
-// ErrorToLog means IncludeProcessor didn't finish. However, it's an internal
-// error, so compile task should be fallen back. Error is logged, but won't be
-// shown to a user.
-//
+// static
 CompilerTypeSpecific::IncludeProcessorResult
 CompilerTypeSpecific::IncludeProcessorResult::ErrorToLog(string error_reason) {
   IncludeProcessorResult result;
@@ -29,8 +26,7 @@ CompilerTypeSpecific::IncludeProcessorResult::ErrorToLog(string error_reason) {
   return result;
 }
 
-// ErrorToUser means IncludeProcessor didn't finish due to user's input.
-// Error is delivered to a user.
+// static
 CompilerTypeSpecific::IncludeProcessorResult
 CompilerTypeSpecific::IncludeProcessorResult::ErrorToUser(string error_reason) {
   IncludeProcessorResult result;

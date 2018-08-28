@@ -462,7 +462,6 @@ arg: "-o"
 arg: "obj/base/allocator/tcmalloc/malloc_hook.o"
 arg: "-fuse-init-array"
 env: "PWD=/home/goma/chromium/src/out/rel_ng"
-env: "SYSROOT="
 cwd: "/home/goma/chromium/src/out/rel_ng"
 subprogram {
   path: "../../third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs.so"

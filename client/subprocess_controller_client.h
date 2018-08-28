@@ -14,6 +14,7 @@
 #include "lockhelper.h"
 #include "scoped_fd.h"
 #include "subprocess_controller.h"
+#include "worker_thread.h"
 #include "worker_thread_manager.h"
 
 namespace devtools_goma {
@@ -94,9 +95,9 @@ class SubProcessControllerClient: public SubProcessController {
   void CheckSignaled();
 
   WorkerThreadManager* wm_;
-  WorkerThreadManager::ThreadId thread_id_;
-  SocketDescriptor* d_;
-  // Ownership is transferred to d_ at Setup().
+  WorkerThread::ThreadId thread_id_;
+  SocketDescriptor* socket_descriptor_;
+  // Ownership is transferred to |socket_descriptor_| at Setup().
   ScopedSocket fd_;
   const pid_t server_pid_;
 

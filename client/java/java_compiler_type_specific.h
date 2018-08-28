@@ -20,6 +20,8 @@ class JavaCompilerTypeSpecific : public CompilerTypeSpecific {
       const string& local_compiler_path,
       const std::vector<string>& compiler_info_envs) override;
 
+  bool SupportsDepsCache() const override { return false; }
+
   IncludeProcessorResult RunIncludeProcessor(
       const string& trace_id,
       const CompilerFlags& compiler_flags,
@@ -44,6 +46,8 @@ class JavacCompilerTypeSpecific : public CompilerTypeSpecific {
       const CompilerFlags& flags,
       const string& local_compiler_path,
       const std::vector<string>& compiler_info_envs) override;
+
+  bool SupportsDepsCache() const override { return false; }
 
   IncludeProcessorResult RunIncludeProcessor(
       const string& trace_id,

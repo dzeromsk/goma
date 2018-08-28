@@ -219,6 +219,7 @@ static_library("gtest_main") {
 }
 
 config("minizip_config") {
+  defines = [ "ZLIB_CONST" ]
   include_dirs = [
     "//third_party/zlib",
     "//third_party/zlib/contrib",

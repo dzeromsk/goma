@@ -12,6 +12,7 @@
 #include "descriptor.h"
 #include "http_util.h"
 #include "tls_engine.h"
+#include "worker_thread.h"
 #include "worker_thread_manager.h"
 
 namespace devtools_goma {
@@ -36,13 +37,14 @@ class TLSDescriptor : public Descriptor {
   ~TLSDescriptor() override;
 
   // To be deleted by WorkerThreadManager.
-  SocketDescriptor* socket_descriptor() override { return d_; }
+  SocketDescriptor* socket_descriptor() override { return socket_descriptor_; }
 
   void NotifyWhenReadable(std::unique_ptr<PermanentClosure> closure) override;
   void NotifyWhenWritable(std::unique_ptr<PermanentClosure> closure) override;
   void ClearWritable() override;
-  void NotifyWhenTimedout(double timeout, OneshotClosure* closure) override;
-  void ChangeTimeout(double timeout) override;
+  void NotifyWhenTimedout(absl::Duration timeout,
+                          OneshotClosure* closure) override;
+  void ChangeTimeout(absl::Duration timeout) override;
   ssize_t Read(void* ptr, size_t len) override;
   ssize_t Write(const void* ptr, size_t len) override;
 
@@ -73,11 +75,11 @@ class TLSDescriptor : public Descriptor {
   // HTTP request to ask proxy to connect the server.
   string CreateProxyRequestMessage();
 
-  SocketDescriptor* d_;
+  SocketDescriptor* socket_descriptor_;
   TLSEngine* engine_;
 
   WorkerThreadManager* wm_;
-  WorkerThreadManager::ThreadId thread_;
+  WorkerThread::ThreadId thread_;
   std::unique_ptr<PermanentClosure> readable_closure_;
   std::unique_ptr<PermanentClosure> writable_closure_;
   char network_read_buffer_[kNetworkBufSize];
@@ -104,7 +106,7 @@ class TLSDescriptor : public Descriptor {
   // TLSDescriptor but at the same time, we need to allow it to stop
   // TLSDescriptor.  If TLSDescriptor is stopped, this wrapper is disabled
   // not to run readable closure.
-  WorkerThreadManager::CancelableClosure* cancel_readable_closure_;
+  WorkerThread::CancelableClosure* cancel_readable_closure_;
   DISALLOW_COPY_AND_ASSIGN(TLSDescriptor);
 };
 

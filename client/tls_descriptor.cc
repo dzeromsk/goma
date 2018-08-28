@@ -8,6 +8,7 @@
 #include <sstream>
 #include <utility>
 
+#include "absl/strings/escaping.h"
 #include "callback.h"
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
@@ -21,7 +22,7 @@ TLSDescriptor::TLSDescriptor(SocketDescriptor* desc,
                              TLSEngine* e,
                              Options options,
                              WorkerThreadManager* wm)
-    : d_(desc),
+    : socket_descriptor_(desc),
       engine_(e),
       wm_(wm),
       readable_closure_(nullptr),
@@ -50,9 +51,9 @@ void TLSDescriptor::Init() {
   if (options_.use_proxy && !engine_->IsRecycled())
     connect_status_ = NEED_WRITE;
 
-  d_->NotifyWhenReadable(
+  socket_descriptor_->NotifyWhenReadable(
       NewPermanentCallback(this, &TLSDescriptor::TransportLayerReadable));
-  d_->NotifyWhenWritable(
+  socket_descriptor_->NotifyWhenWritable(
       NewPermanentCallback(this, &TLSDescriptor::TransportLayerWritable));
 }
 
@@ -62,7 +63,7 @@ void TLSDescriptor::NotifyWhenReadable(
   readable_closure_ = std::move(closure);
   active_read_ = true;
   RestartTransportLayer();
-  VLOG(1) << "Notify when " << d_->fd()
+  VLOG(1) << "Notify when " << socket_descriptor_->fd()
           << " readable " << readable_closure_.get();
 }
 
@@ -72,43 +73,52 @@ void TLSDescriptor::NotifyWhenWritable(
   writable_closure_ = std::move(closure);
   active_write_ = true;
   RestartTransportLayer();
-  VLOG(1) << "Notify when " << d_->fd()
+  VLOG(1) << "Notify when " << socket_descriptor_->fd()
           << " writable " << writable_closure_.get();
 }
 
 void TLSDescriptor::ClearWritable() {
   DCHECK(THREAD_ID_IS_SELF(thread_));
-  VLOG(1) << "Clear " << d_->fd() << " writable " << writable_closure_.get();
+  VLOG(1) << "Clear " << socket_descriptor_->fd() << " writable "
+          << writable_closure_.get();
   active_write_ = false;
   writable_closure_.reset();
 }
 
-void TLSDescriptor::NotifyWhenTimedout(double timeout,
+void TLSDescriptor::NotifyWhenTimedout(absl::Duration timeout,
                                        OneshotClosure* closure) {
   DCHECK(THREAD_ID_IS_SELF(thread_));
-  d_->NotifyWhenTimedout(timeout, closure);
+  socket_descriptor_->NotifyWhenTimedout(timeout, closure);
 }
 
-void TLSDescriptor::ChangeTimeout(double timeout) {
+void TLSDescriptor::ChangeTimeout(absl::Duration timeout) {
   DCHECK(THREAD_ID_IS_SELF(thread_));
   // once is_closed_, timeout closure is cleared (in StopTransportLayer)
   if (is_closed_)
     return;
-  d_->ChangeTimeout(timeout);
+  socket_descriptor_->ChangeTimeout(timeout);
 }
 
 ssize_t TLSDescriptor::Read(void* ptr, size_t len) {
+  CHECK_GT(len, 0) << "fd=" << socket_descriptor_->fd();
   cancel_readable_closure_ = nullptr;
   if (io_failed_)
     return -1;
-  // It seems stack if we do not restart transport layer communications.
-  // It might be because TLS may send something like ACK, we guess.
-  ResumeTransportWritable();
+  if (is_closed_) {
+    VLOG(1) << "reading from tls engine buffer after connection closed"
+            << " fd=" << socket_descriptor_->fd();
+  } else {
+    // It seems to get stuck if we do not restart transport layer
+    // communications.
+    // It might be because TLS may send something like ACK, we guess.
+    socket_descriptor_->RestartWrite();
+  }
 
   const int ret = engine_->Read(ptr, len);
   if (ret == TLSEngine::TLS_WANT_READ || ret == TLSEngine::TLS_WANT_WRITE) {
     if (is_closed_) {
-      LOG(INFO) << "socket has already been closed by peer: fd=" << d_->fd();
+      LOG(INFO) << "socket has already been closed by peer: fd="
+                << socket_descriptor_->fd();
       return 0;
     }
     ssl_pending_ = true;
@@ -121,7 +131,7 @@ ssize_t TLSDescriptor::Read(void* ptr, size_t len) {
     // Make readable_closure_ read all available data.
     DCHECK(readable_closure_.get());
     cancel_readable_closure_ = wm_->RunDelayedClosureInThread(
-        FROM_HERE, thread_, 0,
+        FROM_HERE, thread_, absl::ZeroDuration(),
         NewCallback(static_cast<Closure*>(readable_closure_.get()),
                     &Closure::Run));
   }
@@ -129,6 +139,7 @@ ssize_t TLSDescriptor::Read(void* ptr, size_t len) {
 }
 
 ssize_t TLSDescriptor::Write(const void* ptr, size_t len) {
+  CHECK_GT(len, 0) << "fd=" << socket_descriptor_->fd();
   if (io_failed_ || is_closed_)
     return -1;
   ResumeTransportWritable();
@@ -150,7 +161,7 @@ bool TLSDescriptor::NeedRetry() const {
 }
 
 string TLSDescriptor::GetLastErrorMessage() const {
-  string err_msg = d_->GetLastErrorMessage();
+  string err_msg = socket_descriptor_->GetLastErrorMessage();
   if (!err_msg.empty())
     err_msg.append(" ,");
   return err_msg + "TLS engine:" + engine_->GetLastErrorMessage();
@@ -179,66 +190,86 @@ void TLSDescriptor::StopWrite() {
 void TLSDescriptor::TransportLayerReadable() {
   size_t read_size = std::min(engine_->GetBufSizeFromTransport(),
                               sizeof(network_read_buffer_));
-  const ssize_t read_bytes = d_->Read(network_read_buffer_, read_size);
-  if (read_bytes < 0 && d_->NeedRetry())
+  if (read_size == 0) {
+    LOG(INFO) << "Transport layer is readable, "
+              << "but engine is not ready to read from transport";
+    PutClosuresInRunQueue();
+    return;
+  }
+  const ssize_t read_bytes = socket_descriptor_->Read(network_read_buffer_,
+                                                      read_size);
+  if (read_bytes < 0 && socket_descriptor_->NeedRetry())
       return;
 
   if (read_bytes == 0) {  // EOF.
     LOG(INFO) << "Remote closed. "
-              << " fd=" << d_->fd()
-              << " ret=" << read_bytes
-              << " err=" << d_->GetLastErrorMessage();
+              << " fd=" << socket_descriptor_->fd()
+              << " read_size=" << read_size
+              << " read_bytes=" << read_bytes
+              << " err=" << socket_descriptor_->GetLastErrorMessage();
     is_closed_ = true;
     StopTransportLayer();
     PutClosuresInRunQueue();
     return;
   }
   if (read_bytes < 0) {  // error.
-    LOG(WARNING) << "Transport layer read " << d_->fd() << " failed."
-                 << " ret=" << read_bytes
-                 << " err=" << d_->GetLastErrorMessage();
+    LOG(WARNING) << "Transport layer read " << socket_descriptor_->fd()
+                 << " read_size=" << read_size
+                 << " read_bytes=" << read_bytes
+                 << " err=" << socket_descriptor_->GetLastErrorMessage();
     StopTransportLayer();
     io_failed_ = true;
     PutClosuresInRunQueue();
     return;
   }
-  if (connect_status_ == READY) {
-    int ret = engine_->SetDataFromTransport(
-        absl::string_view(network_read_buffer_, read_bytes));
-    if (ret < 0) {  // Error in TLS engine.
-      StopTransportLayer();
-      io_failed_ = true;
-      PutClosuresInRunQueue();
-      return;
-    }
-    CHECK_EQ(ret, static_cast<int>(read_bytes));
 
-    ResumeTransportWritable();
-    if (!engine_->IsIOPending()) {
-      PutClosuresInRunQueue();
-      return;
-    }
-  } else if (connect_status_ == NEED_READ) {
-    int status_code = 0;
-    size_t offset;
-    size_t content_length;
-    proxy_response_.append(network_read_buffer_, read_bytes);
-    if (ParseHttpResponse(proxy_response_, &status_code, &offset,
-                          &content_length, nullptr)) {
-      if (status_code / 100 == 2) {
-        connect_status_ = READY;
+  switch (connect_status_) {
+    case READY:
+      {
+        int ret = engine_->SetDataFromTransport(
+            absl::string_view(network_read_buffer_, read_bytes));
+        if (ret < 0) {  // Error in TLS engine.
+          StopTransportLayer();
+          io_failed_ = true;
+          PutClosuresInRunQueue();
+          return;
+        }
+        CHECK_EQ(ret, static_cast<int>(read_bytes));
+
         ResumeTransportWritable();
-      } else {
-        LOG(ERROR) << "Proxy's status code != 2xx."
-                   << " Details:" << proxy_response_;
-        StopTransportLayer();
-        io_failed_ = true;
-        PutClosuresInRunQueue();
+        if (engine_->IsReady()) {
+          PutClosuresInRunQueue();
+        }
+        return;
       }
-    }
-  } else if (connect_status_ == NEED_WRITE) {
-    LOG(ERROR) << "Unexpected read occured when waiting writable."
-               << "buf:" << absl::string_view(network_read_buffer_, read_bytes);
+
+    case NEED_READ:
+      {
+          int status_code = 0;
+          size_t offset;
+          size_t content_length;
+          proxy_response_.append(network_read_buffer_, read_bytes);
+          if (ParseHttpResponse(proxy_response_, &status_code, &offset,
+                                &content_length, nullptr)) {
+            if (status_code / 100 == 2) {
+              connect_status_ = READY;
+              ResumeTransportWritable();
+            } else {
+              LOG(ERROR) << "Proxy's status code != 2xx."
+                         << " Details:" << proxy_response_;
+              StopTransportLayer();
+              io_failed_ = true;
+              PutClosuresInRunQueue();
+            }
+          }
+          return;
+      }
+
+    case NEED_WRITE:
+      LOG(ERROR) << "Unexpected read occured when waiting writable."
+                 << "buf:"
+                 << absl::CEscape(
+                     absl::string_view(network_read_buffer_, read_bytes));
   }
 }
 
@@ -249,36 +280,45 @@ void TLSDescriptor::TransportLayerWritable() {
       CHECK_GE(engine_->GetDataToSendTransport(&network_write_buffer_), 0);
     else if (connect_status_ == NEED_WRITE)
       network_write_buffer_ = CreateProxyRequestMessage();
+
     network_write_offset_ = 0;
-    if (network_write_buffer_.size() == 0)
+    if (network_write_buffer_.size() == 0) {
       SuspendTransportWritable();
+    }
     if (!engine_->IsIOPending()) {
       PutClosuresInRunQueue();
       return;
     }
   }
-
-  if (network_write_buffer_.size() - network_write_offset_ > 0) {
-    int ret = d_->Write(network_write_buffer_.c_str() + network_write_offset_,
-                        network_write_buffer_.size() - network_write_offset_);
-    if (ret < 0 && d_->NeedRetry())
-      return;
-    if (ret <= 0) {
-      LOG(WARNING) << "Transport layer write " << d_->fd() << " failed."
-                   << " ret=" << ret
-                   << " err=" << d_->GetLastErrorMessage();
-      StopTransportLayer();
-      io_failed_ = true;
-      PutClosuresInRunQueue();
-      return;
-    }
-    network_write_offset_ += ret;
-    if (network_write_buffer_.size() == network_write_offset_) {
-      network_write_buffer_.clear();
-      network_write_offset_ = 0;
-      if (connect_status_ == NEED_WRITE)
-        connect_status_ = NEED_READ;
-    }
+  ssize_t write_size = network_write_buffer_.size() - network_write_offset_;
+  if (write_size == 0) {
+    return;
+  }
+  DCHECK_GT(write_size, 0);
+  const ssize_t write_bytes =
+      socket_descriptor_->Write(
+          network_write_buffer_.c_str() + network_write_offset_,
+          write_size);
+  if (write_bytes < 0 && socket_descriptor_->NeedRetry())
+    return;
+  if (write_bytes <= 0) {
+    LOG(WARNING) << "Transport layer write " << socket_descriptor_->fd()
+                 << " failed."
+                 << " write_size=" << write_size
+                 << " write_bytes=" << write_bytes
+                 << " err=" << socket_descriptor_->GetLastErrorMessage();
+    StopTransportLayer();
+    io_failed_ = true;
+    PutClosuresInRunQueue();
+    return;
+  }
+  network_write_offset_ += write_bytes;
+  DCHECK_LE(network_write_offset_, network_write_buffer_.size());
+  if (network_write_buffer_.size() == network_write_offset_) {
+    network_write_buffer_.clear();
+    network_write_offset_ = 0;
+    if (connect_status_ == NEED_WRITE)
+      connect_status_ = NEED_READ;
   }
 }
 
@@ -291,7 +331,7 @@ void TLSDescriptor::PutClosuresInRunQueue() const {
     wm_->RunClosureInThread(
         FROM_HERE,
         thread_, writable_closure_.get(),
-        WorkerThreadManager::PRIORITY_IMMEDIATE);
+        WorkerThread::PRIORITY_IMMEDIATE);
     set_callback = true;
   }
 
@@ -299,7 +339,7 @@ void TLSDescriptor::PutClosuresInRunQueue() const {
     wm_->RunClosureInThread(
         FROM_HERE,
         thread_, readable_closure_.get(),
-        WorkerThreadManager::PRIORITY_IMMEDIATE);
+        WorkerThread::PRIORITY_IMMEDIATE);
     set_callback = true;
   }
   LOG_IF(ERROR, !set_callback)
@@ -314,33 +354,35 @@ void TLSDescriptor::PutClosuresInRunQueue() const {
 }
 
 void TLSDescriptor::SuspendTransportWritable() {
-  d_->StopWrite();
-  d_->UnregisterWritable();
+  socket_descriptor_->StopWrite();
+  socket_descriptor_->UnregisterWritable();
 }
 
 void TLSDescriptor::ResumeTransportWritable() {
   if (is_closed_) {
-    LOG(INFO) << "socket has already been closed: fd=" << d_->fd();
+    LOG(INFO) << "socket has already been closed: fd="
+              << socket_descriptor_->fd();
     return;
   }
-  d_->RestartWrite();
+  socket_descriptor_->RestartWrite();
 }
 
 void TLSDescriptor::StopTransportLayer() {
-  d_->StopRead();
-  d_->StopWrite();
+  socket_descriptor_->StopRead();
+  socket_descriptor_->StopWrite();
   if (is_closed_) {
-    d_->ClearTimeout();
+    socket_descriptor_->ClearTimeout();
   }
 }
 
 void TLSDescriptor::RestartTransportLayer() {
   if (is_closed_) {
-    LOG(INFO) << "socket has already been closed: fd=" << d_->fd();
+    LOG(INFO) << "socket has already been closed: fd="
+              << socket_descriptor_->fd();
     return;
   }
-  d_->RestartRead();
-  d_->RestartWrite();
+  socket_descriptor_->RestartRead();
+  socket_descriptor_->RestartWrite();
 }
 
 string TLSDescriptor::CreateProxyRequestMessage() {
@@ -355,7 +397,7 @@ string TLSDescriptor::CreateProxyRequestMessage() {
 }
 
 bool TLSDescriptor::CanReuse() const {
-  return !is_closed_ && !io_failed_ && d_->CanReuse();
+  return !is_closed_ && !io_failed_ && socket_descriptor_->CanReuse();
 }
 
 }  // namespace devtools_goma

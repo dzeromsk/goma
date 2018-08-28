@@ -38,7 +38,6 @@ static_library("benchmark") {
     "src/src/string_util.cc",
     "src/src/string_util.h",
     "src/src/sysinfo.cc",
-    "src/src/sysinfo.h",
     "src/src/timers.cc",
     "src/src/timers.h",
   ]

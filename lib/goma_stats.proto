@@ -175,11 +175,10 @@ message IncludeProcessorStats {
 // Statistics for include cache.
 //
 // IncludeCache contains a file that include only preprocessor directives.
+// // NEXT ID TO USE: 11
 message IncludeCacheStats {
   // The number of entries in the include cache.
   optional int64 total_entries = 1;
-  // The total bytes of the contents in the include cache.
-  optional int64 total_cache_size = 2;
 
   // Cache hit count.
   optional int64 hit = 3;
@@ -190,14 +189,7 @@ message IncludeCacheStats {
   // Cache evicted count.
   optional int64 evicted = 6;
 
-  // The total size of original (unfiltered) header files in byte.
-  optional int64 original_total_size = 7;
-  // The max size ef the original header files in byte.
-  optional int64 original_max_size = 8;
-  // The total size of filtered header files in byte.
-  optional int64 filtered_total_size = 9;
-  // The max size of filtered header files in byte.
-  optional int64 filtered_max_size = 10;
+  reserved 2, 7, 8, 9, 10;
 }
 
 // Statistics of DepsCache.

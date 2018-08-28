@@ -6,6 +6,43 @@
 
 namespace devtools_goma {
 
+namespace {
+
+bool ContainsHasInclude(const std::vector<CppToken>& tokens) {
+  for (const auto& t : tokens) {
+    if (t.IsIdentifier("__has_include") ||
+        t.IsIdentifier("__has_include_next")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Returns true if |directive| is #if and it does not contain
+// __has_include or __has_include_next.
+bool IsDroppableIf(const CppDirective& directive) {
+  if (directive.type() != CppDirectiveType::DIRECTIVE_IF) {
+    return false;
+  }
+  const CppDirectiveIf& directive_if =
+      static_cast<const CppDirectiveIf&>(directive);
+  return !ContainsHasInclude(directive_if.tokens());
+}
+
+// Returns true if |directive| is #elif and it does not contain
+// __has_include or __has_include_next.
+bool IsDroppableElif(const CppDirective& directive) {
+  if (directive.type() != CppDirectiveType::DIRECTIVE_ELIF) {
+    return false;
+  }
+  const CppDirectiveElif& directive_elif =
+      static_cast<const CppDirectiveElif&>(directive);
+  return !ContainsHasInclude(directive_elif.tokens());
+}
+
+}  // namespace
+
 // static
 StatsCounter CppDirectiveOptimizer::total_directives_count_;
 // static
@@ -15,7 +52,7 @@ StatsCounter CppDirectiveOptimizer::converted_count_;
 // static
 StatsCounter CppDirectiveOptimizer::dropped_count_;
 
-// staitc
+// static
 void CppDirectiveOptimizer::DumpStats(std::ostream* os) {
   *os << "directive_optimizer:"
       << " total_directives=" << total_directives_count_.value()
@@ -57,17 +94,20 @@ void CppDirectiveOptimizer::Optimize(CppDirectiveList* directives) {
     // # define X
     // #elif B
     // #endif
+    //
+    // However, if #if contains __has_include(X) or __has_include_next(X),
+    // we should keep X, so we cannot remove it. b/112669612
 
     if (d->type() == CppDirectiveType::DIRECTIVE_ENDIF) {
       while (!result.empty() &&
-             (result.back()->type() == CppDirectiveType::DIRECTIVE_ELIF ||
+             (IsDroppableElif(*result.back()) ||
               result.back()->type() == CppDirectiveType::DIRECTIVE_ELSE)) {
         result.pop_back();
         ++dropped;
       }
 
       if (!result.empty() &&
-          (result.back()->type() == CppDirectiveType::DIRECTIVE_IF ||
+          (IsDroppableIf(*result.back()) ||
            result.back()->type() == CppDirectiveType::DIRECTIVE_IFDEF ||
            result.back()->type() == CppDirectiveType::DIRECTIVE_IFNDEF)) {
         result.pop_back();

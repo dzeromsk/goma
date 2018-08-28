@@ -46,7 +46,7 @@ string GCCFlags::compiler_name() const {
 }
 
 GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
-    : CompilerFlags(args, cwd),
+    : CxxFlags(args, cwd),
       is_cplusplus_(false),
       has_nostdinc_(false),
       has_no_integrated_as_(false),
@@ -585,8 +585,6 @@ bool GCCFlags::IsClientImportantEnv(const char* env) const {
 
 bool GCCFlags::IsServerImportantEnv(const char* env) const {
   // http://gcc.gnu.org/onlinedocs/gcc/Environment-Variables.html
-  // SYSROOT is not mentioned in the above but it seems this changes
-  // the behavior of GCC.
   //
   // Although ld(1) manual mentions following variables, they are not added
   // without actual needs. That is because it may lead security risks and
@@ -597,7 +595,6 @@ bool GCCFlags::IsServerImportantEnv(const char* env) const {
   // PWD is used for current working directory. b/27487704
 
   static const char* kCheckEnvs[] = {
-      "SYSROOT=",
       "LIBRARY_PATH=",
       "CPATH=",
       "C_INCLUDE_PATH=",

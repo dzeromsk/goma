@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "atomic_stats_counter.h"
 #include "autolock_timer.h"
 #include "compiler_specific.h"
@@ -22,6 +23,8 @@ MSVC_POP_WARNING()
 
 namespace devtools_goma {
 
+struct CounterStat;
+
 class CounterInfo {
  public:
   CounterInfo(const char* const location,
@@ -30,12 +33,10 @@ class CounterInfo {
       : location_(location), funcname_(funcname), name_(name) {
   }
 
-  void Inc(int64_t time_ns) {
-    counter_.Add(1);
-    total_time_in_ns_.Add(time_ns);
-  }
+  // Increment the number counter by 1 and the time counter by |time|.
+  void Inc(absl::Duration time);
 
-  void Dump(std::string* name, int64_t* time_ns, int64_t* count) const;
+  void Dump(CounterStat* stat) const;
   void DumpToProto(CounterzStat* counterz) const;
 
  private:
@@ -92,7 +93,7 @@ class ScopedCounter {
 
   ~ScopedCounter() {
     if (counter_info_ != nullptr) {
-      counter_info_->Inc(timer_.GetInNanoseconds());
+      counter_info_->Inc(timer_.GetDuration());
     }
   }
 

@@ -86,6 +86,30 @@ TEST(Util, ToShortNodename) {
   }
 }
 
+TEST(Util, SumRepeatedInt32) {
+  using devtools_goma::SumRepeatedInt32;
+  using RepeatedInt32 =
+      google::protobuf::RepeatedField<google::protobuf::int32>;
+  RepeatedInt32 empty;
+
+  RepeatedInt32 single_int;
+  single_int.Add(1337);
+
+  RepeatedInt32 multiple_ints;
+  for (int i = 1; i <= 10; ++i)  // sum of [1..10] is 55.
+    multiple_ints.Add(i);
+
+  RepeatedInt32 int64_result;
+  int64_result.Add(INT32_MAX);
+  int64_result.Add(1);
+
+  EXPECT_EQ(0, SumRepeatedInt32(empty));
+  EXPECT_EQ(1337, SumRepeatedInt32(single_int));
+  EXPECT_EQ(55, SumRepeatedInt32(multiple_ints));
+  EXPECT_EQ(static_cast<int64_t>(INT32_MAX) + 1,
+            SumRepeatedInt32(int64_result));
+}
+
 TEST(Util, ToVector) {
   std::vector<string> vs = ToVector(absl::StrSplit("x:y:z", ':'));
   EXPECT_EQ((std::vector<string> { "x", "y", "z" }), vs);

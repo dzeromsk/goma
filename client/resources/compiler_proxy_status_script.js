@@ -89,6 +89,17 @@ function makeFlagSummary(flag) {
  * @return {string} task status
  */
 function taskStatus(task) {
+  // There is a case that `canceled` exists but `exit` or `http` does not
+  // exists. So handle this earlier.
+  if (task['canceled']) {
+    return 'cancel';
+  }
+
+  // finished task must have 'replied'. Otherwise,running.
+  if (!('replied' in task)) {
+    return 'running';
+  }
+
   var success = true;
   if ('exit' in task) {
     if (task['exit'] != 0) {
@@ -98,13 +109,8 @@ function taskStatus(task) {
     if (task['http'] != 200) {
       success = false;
     }
-  } else {
-    // if no http, it would be running.
-    return 'running';
   }
-  if (task['canceled']) {
-    return 'cancel';
-  }
+
   if (task['goma_error'] || task['compiler_proxy_error']) {
     return 'gomaerror';
   }
@@ -505,9 +511,9 @@ GomaTaskView.prototype = {
       if (sortKey == 'time') {
         sortFunc = (function(ascending) {
           return function(a, b) {
-            var v1 = a['time'] || a['elapsed'];
-            var v2 = b['time'] || b['elapsed'];
-            return compare(v1, v2, ascending);
+            var v1 = a['time'] || a['elapsed'] || '0';
+            var v2 = b['time'] || b['elapsed'] || '0';
+            return compare(parseInt(v1), parseInt(v2), ascending);
           };
         })(this.currentTaskOrderAscending ? 1 : -1);
       }
@@ -558,7 +564,7 @@ GomaTaskView.prototype = {
       } else if ('elapsed' in task) {
         $('<td class="task-summary-time">').text(task.elapsed).appendTo(tr);
       } else {
-        $('<td class="task-sumamry-time">').appendTo(tr);
+        $('<td class="task-summary-time">').appendTo(tr);
       }
       $('<td class="task-summary-pid">').text(task.pid).appendTo(tr);
       $('<td class="task-summary-state">').text(task.state).appendTo(tr);
@@ -762,12 +768,12 @@ GomaTaskView.prototype = {
     add('output_file_rpc_resp_parse_time');
     addLineBreak();
 
-    add('local_delay_ms');
+    add('local_delay_time');
 
     /* local run */
-    if (('local_pending_ms' in task) || 'local_run_ms' in task) {
-      add('local_pending_ms');
-      add('local_run_ms');
+    if (('local_pending_time' in task) || 'local_run_time' in task) {
+      add('local_pending_time');
+      add('local_run_time');
       add('local_mem_kb');
       add('local_output_file_time');
       add('local_output_file_size');

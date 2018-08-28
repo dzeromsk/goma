@@ -1269,8 +1269,9 @@ TEST_F(GCCFlagsTest, KnownWarningOptions) {
 
   // -Walloc-size-larger-than=100
   EXPECT_TRUE(GCCFlags::IsKnownWarningOption("alloc-size-larger-than=100"));
-  // -Walloc-size-larger-than. This needs "=n"
-  EXPECT_FALSE(GCCFlags::IsKnownWarningOption("alloc-size-larger-than"));
+
+  // -Wnormalized. This needs "=n"
+  EXPECT_FALSE(GCCFlags::IsKnownWarningOption("normalized"));
 
   // Check with removing no-.
   // no-bool-compare is not defined in kKnownWarningOptions, but
@@ -1380,25 +1381,23 @@ TEST_F(GCCFlagsTest, GccFlags) {
   EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
   EXPECT_EQ("/tmp", flags->cwd());
 
-  const size_t env_array_length = 10;
+  const size_t env_array_length = 9;
   const char** env =
       static_cast<const char**>(malloc(sizeof(const char*) * env_array_length));
   env[0] = strdup("PATH=/usr/bin:/bin");
-  env[1] = strdup("SYSROOT=/tmp/1234");
-  env[2] = strdup("LIBRARY_PATH=../libsupp");
-  env[3] = strdup("CPATH=.:/special/include");
-  env[4] = strdup("C_INCLUDE_PATH=.:/special/include");
-  env[5] = strdup("CPLUS_INCLUDE_PATH=.:/special/include/c++");
-  env[6] = strdup("OBJC_INCLUDE_PATH=./special/include/objc");
-  env[7] = strdup("DEPENDENCIES_OUTPUT=foo.d");
-  env[8] = strdup("SUNPRO_DEPENDENCIES=foo.d");
-  env[9] = nullptr;
+  env[1] = strdup("LIBRARY_PATH=../libsupp");
+  env[2] = strdup("CPATH=.:/special/include");
+  env[3] = strdup("C_INCLUDE_PATH=.:/special/include");
+  env[4] = strdup("CPLUS_INCLUDE_PATH=.:/special/include/c++");
+  env[5] = strdup("OBJC_INCLUDE_PATH=./special/include/objc");
+  env[6] = strdup("DEPENDENCIES_OUTPUT=foo.d");
+  env[7] = strdup("SUNPRO_DEPENDENCIES=foo.d");
+  env[8] = nullptr;
 
   std::vector<string> important_env;
   flags->GetClientImportantEnvs(env, &important_env);
 
   std::vector<string> expected_env;
-  expected_env.push_back("SYSROOT=/tmp/1234");
   expected_env.push_back("LIBRARY_PATH=../libsupp");
   expected_env.push_back("CPATH=.:/special/include");
   expected_env.push_back("C_INCLUDE_PATH=.:/special/include");
@@ -1435,24 +1434,22 @@ TEST_F(GCCFlagsTest, ClangImportantEnv) {
   std::unique_ptr<CompilerFlags> flags(
       CompilerFlagsParser::MustNew(args, "/tmp"));
 
-  const size_t env_array_length = 9;
+  const size_t env_array_length = 8;
   const char** env =
       static_cast<const char**>(malloc(sizeof(const char*) * env_array_length));
   env[0] = strdup("PATH=/usr/bin:/bin");
-  env[1] = strdup("SYSROOT=/tmp/1234");
-  env[2] = strdup("LIBRARY_PATH=../libsupp");
-  env[3] = strdup("CPATH=.:/special/include");
-  env[4] = strdup("C_INCLUDE_PATH=.:/special/include");
-  env[5] = strdup("MACOSX_DEPLOYMENT_TARGET=10.7");
-  env[6] = strdup("SDKROOT=/tmp/path_to_root");
-  env[7] = strdup("DEVELOPER_DIR=/tmp/path_to_developer_dir");
-  env[8] = nullptr;
+  env[1] = strdup("LIBRARY_PATH=../libsupp");
+  env[2] = strdup("CPATH=.:/special/include");
+  env[3] = strdup("C_INCLUDE_PATH=.:/special/include");
+  env[4] = strdup("MACOSX_DEPLOYMENT_TARGET=10.7");
+  env[5] = strdup("SDKROOT=/tmp/path_to_root");
+  env[6] = strdup("DEVELOPER_DIR=/tmp/path_to_developer_dir");
+  env[7] = nullptr;
 
   std::vector<string> important_env;
   flags->GetClientImportantEnvs(env, &important_env);
 
   std::vector<string> expected_env;
-  expected_env.push_back("SYSROOT=/tmp/1234");
   expected_env.push_back("LIBRARY_PATH=../libsupp");
   expected_env.push_back("CPATH=.:/special/include");
   expected_env.push_back("C_INCLUDE_PATH=.:/special/include");
@@ -1475,7 +1472,6 @@ TEST_F(GCCFlagsTest, IsImportantEnvGCC) {
     const bool client_important;
     const bool server_important;
   } kTestCases[] {
-    { "SYSROOT=/tmp/1234", true, true },
     { "LIBRARY_PATH=../libsupp", true, true },
     { "CPATH=.:/special/include", true, true },
     { "C_INCLUDE_PATH=.:/include", true, true },

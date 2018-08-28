@@ -27,7 +27,6 @@
 #include "auto_updater.h"
 #include "autolock_timer.h"
 #include "callback.h"
-#include "client_util.h"
 #include "compile_stats.h"
 #include "compile_task.h"
 #include "compiler_flags.h"
@@ -38,6 +37,7 @@
 #include "deps_cache.h"
 #include "file_hash_cache.h"
 #include "file_helper.h"
+#include "file_path_util.h"
 #include "file_stat.h"
 #include "glog/logging.h"
 #include "goma_blob.h"
@@ -57,7 +57,7 @@
 #include "path_resolver.h"
 #include "util.h"
 #include "watchdog.h"
-#include "worker_thread_manager.h"
+#include "worker_thread.h"
 
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/error_notice.pb.h"
@@ -86,7 +86,7 @@ namespace devtools_goma {
 class CompareTaskHandlerTime {
  public:
   bool operator()(CompileTask* a, CompileTask* b) const {
-    return a->stats().handler_time() > b->stats().handler_time();
+    return a->stats().handler_time > b->stats().handler_time;
   }
 };
 
@@ -289,11 +289,11 @@ void CompileService::MultiRpcController::NotifyWhenClosed(
   wm_->RunClosureInThread(
       FROM_HERE,
       wm_->GetCurrentThreadId(), callback,
-      WorkerThreadManager::PRIORITY_IMMEDIATE);
+      WorkerThread::PRIORITY_IMMEDIATE);
 }
 
 void CompileService::MultiRpcController::RequestClosed() {
-  std::vector<std::pair<WorkerThreadManager::ThreadId,
+  std::vector<std::pair<WorkerThread::ThreadId,
                         OneshotClosure*>> callbacks;
   {
     AUTOLOCK(lock, &mu_);
@@ -303,7 +303,7 @@ void CompileService::MultiRpcController::RequestClosed() {
   for (const auto& callback : callbacks) {
     wm_->RunClosureInThread(FROM_HERE, callback.first,
                             callback.second,
-                            WorkerThreadManager::PRIORITY_IMMEDIATE);
+                            WorkerThread::PRIORITY_IMMEDIATE);
   }
 }
 #endif
@@ -326,7 +326,7 @@ CompileService::CompileService(WorkerThreadManager* wm, int compiler_info_pool)
       include_processor_pool_(WorkerThreadManager::kFreePool),
       histogram_(new CompilerProxyHistogram),
       need_to_send_content_(false),
-      new_file_threshold_(60),
+      new_file_threshold_duration_(absl::Minutes(1)),
       enable_gch_hack_(true),
       use_relative_paths_in_argv_(false),
       hermetic_(false),
@@ -359,8 +359,6 @@ CompileService::CompileService(WorkerThreadManager* wm, int compiler_info_pool)
       num_file_output_buf_(0),
       num_include_processor_total_files_(0),
       num_include_processor_skipped_files_(0),
-      include_processor_total_wait_time_(0),
-      include_processor_total_run_time_(0),
       cur_sum_output_size_(0),
       max_sum_output_size_(0),
       req_sum_output_size_(0),
@@ -435,10 +433,6 @@ void CompileService::SetFileServiceHttpClient(
       std::move(file_service));
 }
 
-FileServiceHttpClient* CompileService::file_service() const {
-  return blob_client_->file_service();
-}
-
 BlobClient* CompileService::blob_client() const {
   return blob_client_.get();
 }
@@ -469,7 +463,7 @@ void CompileService::SetWatchdog(std::unique_ptr<Watchdog> watchdog,
 
 void CompileService::Exec(
     RpcController* rpc,
-    const ExecReq* req, ExecResp* resp,
+    const ExecReq& req, ExecResp* resp,
     OneshotClosure* done) {
   CompileTask* task = nullptr;
   // done will be called on this thread when Exec done.
@@ -503,16 +497,16 @@ void CompileService::Exec(
   wm_->RunClosure(
       FROM_HERE,
       NewCallback(task, &CompileTask::Start),
-      WorkerThreadManager::PRIORITY_LOW);
+      WorkerThread::PRIORITY_LOW);
 }
 
-void CompileService::ExecDone(WorkerThreadManager::ThreadId thread_id,
+void CompileService::ExecDone(WorkerThread::ThreadId thread_id,
                               OneshotClosure* done) {
   wm_->RunClosureInThread(
       FROM_HERE,
       thread_id,
       NewCallback(static_cast<Closure*>(done), &Closure::Run),
-      WorkerThreadManager::PRIORITY_HIGH);
+      WorkerThread::PRIORITY_HIGH);
 }
 
 void CompileService::CompileTaskDone(CompileTask* task) {
@@ -552,9 +546,9 @@ void CompileService::CompileTaskDone(CompileTask* task) {
     num_include_processor_skipped_files_ +=
         task->stats().include_preprocess_skipped_files();
     include_processor_total_wait_time_ +=
-        task->stats().include_processor_wait_time();
+        task->stats().include_processor_wait_time;
     include_processor_total_run_time_ +=
-        task->stats().include_processor_run_time();
+        task->stats().include_processor_run_time;
 
     switch (task->state()) {
       case CompileTask::FINISHED:
@@ -619,8 +613,8 @@ void CompileService::CompileTaskDone(CompileTask* task) {
       task->Ref();
       long_tasks_.push_back(task);
       is_longest = true;
-    } else if (task->stats().handler_time() >
-               long_tasks_[0]->stats().handler_time()) {
+    } else if (task->stats().handler_time >
+               long_tasks_[0]->stats().handler_time) {
       pop_heap(long_tasks_.begin(), long_tasks_.end(),
                CompareTaskHandlerTime());
       deref_tasks.push_back(long_tasks_.back());
@@ -641,7 +635,7 @@ void CompileService::CompileTaskDone(CompileTask* task) {
     wm_->RunClosure(
         FROM_HERE,
         NewCallback(start_task, &CompileTask::Start),
-        WorkerThreadManager::PRIORITY_LOW);
+        WorkerThread::PRIORITY_LOW);
   }
   for (auto* deref_task : deref_tasks) {
     deref_task->Deref();
@@ -982,27 +976,12 @@ void CompileService::DumpStats(std::ostringstream* ss) {
         << std::endl;
   if (gstats.has_includecache_stats()) {
     const IncludeCacheStats& ic_stats = gstats.includecache_stats();
-    int original_ave = 0;
-    int filtered_ave = 0;
-    if (ic_stats.total_entries() > 0) {
-      original_ave = ic_stats.original_total_size() / ic_stats.total_entries();
-      filtered_ave = ic_stats.filtered_total_size() / ic_stats.total_entries();
-    }
-
     (*ss) << "includecache:" << std::endl;
     (*ss) << "  entries=" << ic_stats.total_entries()
-          << " cache_size=" << ic_stats.total_cache_size()
           << " hit=" << ic_stats.hit()
           << " missed=" << ic_stats.missed()
           << " updated=" << ic_stats.updated()
           << " evicted=" << ic_stats.evicted() << std::endl;
-    (*ss) << "  orig_total=" << ic_stats.original_total_size()
-          << " orig_max=" << ic_stats.original_max_size()
-          << " orig_ave=" << original_ave
-          << " filter_total=" << ic_stats.filtered_total_size()
-          << " filter_max=" << ic_stats.filtered_max_size()
-          << " filter_ave=" << filtered_ave
-          << std::endl;
   }
   if (gstats.has_depscache_stats()) {
     const DepsCacheStats& dc_stats = gstats.depscache_stats();
@@ -1356,7 +1335,7 @@ void CompileService::GetCompilerInfo(
                         NewCallback(
                             this, &CompileService::GetCompilerInfoInternal,
                             param, callback),
-                        WorkerThreadManager::PRIORITY_MED);
+                        WorkerThread::PRIORITY_MED);
 }
 
 void CompileService::GetCompilerInfoInternal(
@@ -1386,7 +1365,7 @@ void CompileService::GetCompilerInfoInternal(
               << " FillFromCompilerOutputs"
               << " state=" << param->state.get()
               << " found=" << param->state.get()->info().found()
-              << " in " << timer.GetInMilliseconds() << "[ms]";
+              << " in " << timer.GetDuration();
   }
   param->state.get()->Use(param->key.local_compiler_path, *param->flags);
   std::unique_ptr<CompilerInfoWaiterList> waiters;
@@ -1410,7 +1389,7 @@ void CompileService::GetCompilerInfoInternal(
   wm_->RunClosureInThread(FROM_HERE,
                           param->thread_id,
                           callback,
-                          WorkerThreadManager::PRIORITY_MED);
+                          WorkerThread::PRIORITY_MED);
   // param may be invalidated here.
   CHECK(waiters.get() != nullptr) << trace_id << " state=" << state.get();
   LOG(INFO) << trace_id << " callback " << waiters->size() << " waiters";
@@ -1423,7 +1402,7 @@ void CompileService::GetCompilerInfoInternal(
     wm_->RunClosureInThread(FROM_HERE,
                             wparam->thread_id,
                             wcallback,
-                            WorkerThreadManager::PRIORITY_MED);
+                            WorkerThread::PRIORITY_MED);
   }
 }
 
@@ -1687,12 +1666,14 @@ void CompileService::DumpErrorStatus(std::ostringstream* ss) {
 
   // TODO: decide the design and implement more error notice.
   GomaStats gstats;
+  int num_active_tasks = 0;
   {
     AUTOLOCK(lock, &mu_);
     {
       AUTO_SHARED_LOCK(lock, &buf_mu_);
       DumpCommonStatsUnlocked(&gstats);
     }
+    num_active_tasks = static_cast<int>(active_tasks_.size());
   }
   InfraStatus* infra_status = notice->mutable_infra_status();
   infra_status->set_ping_status_code(
@@ -1721,6 +1702,7 @@ void CompileService::DumpErrorStatus(std::ostringstream* ss) {
       gstats.request_stats().compiler_proxy().fail());
   infra_status->set_num_user_error(
       gstats.error_stats().user_error());
+  infra_status->set_num_active_tasks(num_active_tasks);
 
   if (infra_status->num_exec_compiler_proxy_failure() > 0) {
     notice->set_compile_error(ErrorNotice::COMPILER_PROXY_FAILURE);
@@ -1801,8 +1783,10 @@ void CompileService::DumpCommonStatsUnlocked(GomaStats* stats) {
           stats->mutable_include_processor_stats();
       processor->set_total(num_include_processor_total_files_);
       processor->set_skipped(num_include_processor_skipped_files_);
-      processor->set_total_wait_time(include_processor_total_wait_time_);
-      processor->set_total_run_time(include_processor_total_run_time_);
+      processor->set_total_wait_time(
+          absl::ToInt64Milliseconds(include_processor_total_wait_time_));
+      processor->set_total_run_time(
+          absl::ToInt64Milliseconds(include_processor_total_run_time_));
     }
     if (IncludeCache::IsEnabled()) {
       IncludeCache::instance()->DumpStatsToProto(
@@ -1909,9 +1893,8 @@ bool CompileService::IncrementActiveFailFallbackTasks() {
               << *reached_max_active_fail_fallback_time_;
   }
   if (reached_max_active_fail_fallback_time_.has_value() &&
-      allowed_max_active_fail_fallback_duration_.has_value() &&
       now < *reached_max_active_fail_fallback_time_ +
-            *allowed_max_active_fail_fallback_duration_) {
+      allowed_max_active_fail_fallback_duration_) {
     LOG(INFO) << "reached max_active_fail_fallback_tasks but not reached "
               << "end of allowed duration."
               << " max_active_fail_fallback_tasks="

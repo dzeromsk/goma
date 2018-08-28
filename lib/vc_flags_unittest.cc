@@ -890,7 +890,8 @@ TEST_F(VCFlagsTest, VCImplicitMacros) {
   std::unique_ptr<CompilerFlags> flags1(
       CompilerFlagsParser::MustNew(args, "C:\\src\\sfntly\\cpp\\build"));
   EXPECT_EQ(args, flags1->args());
-  EXPECT_EQ("#define __cplusplus\n", flags1->implicit_macros());
+  EXPECT_EQ("#define __cplusplus\n",
+            static_cast<const VCFlags&>(*flags1).implicit_macros());
 
   // Simple C file
   args.clear();
@@ -901,7 +902,8 @@ TEST_F(VCFlagsTest, VCImplicitMacros) {
   std::unique_ptr<CompilerFlags> flags2(
       CompilerFlagsParser::MustNew(args, "C:\\src\\sfntly\\cpp\\build"));
   EXPECT_EQ(args, flags2->args());
-  EXPECT_EQ(0UL, flags2->implicit_macros().length());
+  EXPECT_EQ(0UL,
+            static_cast<const VCFlags&>(*flags2).implicit_macros().length());
 
   // Full fledge
   args.clear();
@@ -918,7 +920,7 @@ TEST_F(VCFlagsTest, VCImplicitMacros) {
   std::unique_ptr<CompilerFlags> flags3(
       CompilerFlagsParser::MustNew(args, "C:\\src\\sfntly\\cpp\\build"));
   EXPECT_EQ(args, flags3->args());
-  string macro = flags3->implicit_macros();
+  string macro = static_cast<const VCFlags&>(*flags3).implicit_macros();
   EXPECT_TRUE(macro.find("__cplusplus") != string::npos);
   EXPECT_TRUE(macro.find("_VC_NODEFAULTLIB") != string::npos);
   EXPECT_TRUE(macro.find("__MSVC_RUNTIME_CHECKS") != string::npos);

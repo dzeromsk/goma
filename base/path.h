@@ -11,14 +11,16 @@
 
 #include "absl/strings/string_view.h"
 
+using std::string;
+
 // BEGIN GOOGLE-INTERNAL
 // path.h emulation layer
 // END GOOGLE INTERNAL
 namespace file {
 
 namespace internal {
-std::string JoinPathImpl(std::initializer_list<absl::string_view> paths);
-std::string JoinPathRespectAbsoluteImpl(
+string JoinPathImpl(std::initializer_list<absl::string_view> paths);
+string JoinPathRespectAbsoluteImpl(
     std::initializer_list<absl::string_view> paths);
 }  // namespace internal
 
@@ -41,13 +43,13 @@ absl::string_view Extension(absl::string_view path);
 // New file path API.
 // It always returns path1/path2 even when path2 is absolute.
 template<typename... Strs>
-inline std::string JoinPath(const Strs&... paths) {
+inline string JoinPath(const Strs&... paths) {
   return internal::JoinPathImpl({paths...});
 }
 
 // It would return path2, if path2 is absolute.
 template<typename... Strs>
-inline std::string JoinPathRespectAbsolute(const Strs&... paths) {
+inline string JoinPathRespectAbsolute(const Strs&... paths) {
   return internal::JoinPathRespectAbsoluteImpl({paths...});
 }
 

@@ -71,4 +71,21 @@ bool GetInt64FromJson(const Json::Value& json, const std::string& key,
   return true;
 }
 
+bool GetArrayFromJson(const Json::Value& json, const std::string& key,
+                      Json::Value* value, std::string* error_message) {
+  if (!json.isMember(key)) {
+    *error_message = "missing " + key;
+    return false;
+  }
+
+  const Json::Value& array_value = json[key];
+  if (!array_value.isArray()) {
+    *error_message = key + " is not an array";
+    return false;
+  }
+
+  *value = array_value;
+  return true;
+}
+
 } // namespace devtools_goma

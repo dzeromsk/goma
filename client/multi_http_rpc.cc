@@ -21,14 +21,13 @@ MSVC_POP_WARNING()
 #include "lockhelper.h"
 #include "scoped_fd.h"  // for FAIL
 #include "simple_timer.h"
-#include "worker_thread_manager.h"
+#include "worker_thread.h"
 
 namespace devtools_goma {
 
 MultiHttpRPC::Options::Options()
     : max_req_in_call(0),
-      req_size_threshold_in_call(0),
-      check_interval_ms(0) {
+      req_size_threshold_in_call(0) {
 }
 
 class MultiHttpRPC::MultiJob {
@@ -61,7 +60,7 @@ class MultiHttpRPC::MultiJob {
       if (master_job != nullptr) {
         http_rpc_stat_->master_trace_id = master_job->http_rpc_stat()->trace_id;
       }
-      http_rpc_stat_->pending_time = timer_.GetInIntMilliseconds();
+      http_rpc_stat_->pending_time = timer_.GetDuration();
     }
 
     void Done() {
@@ -71,7 +70,7 @@ class MultiHttpRPC::MultiJob {
       if (callback_ != nullptr) {
         wm_->RunClosureInThread(FROM_HERE,
                                 thread_id_, callback_,
-                                WorkerThreadManager::PRIORITY_MED);
+                                WorkerThread::PRIORITY_MED);
         callback_ = nullptr;
       }
       delete this;
@@ -82,7 +81,7 @@ class MultiHttpRPC::MultiJob {
       CHECK(callback_ == nullptr);
     }
     WorkerThreadManager* wm_;
-    WorkerThreadManager::ThreadId thread_id_;
+    WorkerThread::ThreadId thread_id_;
     HttpRPC::Status* http_rpc_stat_;
     const google::protobuf::Message* req_;
     int req_size_;
@@ -313,7 +312,7 @@ void MultiHttpRPC::Call(
     if (!http_rpc_->client()->shutting_down() &&
         periodic_callback_id_ == kInvalidPeriodicClosureId) {
       periodic_callback_id_ = wm_->RegisterPeriodicClosure(
-          FROM_HERE, options_.check_interval_ms,
+          FROM_HERE, options_.check_interval,
           NewPermanentCallback(this, &MultiHttpRPC::CheckPending));
     }
 
@@ -411,7 +410,7 @@ void MultiHttpRPC::CheckPending() {
         FROM_HERE,
         NewCallback(
             multi_job, &MultiHttpRPC::MultiJob::Call),
-        WorkerThreadManager::PRIORITY_MED);
+        WorkerThread::PRIORITY_MED);
   }
 
   if (periodic_callback_to_delete != kInvalidPeriodicClosureId) {
@@ -423,7 +422,7 @@ void MultiHttpRPC::CheckPending() {
         NewCallback(
             this, &MultiHttpRPC::UnregisterCheckPending,
             periodic_callback_to_delete),
-        WorkerThreadManager::PRIORITY_IMMEDIATE);
+        WorkerThread::PRIORITY_IMMEDIATE);
   }
 }
 
@@ -453,7 +452,7 @@ string MultiHttpRPC::DebugString() const {
        << " : call=" << num_call_by_req_num_ << std::endl
        << " req size threshold in call=" << options_.req_size_threshold_in_call
        << " : call=" << num_call_by_req_size_ << std::endl
-       << " check interval ms=" << options_.check_interval_ms
+       << " check interval=" << options_.check_interval
        << " : call=" << num_call_by_latency_ << std::endl;
   } else {
     ss << "multi_call disabled" << std::endl;

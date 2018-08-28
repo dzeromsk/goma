@@ -9,6 +9,7 @@
 #include "autolock_timer.h"
 #include "compiler_info_builder.h"
 #include "cxx/cxx_compiler_info.h"
+#include "fake/fake_compiler_info.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "java/java_compiler_info.h"
@@ -27,6 +28,8 @@ std::unique_ptr<CompilerInfo> CompilerInfoState::MakeCompilerInfo(
       return absl::make_unique<JavacCompilerInfo>(std::move(data));
     case CompilerInfoData::kJava:
       return absl::make_unique<JavaCompilerInfo>(std::move(data));
+    case CompilerInfoData::kFake:
+      return absl::make_unique<FakeCompilerInfo>(std::move(data));
     case CompilerInfoData::LANGUAGE_EXTENSION_NOT_SET:
       CHECK(false) << "CompilerInfoData does not have any language extension";
       return nullptr;

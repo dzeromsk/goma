@@ -9,10 +9,10 @@
 #include "absl/strings/str_cat.h"
 #include "env_flags.h"
 #include "file_dir.h"
+#include "file_helper.h"
 #include "filesystem.h"
 #include "glog/logging.h"
 #include "gtest/gtest.h"
-#include "ioutil.h"
 #include "path.h"
 #include "path_resolver.h"
 #ifdef _WIN32
@@ -97,7 +97,7 @@ TEST_F(MyPathTest, CheckTempDiretoryNotDirectory) {
       << tmpdir;
   const string& tmpdir_file =
       file::JoinPath(tmpdir, "tmpdir_is_not_dir");
-  devtools_goma::WriteStringToFileOrDie("", tmpdir_file, 0700);
+  ASSERT_TRUE(devtools_goma::WriteStringToFile("", tmpdir_file));
 #ifndef _WIN32
 // TODO: enable CheckTempDiretoryNotDirectory on win.
 // EXPECT_DEATH doesn't work well on windows?

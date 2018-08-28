@@ -34,7 +34,6 @@
 #endif  // _WIN32
 using google::GetExistingTempDirectories;
 using std::string;
-using absl::StrCat;
 
 namespace devtools_goma {
 

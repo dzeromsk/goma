@@ -4,6 +4,8 @@
 
 #include "goma_blob.h"
 
+#include <stdio.h>
+
 #include "absl/memory/memory.h"
 #include "basictypes.h"
 #include "compiler_specific.h"
@@ -87,10 +89,53 @@ class FileServiceBlobUploader : public BlobClient::Uploader {
     return FileServiceClient::IsValidFileBlob(input->content());
   }
 
+  bool Store() const override {
+    if (!blob_) {
+      return false;
+    }
+    if (!FileServiceClient::IsValidFileBlob(*blob_)) {
+      return false;
+    }
+    return file_service_->StoreFileBlob(*blob_);
+  }
+
  private:
   std::unique_ptr<FileServiceHttpClient> file_service_;
   std::unique_ptr<FileBlob> blob_;
   bool need_blob_ = false;
+};
+
+class FileServiceBlobDownloader : public BlobClient::Downloader {
+ public:
+  explicit FileServiceBlobDownloader(
+      std::unique_ptr<FileServiceHttpClient> file_service)
+      : file_service_(std::move(file_service)) {}
+  ~FileServiceBlobDownloader() override = default;
+
+  bool Download(const ExecResult_Output& output,
+                const string& filename,
+                int mode) override {
+    remove(filename.c_str());
+    std::unique_ptr<FileServiceClient::Output> file_output(
+        FileServiceClient::FileOutput(filename, mode));
+    return file_service_->OutputFileBlob(output.blob(), file_output.get());
+  }
+
+  bool DownloadInBuffer(const ExecResult_Output& output,
+                        string* buffer) override {
+    std::unique_ptr<FileServiceClient::Output> str_output(
+        FileServiceClient::StringOutput(output.filename(), buffer));
+    return file_service_->OutputFileBlob(output.blob(), str_output.get());
+  }
+
+  int num_rpc() const override { return file_service_->num_rpc(); }
+
+  const HttpClient::Status& http_status() const override {
+    return file_service_->http_rpc_status();
+  }
+
+ private:
+  std::unique_ptr<FileServiceHttpClient> file_service_;
 };
 
 std::unique_ptr<BlobClient::Uploader>
@@ -103,6 +148,14 @@ FileServiceBlobClient::NewUploader(
       file_service_->WithRequesterInfoAndTraceId(
           requester_info,
           std::move(trace_id)));
+}
+
+std::unique_ptr<BlobClient::Downloader> FileServiceBlobClient::NewDownloader(
+    const RequesterInfo& requester_info,
+    string trace_id) {
+  return absl::make_unique<FileServiceBlobDownloader>(
+      file_service_->WithRequesterInfoAndTraceId(requester_info,
+                                                 std::move(trace_id)));
 }
 
 }  // namespace devtools_goma

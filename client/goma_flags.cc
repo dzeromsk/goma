@@ -51,22 +51,6 @@ static int NumDefaultProxyHttpThreads() {
   return 4;
 }
 
-// The max size of include cache.
-// On Win or Mac, this will improve compile performance.
-// On Linux, IncludeCache itself does not improve compile performance so much,
-// however, IncludeCache is required to enable DepsCache.
-// As of 2017, 32MB is not enough to cache all include headers if clobber
-// build happens. So, in 64bit system, use 64MB by default.
-static int MaxIncludeCacheSize() {
-#if defined(__LP64__) || defined(_WIN64)
-  int64_t memory_size = devtools_goma::GetSystemTotalMemory();
-  int64_t gb = memory_size / 1024 / 1024 / 1024;
-  if (gb >= 15)
-    return 64;
-#endif
-  return 32;
-}
-
 static int MaxSubProcsLow() {
   int cpus = devtools_goma::GetNumCPUs();
   if (cpus > 0)
@@ -366,9 +350,13 @@ GOMA_DEFINE_string(COMPILER_PROXY_TRUSTED_IPS,
                    "considered as trusted.");
 GOMA_DEFINE_bool(ENABLE_GCH_HACK, false,
                  "Enable *.gch hack");
-GOMA_DEFINE_AUTOCONF_int32(MAX_INCLUDE_CACHE_SIZE,
-                           MaxIncludeCacheSize,
-                           "The size of include cache in MB.");
+GOMA_DEFINE_int32(MAX_INCLUDE_CACHE_SIZE, 0, "(DEPRECATED)");
+// As of 2018-08-21, we need keep more than 35000 header files to build
+// chrome. Some people builds chrome in several different directories.
+// So, 35000x4 is chosen.
+GOMA_DEFINE_int32(MAX_INCLUDE_CACHE_ENTRIES,
+                  140000,
+                  "The max count of include cache.");
 GOMA_DEFINE_int32(MAX_LIST_DIR_CACHE_ENTRY_NUM, 32768,
                   "The entry limit in list dir cache.");
 GOMA_DEFINE_string(CONTENT_TYPE_FOR_PROTOBUF, "binary/x-protocol-buffer",
@@ -606,11 +594,11 @@ GOMA_DEFINE_int32(MAX_ACTIVE_FAIL_FALLBACK_TASKS, -1,
                   "failure gets larger than this value and go over the allowed "
                   "duration set by ALLOWED_MAX_ACTIVE_FAIL_FALLBACK_DURATION. "
                   "This feature is disabled if negative value is set.");
-GOMA_DEFINE_int32(ALLOWED_MAX_ACTIVE_FAIL_FALLBACK_DURATION, -1,
+GOMA_DEFINE_int32(ALLOWED_MAX_ACTIVE_FAIL_FALLBACK_DURATION, 0,
                   "Compiler_proxy will make compile error if the number of "
                   "local fallbacks by remote compile failure gets larger than "
                   "MAX_ACTIVE_FAIL_FALLBACK_TASKS and reaches this duration "
-                  "(in seconds). value <= 0 means duration is set to 0.");
+                  "(in seconds). This flag must not be negative.");
 
 GOMA_DEFINE_int32(MAX_COMPILER_DISABLED_TASKS, -1,
                   "Compiler_proxy will enter burst mode if the number of "
@@ -662,11 +650,11 @@ GOMA_DEFINE_string(HTTP_SOCKET_READ_TIMEOUT_SECS, "1.0",
                    "Time(sec) for once the socket receives response header.");
 
 GOMA_DEFINE_int32(HTTP_RPC_MIN_RETRY_BACKOFF, 500,
-                  "Minimum Time(millesec) for retry backoff for HttpRPC. "
+                  "Minimum Time(millisec) for retry backoff for HttpRPC. "
                   "Backoff time is randomized by subtracing 40%, so actual "
                   "minimum backoff time would be 60% of this value.");
 GOMA_DEFINE_int32(HTTP_RPC_MAX_RETRY_BACKOFF, 5000,
-                  "Minimum Time(millesec) for retry backoff for HttpRPC.");
+                  "Maximum Time(millisec) for retry backoff for HttpRPC.");
 
 GOMA_DEFINE_int32(RPC_TRACE_PERIOD, 0,
                   "How often to request RPC traces on the server. Traces will "

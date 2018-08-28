@@ -21,9 +21,12 @@ import gzip
 import hashlib
 import json
 import os
+import random
 import re
 import shutil
 import socket
+import string
+import StringIO
 import subprocess
 import sys
 import tarfile
@@ -46,7 +49,6 @@ _DEFAULT_NO_SSL_ENV = [
     ]
 _MAX_COOLDOWN_WAIT = 5  # seconds to wait for compiler_proxy to shutdown.
 _COOLDOWN_SLEEP = 1  # seconds to each wait for compiler_proxy to shutdown.
-_CURL_RETRY = 5  # times to retry for transient failures on curl.
 _CRASH_DUMP_DIR = 'goma_crash'
 _CACHE_DIR = 'goma_cache'
 _PRODUCT_NAME = 'Goma'  # product name used for crash report.
@@ -459,21 +461,18 @@ class GomaDriver(object):
     self._backend = backend
     self._latest_package_dir = 'latest'
     self._action_mappings = {
-        'pull': self._Pull,
-        'start': self._StartCompilerProxy,
-        'status': self._GetStatus,
-        'stop': self._ShutdownCompilerProxy,
-        'latest_version': self._PrintLatestVersion,
-        'update': self._Update,
-        'restart': self._RestartCompilerProxy,
+        'audit': self._Audit,
         'ensure_start': self._EnsureStartCompilerProxy,
         'ensure_stop': self._EnsureStopCompilerProxy,
-        'fetch': self._Fetch,
-        'stat': self._PrintStatistics,
         'histogram': self._PrintHistogram,
         'jsonstatus': self._PrintJsonStatus,
         'report': self._Report,
-        'audit': self._Audit,
+        'restart': self._RestartCompilerProxy,
+        'showflags': self._PrintFlags,
+        'start': self._StartCompilerProxy,
+        'stat': self._PrintStatistics,
+        'status': self._GetStatus,
+        'stop': self._ShutdownCompilerProxy,
     }
     self._version = 0
     self._manifest = {}
@@ -855,6 +854,10 @@ class GomaDriver(object):
   def _PrintHistogram(self):
     print self._env.ControlCompilerProxy('/histogramz')['message']
 
+  def _PrintFlags(self):
+    flagz = self._env.ControlCompilerProxy('/flagz', check_running=False)
+    print json.dumps(_ParseFlagz(flagz['message'].strip()))
+
   def _PrintJsonStatus(self):
     status = self._GetJsonStatus()
     if len(self._args) > 1:
@@ -1039,20 +1042,16 @@ class GomaDriver(object):
     """Print usage."""
     program_name = self._env.GetGomaCtlScriptName()
     print 'Usage: %s <subcommand>, available subcommands are:' % program_name
-    print '  start                 start compiler proxy'
-    print '  stop                  stop compiler proxy'
-    print '  restart               restart compiler proxy'
+    print '  audit                 audit goma client.'
     print '  ensure_start          start compiler proxy if it is not running'
-    print '  pull                  just download the latest goma pkg for update'
-    print '  update                update or install goma package'
-    print '  status                get compiler proxy status'
-    print '  stat                  show statistics'
     print '  histogram             show histogram'
     print '  jsonstatus [outfile]  show status report in JSON'
-    print '  latest_version        show the available latest release version'
-    print '  fetch <platform> [outfile]  download the latest goma package'
     print '  report                create a report file.'
-    print '  audit                 audit goma client.'
+    print '  restart               restart compiler proxy'
+    print '  start                 start compiler proxy'
+    print '  stat                  show statistics'
+    print '  status                get compiler proxy status'
+    print '  stop                  stop compiler proxy'
 
   def _DefaultAction(self):
     if self._args and not self._args[0] in ('-h', '--help', 'help'):
@@ -1078,7 +1077,6 @@ class GomaEnv(object):
   _GOMACC = ''
   _COMPILER_PROXY = ''
   _GOMA_FETCH = ''
-  _CURL = ''
   _COMPILER_PROXY_IDENTIFIER_ENV_NAME = ''
   PLATFORM_CANDIDATES = []
   _DEFAULT_ENV = []
@@ -1092,7 +1090,6 @@ class GomaEnv(object):
     self._goma_fetch = None
     if os.path.exists(os.path.join(self._dir, self._GOMA_FETCH)):
       self._goma_fetch = os.path.join(self._dir, self._GOMA_FETCH)
-    self._curl_path = None
     self._is_daemon_mode = False
     self._gomacc_binary = os.path.join(self._dir, self._GOMACC)
     self._manifest = self.ReadManifest(self._dir)
@@ -1294,30 +1291,15 @@ class GomaEnv(object):
       msg = repr(ex)
     return {'status': False, 'message': msg, 'url': url_prefix, 'pid': pids}
 
-  def _FindCurlPath(self):
-    """Identify depot_tool path and use the curl there."""
-    if self._curl_path:
-      return self._curl_path
-
-    self._curl_path = _FindCommandInPath(
-        self._CURL, find_subdir_rule=self._FindCurlUnderPath)
-    if self._curl_path:
-      return self._curl_path
-    raise Error('Unable to find curl')
-
   def HttpDownload(self, source_url,
                    rewrite_url=None, headers=None, destination_file=None):
     """Download data from the given URL to the file.
 
-    If self._goma_fetch defined, prefer goma_fetch to curl.
-    Using curl instead of urllib2.urlopen because of python limitations.  For
-    the minimum python version we targeted at (2.6), urllib2 does not validate
-    certificates in SSL connection.
-    TODO: kill curl supports.
+    If self._goma_fetch defined, prefer goma_fetch to urllib2.
 
     Args:
       source_url: URL to retrieve data.
-      rewrite_url: rewrite source_url for curl.
+      rewrite_url: rewrite source_url for urllib2.
       headers: a dictionary to be used in the HTTP header.
       destination_file: file name to store data, if specified None, return
                         contents as string.
@@ -1352,25 +1334,26 @@ class GomaEnv(object):
     if rewrite_url:
       source_url = rewrite_url(source_url)
 
-    curl_command = [self._FindCurlPath(), '--silent',
-                    '--retry', str(_CURL_RETRY)]
+    if sys.hexversion < 0x2070900:
+      raise Error('Please use python version >= 2.7.9')
+
+    http_handler = urllib2.BaseHandler()
     if self._https_proxy:
-      curl_command.extend(['--proxy', self._https_proxy])
+      http_handler = urllib2.ProxyHandler({'https': self._https_proxy})
+    http_opener = urllib2.build_opener(http_handler)
+
+    http_req = urllib2.Request(source_url)
     if headers:
       for name, value in headers.items():
-        curl_command.extend(['-H', '%s: %s' % (name, value)])
+        http_req.add_header(name, value)
 
+    r = http_opener.open(http_req)
     if destination_file:
-      destination_file = os.path.join(self._dir, destination_file)
-      retcode = subprocess.call(curl_command + ['-o', destination_file,
-                                                source_url])
-      if retcode:
-        raise Error('failed to fetch %s: %d' % (source_url, retcode))
+      with open(os.path.join(self._dir, destination_file), 'w') as f:
+        shutil.copyfileobj(r, f)
       return
-
-    return PopenWithCheck(curl_command + [source_url],
-                          stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE).communicate()[0]
+    else:
+      return r.read()
 
   def GetGomaTmpDir(self):
     """Get a directory path for goma.
@@ -1540,7 +1523,7 @@ class GomaEnv(object):
       os.environ['GOMA_PROXY_PORT'] = proxy_env['port']
     if (os.environ.has_key('GOMA_PROXY_HOST') and
         os.environ.has_key('GOMA_PROXY_PORT')):
-      # Set HTTPS proxy for curl.
+      # Set HTTPS proxy for urllib2.
       self._https_proxy = '%s:%s' % (os.environ['GOMA_PROXY_HOST'],
                                      os.environ['GOMA_PROXY_PORT'])
 
@@ -1833,18 +1816,6 @@ class GomaEnv(object):
     raise NotImplementedError(
         'EnsureDirectoryOwnedByUser should be implemented.')
 
-  def _FindCurlUnderPath(self, directory, command):
-    """Return curl full path if exist under prefix.
-
-    Args:
-      directory: a string of directory name to find curl.
-      command: a string of command name of curl.
-
-    Returns:
-      a string of a curl full path if exist.  Otherwise, None.
-    """
-    raise NotImplementedError('_FindCurlUnderPath should be implemented.')
-
   def _WaitWithTimeout(self, proc, timeout_sec):
     """Wait proc finish until timeout_sec.
 
@@ -1879,7 +1850,6 @@ class GomaEnvWin(GomaEnv):
   _GOMACC = 'gomacc.exe'
   _COMPILER_PROXY = 'compiler_proxy.exe'
   _GOMA_FETCH = 'goma_fetch.exe'
-  _CURL = 'curl.exe'
   # TODO: could be in GomaEnv if env name is the same between
   # posix and win.
   _COMPILER_PROXY_IDENTIFIER_ENV_NAME = 'GOMA_COMPILER_PROXY_SOCKET_NAME'
@@ -2009,15 +1979,6 @@ class GomaEnvWin(GomaEnv):
     # TODO: implement for Win.
     return True
 
-  def _FindCurlUnderPath(self, directory, curl):
-    if not self._DEPOT_TOOLS_DIR_PATTERN.match(directory.lower()):
-      return None
-
-    for root, _, files in os.walk(directory):
-      if curl in files:
-        return os.path.join(root, curl)
-    return None
-
   def _WaitWithTimeout(self, proc, timeout_sec):
     import win32api
     import win32con
@@ -2044,7 +2005,6 @@ class GomaEnvPosix(GomaEnv):
   _GOMACC = 'gomacc'
   _COMPILER_PROXY = 'compiler_proxy'
   _GOMA_FETCH = 'goma_fetch'
-  _CURL = 'curl'
   _COMPILER_PROXY_IDENTIFIER_ENV_NAME = 'GOMA_COMPILER_PROXY_SOCKET_NAME'
   _DEFAULT_ENV = [
       # goma_ctl.py runs compiler_proxy in daemon mode by default.
@@ -2281,9 +2241,6 @@ class GomaEnvPosix(GomaEnv):
       sys.stderr.write('chmod failure: %s\n' % err)
       return False
     return True
-
-  def _FindCurlUnderPath(self, directory, curl):
-    return os.path.join(directory, curl)
 
   def _WaitWithTimeout(self, proc, timeout_sec):
     import signal

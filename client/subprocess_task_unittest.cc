@@ -28,7 +28,7 @@
 #include "subprocess_controller_client.h"
 #include "unittest_util.h"
 #include "util.h"
-#include "worker_thread_manager.h"
+#include "worker_thread.h"
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
@@ -120,7 +120,7 @@ class SubProcessTaskTest : public ::testing::Test {
     wm_->RunClosure(
         FROM_HERE,
         NewCallback(this, &SubProcessTaskTest::TestReadCommandOutput, &done),
-        WorkerThreadManager::PRIORITY_LOW);
+        WorkerThread::PRIORITY_LOW);
     WaitDone(&done);
   }
 
@@ -169,7 +169,7 @@ class SubProcessTaskTest : public ::testing::Test {
     EXPECT_NE(0, c.status_);
     wm_->RunClosure(FROM_HERE,
                     NewCallback(this, &SubProcessTaskTest::TestSubProcess, &c),
-                    WorkerThreadManager::PRIORITY_LOW);
+                    WorkerThread::PRIORITY_LOW);
     WaitDone(&c.done_);
     EXPECT_EQ(0, c.status_);
   }
@@ -194,7 +194,7 @@ class SubProcessTaskTest : public ::testing::Test {
     EXPECT_NE(0, c.status_);
     wm_->RunClosure(FROM_HERE,
                     NewCallback(this, &SubProcessTaskTest::TestSubProcess, &c),
-                    WorkerThreadManager::PRIORITY_LOW);
+                    WorkerThread::PRIORITY_LOW);
     WaitDone(&c.done_);
     EXPECT_EQ(1, c.status_);
   }
@@ -212,7 +212,7 @@ class SubProcessTaskTest : public ::testing::Test {
     EXPECT_NE(0, c.status_);
     wm_->RunClosure(FROM_HERE,
                     NewCallback(this, &SubProcessTaskTest::TestSubProcess, &c),
-                    WorkerThreadManager::PRIORITY_LOW);
+                    WorkerThread::PRIORITY_LOW);
 
     ASSERT_TRUE(c.started_.WaitForNotificationWithTimeout(absl::Seconds(10)));
     while (SubProcessState::PENDING == c.s_->state()) {
@@ -225,7 +225,7 @@ class SubProcessTaskTest : public ::testing::Test {
     wm_->RunClosure(
         FROM_HERE,
         NewCallback(this, &SubProcessTaskTest::TestSubProcessKill, &c),
-        WorkerThreadManager::PRIORITY_IMMEDIATE);
+        WorkerThread::PRIORITY_IMMEDIATE);
     WaitDone(&c.done_);
     EXPECT_EQ(1, c.status_);
   }
@@ -286,7 +286,7 @@ class SubProcessTaskTest : public ::testing::Test {
     EXPECT_NE(0, c.status_);
     wm_->RunClosure(FROM_HERE,
                     NewCallback(this, &SubProcessTaskTest::TestSubProcess, &c),
-                    WorkerThreadManager::PRIORITY_LOW);
+                    WorkerThread::PRIORITY_LOW);
 
     ASSERT_TRUE(c.started_.WaitForNotificationWithTimeout(absl::Seconds(10)));
     while (SubProcessState::PENDING == c.s_->state()) {
@@ -299,7 +299,7 @@ class SubProcessTaskTest : public ::testing::Test {
     wm_->RunClosure(
         FROM_HERE,
         NewCallback(this, &SubProcessTaskTest::TestSubProcessKill, &c),
-        WorkerThreadManager::PRIORITY_IMMEDIATE);
+        WorkerThread::PRIORITY_IMMEDIATE);
     WaitDone(&c.done_);
 
     EXPECT_EQ(1, c.status_);

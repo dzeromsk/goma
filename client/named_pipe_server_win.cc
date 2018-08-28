@@ -12,7 +12,7 @@
 #include "config_win.h"
 #include "counterz.h"
 #include "glog/logging.h"
-#include "worker_thread_manager.h"
+#include "worker_thread.h"
 
 namespace devtools_goma {
 
@@ -241,7 +241,7 @@ class NamedPipeServer::Conn {
     err_ = err;
     server_->Closed(this);
     OneshotClosure* callback = nullptr;
-    WorkerThreadManager::ThreadId thread_id;
+    WorkerThread::ThreadId thread_id;
     {
       AUTOLOCK(lock, &mu_);
       callback = closed_callback_.release();
@@ -253,7 +253,7 @@ class NamedPipeServer::Conn {
           FROM_HERE,
           thread_id,
           NewCallback(static_cast<Closure*>(callback), &Closure::Run),
-          WorkerThreadManager::PRIORITY_HIGH);
+          WorkerThread::PRIORITY_HIGH);
     }
   }
 
@@ -303,14 +303,14 @@ class NamedPipeServer::Conn {
   OVERLAPPED overlapped_;  // should be initial member at offset 0.
   NamedPipeServer* server_;
   ScopedNamedPipe pipe_;
-  WorkerThreadManager::ThreadId thread_id_;
+  WorkerThread::ThreadId thread_id_;
   DWORD err_;
   std::vector<char> buf_;
   absl::string_view request_message_;
   size_t written_;
 
   mutable Lock mu_;
-  WorkerThreadManager::ThreadId closed_thread_id_ GUARDED_BY(mu_);
+  WorkerThread::ThreadId closed_thread_id_ GUARDED_BY(mu_);
   std::unique_ptr<OneshotClosure> closed_callback_ GUARDED_BY(mu_);
 
   std::unique_ptr<Req> req_;
@@ -648,7 +648,7 @@ void NamedPipeServer::ReadDone(Conn* conn) {
                   NewCallback(handler_,
                               &NamedPipeServer::Handler::HandleIncoming,
                               conn->req()),
-                  WorkerThreadManager::PRIORITY_HIGH);
+                  WorkerThread::PRIORITY_HIGH);
 }
 
 void NamedPipeServer::ProcessWatchClosed() {

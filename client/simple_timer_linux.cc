@@ -15,7 +15,7 @@ void SimpleTimer::Start() {
   clock_gettime(CLOCK_MONOTONIC, &start_time_);
 }
 
-long long SimpleTimer::GetInNanoseconds() const {
+int64_t SimpleTimer::GetInNanoSeconds() const {
   struct timespec end_time;
   clock_gettime(CLOCK_MONOTONIC, &end_time);
 
@@ -33,7 +33,7 @@ long long SimpleTimer::GetInNanoseconds() const {
     return 0;
   }
 
-  return static_cast<long long>(end_time_int - start_time_int);
+  return static_cast<int64_t>(end_time_int - start_time_int);
 }
 
 }  // namespace devtools_goma

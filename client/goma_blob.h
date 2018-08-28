@@ -13,6 +13,7 @@
 namespace devtools_goma {
 
 class ExecReq_Input;
+class ExecResult_Output;
 class FileBlob;
 class FileServiceClient;
 class FileServiceHttpClient;
@@ -48,11 +49,43 @@ class BlobClient {
     // Fills in input.
     virtual bool GetInput(ExecReq_Input* input) const = 0;
 
+    // Stores remaining file blob and confirms file blob is uploaded
+    // to the server after Uploads.
+    // It is used to send file contents without Exec request.
+    virtual bool Store() const = 0;
+
    protected:
     explicit Uploader(std::string filename);
 
     const std::string filename_;
     std::string hash_key_;
+  };
+  // Downloader downloads file blob from server to client.
+  class Downloader {
+   public:
+    virtual ~Downloader() = default;
+
+    Downloader(Downloader&&) = delete;
+    Downloader(const Downloader&) = delete;
+    Downloader& operator=(const Downloader&) = delete;
+    Downloader& operator=(Downloader&&) = delete;
+
+    // Downloads file content specified by output
+    // into filename with mode.
+    virtual bool Download(const ExecResult_Output& output,
+                          const std::string& filename,
+                          int mode) = 0;
+
+    // Downloads file contents specified by output
+    // into buffer.
+    virtual bool DownloadInBuffer(const ExecResult_Output& output,
+                                  std::string* buffer) = 0;
+
+    virtual int num_rpc() const = 0;
+    virtual const HttpClient::Status& http_status() const = 0;
+
+   protected:
+    Downloader() = default;
   };
 
   virtual ~BlobClient() = default;
@@ -67,7 +100,11 @@ class BlobClient {
       std::string filename,
       const RequesterInfo& requester_info,
       std::string trace_id) = 0;
-  // TODO: Downloader
+
+  // NewDownloader creates new downloader.
+  virtual std::unique_ptr<Downloader> NewDownloader(
+      const RequesterInfo& requester_info,
+      std::string trace_id) = 0;
 
  protected:
   BlobClient() = default;
@@ -89,6 +126,10 @@ class FileServiceBlobClient : public BlobClient {
 
   std::unique_ptr<BlobClient::Uploader> NewUploader(
       std::string filename,
+      const RequesterInfo& requester_info,
+      std::string trace_id) override;
+
+  std::unique_ptr<BlobClient::Downloader> NewDownloader(
       const RequesterInfo& requester_info,
       std::string trace_id) override;
 

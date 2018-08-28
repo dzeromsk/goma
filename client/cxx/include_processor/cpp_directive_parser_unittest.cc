@@ -17,10 +17,12 @@ SharedCppDirectives Parse(absl::string_view text) {
   std::unique_ptr<Content> content =
       Content::CreateFromBuffer(text.data(), text.size());
 
-  SharedCppDirectives directives(
-      CppDirectiveParser::ParseFromContent(*content, "<string>"));
-  EXPECT_TRUE(directives != nullptr);
-  return directives;
+  CppDirectiveParser parser;
+  CppDirectiveList directives;
+  EXPECT_TRUE(parser.Parse(*content, "<string>", &directives));
+  EXPECT_FALSE(parser.has_unknown_directives());
+
+  return std::make_shared<CppDirectiveList>(std::move(directives));
 }
 
 // Parse single directive, and returns it.
@@ -546,6 +548,43 @@ TEST_F(CppDirectiveParserTest, ErrorWarning) {
   ASSERT_EQ(2U, p->size());
   EXPECT_EQ(CppDirectiveType::DIRECTIVE_DEFINE, (*p)[0]->type());
   EXPECT_EQ(CppDirectiveType::DIRECTIVE_DEFINE, (*p)[1]->type());
+}
+
+TEST_F(CppDirectiveParserTest, Ignore) {
+  // #line and '#' are also removed after parsing.
+  auto p = Parse(
+      "#define A\n"
+      "#line 123\n"
+      "#\n"
+      "#define B\n");
+
+  ASSERT_EQ(2U, p->size());
+  EXPECT_EQ(CppDirectiveType::DIRECTIVE_DEFINE, (*p)[0]->type());
+  EXPECT_EQ(CppDirectiveType::DIRECTIVE_DEFINE, (*p)[1]->type());
+}
+
+TEST_F(CppDirectiveParserTest, EvilHashSignInReplacement) {
+  // replacement should be [X][ ][#][ ][Y]
+  auto p = Parse(
+      "#define F X \\\n"
+      "# \\\n"
+      "Y");
+
+  ASSERT_EQ(1U, p->size());
+  ASSERT_EQ(CppDirectiveType::DIRECTIVE_DEFINE, (*p)[0]->type());
+
+  const CppDirectiveDefine& d = AsCppDirectiveDefine(*(*p)[0]);
+  ASSERT_EQ(5U, d.replacement().size());
+  EXPECT_EQ(CppToken::SHARP, d.replacement()[2].type);
+}
+
+TEST_F(CppDirectiveParserTest, ParseUnknownDirective) {
+  std::unique_ptr<Content> content = Content::CreateFromString("#foo bar\n");
+
+  CppDirectiveParser parser;
+  CppDirectiveList directives;
+  EXPECT_TRUE(parser.Parse(*content, "<string>", &directives));
+  EXPECT_TRUE(parser.has_unknown_directives());
 }
 
 }  // namespace devtools_goma

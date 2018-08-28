@@ -468,8 +468,7 @@ SpawnerPosix::ProcessStatus SpawnerPosix::Wait(WaitPolicy wait_policy) {
   }
   LOG_IF(INFO, sent_sig_ != 0)
       << "signal=" << sent_sig_ << " sent to monitor_pid=" << monitor_pid_
-      << " prog_pid=" << prog_pid_
-       << " " << sig_timer_.GetInMilliseconds() << "msec ago,"
+      << " prog_pid=" << prog_pid_ << " " << sig_timer_.GetDuration() << " ago,"
       << " terminated by signal=" << signal_ << " from " << sig_source
       << " exit=" << status_;
   monitor_pid_ = Spawner::kInvalidPid;

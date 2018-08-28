@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "basictypes.h"
 #include "http_rpc.h"
 #include "lockhelper.h"
@@ -35,7 +36,7 @@ class WorkerThreadManager;
 // is realized by ExecService.MultiExec stub on top of HttpRPC.
 // Client can use Exec() as single Exec API call, but MultiExecClient packs
 // at most max_req_in_call into single MultiExec call to path over http_rpc.
-// It also checks pending requests in each check_interval_ms, and if any
+// It also checks pending requests in each check_interval, and if any
 // pending Exec requests, it issues MultiExec call.
 class MultiHttpRPC {
  public:
@@ -43,7 +44,7 @@ class MultiHttpRPC {
     Options();
     size_t max_req_in_call;
     size_t req_size_threshold_in_call;
-    int check_interval_ms;
+    absl::Duration check_interval;
   };
 
   virtual ~MultiHttpRPC();

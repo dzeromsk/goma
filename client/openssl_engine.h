@@ -47,7 +47,7 @@ class OpenSSLContext {
   // |invalidate_closure| MUST NOT call any OpenSSLContext methods
   // to avoid dead lock.
   void Init(const string& hostname,
-            int crl_max_valid_duration,
+            absl::optional<absl::Duration> crl_max_valid_duration,
             OneshotClosure* invalidate_closure);
   // Set proxy to be used to download CRLs.
   void SetProxy(const string& proxy_host, const int proxy_port);
@@ -106,7 +106,7 @@ class OpenSSLContext {
   bool is_crl_ready_;
   string last_error_;
   absl::optional<absl::Time> last_error_time_;
-  int crl_max_valid_duration_;
+  absl::optional<absl::Duration> crl_max_valid_duration_;
 
   // ref_cnt_ represents the number of OpenSSLEngine using the class instance.
   // It is increased by NewSSL, and decreased by DeleteSSL.
@@ -127,6 +127,7 @@ class OpenSSLContext {
 class OpenSSLEngine : public TLSEngine {
  public:
   bool IsIOPending() const override;
+  bool IsReady() const override;
 
   int GetDataToSendTransport(string* data) override;
   size_t GetBufSizeFromTransport() override;
@@ -199,8 +200,8 @@ class OpenSSLEngineCache : public TLSEngineFactory {
     proxy_host_ = proxy_host;
     proxy_port_ = proxy_port;
   }
-  void SetCRLMaxValidDurationInSeconds(int duration) {
-    crl_max_valid_duration_ = duration;
+  void SetCRLMaxValidDuration(absl::optional<absl::Duration> duration) {
+    crl_max_valid_duration_ = std::move(duration);
   }
 
  private:
@@ -217,7 +218,7 @@ class OpenSSLEngineCache : public TLSEngineFactory {
   string hostname_;
   string proxy_host_;
   int proxy_port_;
-  int crl_max_valid_duration_;
+  absl::optional<absl::Duration> crl_max_valid_duration_;
 
   DISALLOW_COPY_AND_ASSIGN(OpenSSLEngineCache);
 };

@@ -17,6 +17,7 @@ import (
 
 const GnuDocumentUrl = "https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html"
 const ClangDocumentUrl = "https://clang.llvm.org/docs/DiagnosticsReference.html"
+const ClangRepositoryUrl = "https://raw.githubusercontent.com/llvm-project/llvm-project-20170507/master/clang/include/clang/Basic/DiagnosticGroups.td"
 
 // Already known warnings. These warnings will be merged.
 var knownWarnings = []string{
@@ -566,12 +567,41 @@ func parseClangDocument() ([]string, error) {
 	return warnings, nil
 }
 
+// parseClangRepository loads flag config file from llvm repository.
+func parseClangRepository() ([]string, error) {
+	body, err := loadFromWeb(ClangRepositoryUrl)
+	if err != nil {
+		return nil, err
+	}
+	var warnings []string
+	// clang warning flags config has flag config like belows.
+	// * def ObjCStringComparison : DiagGroup<"objc-string-compare">;
+	// * def : DiagGroup<"switch-default">;
+	// * def Shadow : DiagGroup<"shadow", [ShadowFieldInConstructorModified,
+	codeRE := regexp.MustCompile(`def.* : DiagGroup<"(.*)"`)
+	for _, matched := range codeRE.FindAllStringSubmatch(body, -1) {
+		s := matched[1]
+		s = removeAfterEqual(s)
+		warnings = append(warnings, strings.TrimSpace(s))
+	}
+
+	return warnings, nil
+}
+
 func main() {
 	clangWarnings, err := parseClangDocument()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to read clang documents: %v\n", err)
 		os.Exit(1)
 	}
+
+	clangWarningsInRepository, err := parseClangRepository()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to read clang reposotiry: %v\n", err)
+		os.Exit(1)
+	}
+
+	clangWarnings = append(clangWarnings, clangWarningsInRepository...)
 
 	gnuWarnings, err := parseGnuDocument()
 	if err != nil {

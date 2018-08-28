@@ -37,7 +37,11 @@ using std::string;
 
 namespace devtools_goma {
 
-static void SetError(int err, const string error_message,
+namespace {
+
+constexpr absl::Duration kReadSelectTimeout = absl::Seconds(20);
+
+void SetError(int err, const string error_message,
                      GomaIPC::Status* status) {
   VLOG(1) << error_message;
   if (status->err == OK)
@@ -47,6 +51,8 @@ static void SetError(int err, const string error_message,
   else
     status->error_message += "\n" + error_message;
 }
+
+}  // namespace
 
 GomaIPC::GomaIPC(std::unique_ptr<ChanFactory> chan_factory)
     : chan_factory_(std::move(chan_factory)) {
@@ -99,11 +105,11 @@ std::unique_ptr<IOChannel> GomaIPC::CallAsync(
   if (err < 0) {
     std::ostringstream ss;
     ss << "Failed to send err=" << err
-       << " duration=" << req_send_timer.GetInMilliseconds() << "ms";
+       << " duration=" << req_send_timer.GetDuration();
     SetError(err, ss.str(), status);
     return nullptr;
   }
-  status->req_send_time = req_send_timer.GetInSeconds();
+  status->req_send_time = req_send_timer.GetDuration();
   return chan;
 }
 
@@ -128,7 +134,7 @@ int GomaIPC::Wait(std::unique_ptr<IOChannel> chan,
   if (err < 0) {
     std::ostringstream ss;
     ss << "Failed to read response err=" << err
-       << " duration=" << resp_recv_timer.GetInMilliseconds() << "ms";
+       << " duration=" << resp_recv_timer.GetDuration();
     SetError(err, ss.str(), status);
     return err;
   }
@@ -146,7 +152,7 @@ int GomaIPC::Wait(std::unique_ptr<IOChannel> chan,
     return FAIL;
   }
 
-  status->resp_recv_time = resp_recv_timer.GetInSeconds();
+  status->resp_recv_time = resp_recv_timer.GetDuration();
   status->resp_size = body.size();
 
   if (!resp->ParseFromString(body)) {
@@ -192,8 +198,7 @@ int GomaIPC::SendRequest(const IOChannel* chan,
       << "Content-Type: binary/x-protocol-buffer\r\n"
       << "Content-Length: " << s.size() << "\r\n";
   http_send_message << "\r\n" << s;
-  int err = chan->WriteString(http_send_message.str(),
-                              status->initial_timeout_sec);
+  int err = chan->WriteString(http_send_message.str(), status->initial_timeout);
   if (err < 0) {
     LOG(ERROR) << "GOMA: sending request failed: "
                << chan->GetLastErrorMessage();
@@ -208,7 +213,7 @@ int GomaIPC::ReadResponse(const IOChannel* chan,
                           string* body,
                           int* http_return_code,
                           Status* status) {
-  int timeout_sec = status->initial_timeout_sec;
+  absl::Duration timeout = status->initial_timeout;
   string response;
   size_t response_len = 0;
   size_t offset = 0;
@@ -227,7 +232,7 @@ int GomaIPC::ReadResponse(const IOChannel* chan,
     char* buf = const_cast<char*>(response.data()) + response_len;
     int buf_size = response.size() - response_len;
     DCHECK_GT(buf_size, 0);
-    int len = chan->ReadWithTimeout(buf, buf_size, timeout_sec);
+    int len = chan->ReadWithTimeout(buf, buf_size, timeout);
     if (len == 0) {
       LOG(ERROR) << "GOMA: Unexpected end-of-file at " << response_len
                  << "+" << buf_size
@@ -239,7 +244,7 @@ int GomaIPC::ReadResponse(const IOChannel* chan,
       response_len += len;
       // Now we've got the first response. The next response
       // should come soon. Let's make the timeout shorter.
-      timeout_sec = status->read_timeout_sec;
+      timeout = status->read_timeout;
       absl::string_view resp(response.data(), response_len);
       if ((found_header || ParseHttpResponse(resp, http_return_code,
                                              &offset, &content_length,
@@ -262,7 +267,7 @@ int GomaIPC::ReadResponse(const IOChannel* chan,
       if (len == OK) {
         LOG(INFO) << "healthy. wait more in pid:" << Getpid();
       }
-      timeout_sec = status->check_timeout_sec;
+      timeout = status->check_timeout;
       continue;
     }
     return len;
@@ -319,12 +324,12 @@ int GomaIPC::CheckHealthz(Status* status) {
   healthz_response.resize(kNetworkBufSize);
   char* buf = const_cast<char*>(healthz_response.data());
   SimpleTimer timer;
-  int len = healthz_chan->ReadWithTimeout(buf, kNetworkBufSize,
-                                          kReadSelectTimeoutSec);
+  int len =
+      healthz_chan->ReadWithTimeout(buf, kNetworkBufSize, kReadSelectTimeout);
   if (len <= 0) {
     std::ostringstream ss;
     ss << "Error /healthz err=" << len
-       << " duration=" << timer.GetInMilliseconds() << "ms"
+       << " duration=" << timer.GetDuration()
        << " in pid:" << pid
        << " error=" << healthz_chan->GetLastErrorMessage();
     LOG(ERROR) << "GOMA: " << ss.str();
@@ -367,8 +372,8 @@ string GomaIPC::Status::DebugString() const {
       " http_return_code=", http_return_code,
       " req_size=", req_size,
       " resp_size=", resp_size,
-      " req_send_time=", req_send_time,
-      " resp_recv_time=", resp_recv_time);
+      " req_send_time=", absl::FormatDuration(req_send_time),
+      " resp_recv_time=", absl::FormatDuration(resp_recv_time));
 }
 
 }  // namespace devtools_goma

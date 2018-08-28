@@ -29,11 +29,6 @@
 
 namespace devtools_goma {
 
-/* static */
-const int WorkerThreadManager::kDeadPool = -2;
-const int WorkerThreadManager::kAlarmPool = -1;
-const int WorkerThreadManager::kFreePool = 0;
-
 // Once we register atfork handler, we can't unregister it.
 // However, we'd like to fork at SetUp in each unit test of
 // subprocess_task_unittest.
@@ -97,11 +92,11 @@ void WorkerThreadManager::Start(int num_threads) {
   AUTO_EXCLUSIVE_LOCK(lock, &mu_);
   CHECK(workers_.empty());
   CHECK(GetCurrentWorker() == nullptr);
-  alarm_worker_ = new WorkerThread(this, kAlarmPool, "alarm_worker");
+  alarm_worker_ = new WorkerThread(kAlarmPool, "alarm_worker");
   alarm_worker_->Start();
   next_worker_index_ = 0;
   for (int i = 0; i < num_threads; ++i) {
-    WorkerThread* worker = new WorkerThread(this, kFreePool, "worker");
+    WorkerThread* worker = new WorkerThread(kFreePool, "worker");
     worker->Start();
     workers_.push_back(worker);
   }
@@ -112,7 +107,7 @@ int WorkerThreadManager::StartPool(int num_threads, const std::string& name) {
   CHECK(GetCurrentWorker() == nullptr);
   int pool = next_pool_++;
   for (int i = 0; i < num_threads; ++i) {
-    WorkerThread* worker = new WorkerThread(this, pool, name);
+    WorkerThread* worker = new WorkerThread(pool, name);
     worker->Start();
     workers_.push_back(worker);
   }
@@ -123,10 +118,10 @@ void WorkerThreadManager::NewThread(OneshotClosure* callback,
                                     const std::string& name) {
   AUTO_EXCLUSIVE_LOCK(lock, &mu_);
   int pool = next_pool_++;
-  WorkerThread* worker = new WorkerThread(this, pool, name);
+  WorkerThread* worker = new WorkerThread(pool, name);
   worker->Start();
   workers_.push_back(worker);
-  worker->RunClosure(FROM_HERE, callback, PRIORITY_IMMEDIATE);
+  worker->RunClosure(FROM_HERE, callback, WorkerThread::PRIORITY_IMMEDIATE);
 }
 
 size_t WorkerThreadManager::num_threads() const {
@@ -174,7 +169,7 @@ void WorkerThreadManager::Finish() {
   }
 }
 
-WorkerThreadManager::ThreadId WorkerThreadManager::GetCurrentThreadId() {
+WorkerThread::ThreadId WorkerThreadManager::GetCurrentThreadId() {
   return devtools_goma::GetCurrentThreadId();
 }
 
@@ -205,7 +200,8 @@ PeriodicClosureId WorkerThreadManager::NextPeriodicClosureId() {
 
 PeriodicClosureId WorkerThreadManager::RegisterPeriodicClosure(
     const char* const location,
-    int ms, std::unique_ptr<PermanentClosure> closure) {
+    absl::Duration period,
+    std::unique_ptr<PermanentClosure> closure) {
   DCHECK(alarm_worker_);
   PeriodicClosureId id = NextPeriodicClosureId();
 
@@ -213,8 +209,8 @@ PeriodicClosureId WorkerThreadManager::RegisterPeriodicClosure(
       FROM_HERE,
       NewCallback(
           &WorkerThreadManager::RegisterPeriodicClosureOnAlarmer,
-          alarm_worker_, id, location, ms, std::move(closure)),
-      PRIORITY_IMMEDIATE);
+          alarm_worker_, id, location, period, std::move(closure)),
+      WorkerThread::PRIORITY_IMMEDIATE);
 
   return id;
 }
@@ -222,22 +218,22 @@ PeriodicClosureId WorkerThreadManager::RegisterPeriodicClosure(
 /* static */
 void WorkerThreadManager::RegisterPeriodicClosureOnAlarmer(
     WorkerThread* alarmer, PeriodicClosureId id, const char* location,
-    int ms, std::unique_ptr<PermanentClosure> closure) {
-  alarmer->RegisterPeriodicClosure(id, location, ms, std::move(closure));
+    absl::Duration period, std::unique_ptr<PermanentClosure> closure) {
+  alarmer->RegisterPeriodicClosure(id, location, period, std::move(closure));
 }
 
 void WorkerThreadManager::UnregisterPeriodicClosure(PeriodicClosureId id) {
   CHECK(GetCurrentWorker() != alarm_worker_);
   DCHECK(alarm_worker_);
 
-  UnregisteredClosureData unregistered_data;
+  WorkerThread::UnregisteredClosureData unregistered_data;
   alarm_worker_->RunClosure(
       FROM_HERE,
       NewCallback(
           alarm_worker_,
-          &WorkerThreadManager::WorkerThread::UnregisterPeriodicClosure,
+          &WorkerThread::UnregisterPeriodicClosure,
           id, &unregistered_data),
-      PRIORITY_IMMEDIATE);
+      WorkerThread::PRIORITY_IMMEDIATE);
 
   SimpleTimer timer;
   timer.Start();
@@ -249,9 +245,9 @@ void WorkerThreadManager::UnregisterPeriodicClosure(PeriodicClosureId id) {
         << "UnregisterPeriodicClosure id=" << id
         << " location="
         << (location ? location : "")
-        << " timer=" << timer.GetInMilliseconds() << " [ms]";
-    CHECK_LT(timer.GetInMilliseconds(), 60 * 1000)
-        << "UnregisterPeriodicClosure didn't finish in 60 seconds";
+        << " timer=" << timer.GetDuration();
+    CHECK_LT(timer.GetDuration(), absl::Minutes(1))
+        << "UnregisterPeriodicClosure didn't finish in one minute";
     absl::SleepFor(absl::Milliseconds(10));
   }
 }
@@ -307,13 +303,13 @@ void WorkerThreadManager::RunClosureInThread(
 }
 
 WorkerThreadManager::CancelableClosure*
-WorkerThreadManager::RunDelayedClosureInThread(
-    const char* const location,
-    ThreadId id, int msec,
-    Closure* closure) {
+WorkerThreadManager::RunDelayedClosureInThread(const char* const location,
+                                               ThreadId id,
+                                               absl::Duration delay,
+                                               Closure* closure) {
   WorkerThread* worker = GetWorker(id);
   DCHECK(worker);
-  return worker->RunDelayedClosure(location, msec, closure);
+  return worker->RunDelayedClosure(location, delay, closure);
 }
 
 string WorkerThreadManager::DebugString() const {
@@ -344,22 +340,7 @@ void WorkerThreadManager::DebugLog() const {
   LOG(INFO) << "idle workers:" << num_idles;
 }
 
-/* static */
-string WorkerThreadManager::Priority_Name(int priority) {
-  switch (priority) {
-    case PRIORITY_LOW: return "PriLow";
-    case PRIORITY_MED: return "PriMed";
-    case PRIORITY_HIGH: return "PriHigh";
-    case PRIORITY_IMMEDIATE: return "PriImmediate";
-    default:
-      break;
-  }
-  std::ostringstream ss;
-  ss << "PriUnknown[" << priority << "]";
-  return ss.str();
-}
-
-WorkerThreadManager::WorkerThread* WorkerThreadManager::GetWorker(ThreadId id) {
+WorkerThread* WorkerThreadManager::GetWorker(ThreadId id) {
   WorkerThread* worker = nullptr;
   {
     AUTO_SHARED_LOCK(lock, &mu_);
@@ -372,7 +353,7 @@ WorkerThreadManager::WorkerThread* WorkerThreadManager::GetWorker(ThreadId id) {
   return nullptr;
 }
 
-WorkerThreadManager::WorkerThread* WorkerThreadManager::GetWorkerUnlocked(
+WorkerThread* WorkerThreadManager::GetWorkerUnlocked(
     ThreadId id) {
   for (auto* worker : workers_) {
     if (worker && id == worker->id()) {
@@ -382,7 +363,7 @@ WorkerThreadManager::WorkerThread* WorkerThreadManager::GetWorkerUnlocked(
   return nullptr;
 }
 
-WorkerThreadManager::WorkerThread* WorkerThreadManager::GetCurrentWorker() {
+WorkerThread* WorkerThreadManager::GetCurrentWorker() {
   return WorkerThread::GetCurrentWorker();
 }
 
@@ -397,7 +378,7 @@ WorkerThreadRunner::WorkerThreadRunner(
                      this,
                      &WorkerThreadRunner::Run,
                      closure),
-                 WorkerThreadManager::PRIORITY_MED);
+                 WorkerThread::PRIORITY_MED);
 }
 
 WorkerThreadRunner::~WorkerThreadRunner() {

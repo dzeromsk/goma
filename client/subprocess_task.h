@@ -17,7 +17,7 @@ MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/subprocess.pb.h"
 MSVC_POP_WARNING()
 #include "util.h"
-#include "worker_thread_manager.h"
+#include "worker_thread.h"
 
 using std::string;
 
@@ -56,7 +56,7 @@ class SubProcessTask {
   SubProcessTask(const string& trace_id,
                  const char* prog, char* const argv[]);
 
-  WorkerThreadManager::ThreadId thread_id() { return thread_id_; }
+  WorkerThread::ThreadId thread_id() { return thread_id_; }
 
   SubProcessState::State state() const {
     AUTOLOCK(lock, &mu_);
@@ -110,12 +110,10 @@ class SubProcessTask {
 
   // The subprocess is started with pid.
   // Runs in subprocess controller's context.
-  // Takes ownership of started.
   void Started(std::unique_ptr<SubProcessStarted> started);
 
   // The subprocess is terminated.
   // Runs in subprocess controller's context.
-  // Takes ownership of terminated.
   void Terminated(std::unique_ptr<SubProcessTerminated> terminated);
 
   // Calls callback_ and delete itself.
@@ -125,7 +123,7 @@ class SubProcessTask {
   SubProcessStarted started_;
   SubProcessTerminated terminated_;
 
-  WorkerThreadManager::ThreadId thread_id_;
+  WorkerThread::ThreadId thread_id_;
 
   OneshotClosure* callback_;
 

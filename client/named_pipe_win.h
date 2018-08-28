@@ -40,11 +40,12 @@ class ScopedNamedPipe : public IOChannel {
   ssize_t Write(const void* ptr, size_t len) const override;
   ssize_t ReadWithTimeout(char* buf,
                           size_t bufsize,
-                          int timeout_sec) const override;
+                          absl::Duration timeout) const override;
   ssize_t WriteWithTimeout(const char* buf,
                            size_t bufsize,
-                           int timeout_sec) const override;
-  int WriteString(absl::string_view message, int timeout) const override;
+                           absl::Duration timeout) const override;
+  int WriteString(absl::string_view message,
+                  absl::Duration timeout) const override;
 
   bool is_secure() const override { return true; }
 

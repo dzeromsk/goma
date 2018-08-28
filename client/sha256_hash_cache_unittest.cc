@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "autolock_timer.h"
 #include "unittest_util.h"
 
@@ -14,16 +14,19 @@ namespace devtools_goma {
 
 class SHA256HashCacheTest : public testing::Test {
  public:
-  SHA256HashCacheTest() { cache_.time_fn_ = Time; }
+  SHA256HashCacheTest() {
+    dummy_time_ = absl::Time();
+    cache_.now_fn_ = GetDummyTime;
+  }
 
  protected:
-  static time_t Time(time_t*) { return time_; }
+  static absl::Time GetDummyTime() { return dummy_time_; }
 
-  static time_t time_;
+  static absl::Time dummy_time_;
   SHA256HashCache cache_;
 };
 
-time_t SHA256HashCacheTest::time_ = 0;
+absl::Time SHA256HashCacheTest::dummy_time_;
 
 TEST_F(SHA256HashCacheTest, BasicTest) {
   TmpdirUtil tmpdir("sha256_hash_cache");
@@ -47,7 +50,9 @@ TEST_F(SHA256HashCacheTest, BasicTest) {
   EXPECT_EQ(0, cache_.hit());
 
   // Set future time.
-  time_ = FileStat(empty).mtime + 2;
+  auto empty_file_stat = FileStat(empty);
+  ASSERT_TRUE(empty_file_stat.mtime.has_value());
+  dummy_time_ = *empty_file_stat.mtime + absl::Seconds(2);
 
   // cache hit
   EXPECT_TRUE(cache_.GetHashFromCacheOrFile(empty, &hash));

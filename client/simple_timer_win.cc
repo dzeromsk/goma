@@ -15,7 +15,7 @@ void SimpleTimer::Start() {
 
 // In chromium's base/time/time_win.cc, QPC is not used in some conditions.
 // But we assume that goma users use goma on machines QPC works correctly.
-long long SimpleTimer::GetInNanoseconds() const {
+int64_t SimpleTimer::GetInNanoSeconds() const {
   LARGE_INTEGER end_time;
   ::QueryPerformanceCounter(&end_time);
 

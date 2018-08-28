@@ -14,11 +14,23 @@
 
 namespace devtools_goma {
 
-void CounterInfo::Dump(
-    std::string* name, int64_t* time_ns, int64_t* count) const {
-  *name = location_ + "(" + funcname_ + ":" + name_ + ")";
-  *count = counter_.value();
-  *time_ns = total_time_in_ns_.value();
+struct CounterStat {
+  std::string name;
+  int64_t count;
+  absl::Duration time;
+};
+
+void CounterInfo::Inc(absl::Duration time) {
+  counter_.Add(1);
+  // This must be kept as an integer number of nanoseconds because
+  // total_time_in_ns_ is an atomic integer counter.
+  total_time_in_ns_.Add(absl::ToInt64Nanoseconds(time));
+}
+
+void CounterInfo::Dump(CounterStat* stat) const {
+  stat->name = location_ + "(" + funcname_ + ":" + name_ + ")";
+  stat->count = counter_.value();
+  stat->time = absl::Nanoseconds(total_time_in_ns_.value());
 }
 
 void CounterInfo::DumpToProto(CounterzStat* counterz) const {
@@ -31,39 +43,31 @@ void CounterInfo::DumpToProto(CounterzStat* counterz) const {
 }
 
 void Counterz::DumpToJson(Json::Value* json) const {
-  struct stat {
-    std::string name;
-    int64_t count, time_ns;
-  };
-
-  std::vector<stat> stats;
+  std::vector<CounterStat> stats(counters_.size());
 
   {
     AUTOLOCK(lock, &mu_);
     for (size_t i = 0; i < counters_.size(); ++i) {
-      stat s;
-      counters_[i]->Dump(&s.name, &s.time_ns, &s.count);
-      stats.push_back(std::move(s));
+      counters_[i]->Dump(&stats[i]);
     }
   }
 
   std::sort(stats.begin(), stats.end(),
-            [](const stat& l, const stat& r) {
-              return l.time_ns > r.time_ns;
+            [](const CounterStat& l, const CounterStat& r) {
+              return l.time > r.time;
             });
 
   *json = Json::Value(Json::arrayValue);
 
-  for (const auto& s : stats) {
-    Json::Value j;
-    j["name"] = s.name;
-    j["count"] = Json::Int64(s.count);
+  for (const auto& stat : stats) {
+    Json::Value value;
+    value["name"] = stat.name;
+    value["count"] = Json::Int64(stat.count);
 
-    // TODO: human readable representation.
-    j["time(s)"] = Json::Value(s.time_ns / 1e9);
-    j["avg(ms)"] = Json::Value(
-        s.time_ns / 1e6 / std::max<int64_t>(s.count, 1));
-    json->append(j);
+    value["total time"] = absl::FormatDuration(stat.time);
+    value["average time"] =
+        absl::FormatDuration(stat.time / std::max<int64_t>(stat.count, 1));
+    json->append(std::move(value));
   }
 }
 

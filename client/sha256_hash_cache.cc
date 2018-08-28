@@ -21,7 +21,7 @@ bool SHA256HashCache::GetHashFromCacheOrFile(const string& path, string* hash) {
     AUTO_SHARED_LOCK(lock, &mu_);
     const auto& it = cache_.find(path);
     if (it != cache_.end() &&
-        !filestat.CanBeNewerThan(it->second.first, time_fn_(nullptr))) {
+        !filestat.CanBeNewerThan(it->second.first, now_fn_())) {
       *hash = it->second.second;
       hit_.Add(1);
       return true;

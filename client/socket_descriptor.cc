@@ -14,6 +14,7 @@
 
 #include <memory>
 
+#include "absl/time/clock.h"
 #include "callback.h"
 #include "compiler_specific.h"
 #include "glog/logging.h"
@@ -22,15 +23,14 @@
 namespace devtools_goma {
 
 SocketDescriptor::SocketDescriptor(ScopedSocket&& fd,
-                                   WorkerThreadManager::Priority priority,
-                                   WorkerThreadManager::WorkerThread* worker)
+                                   WorkerThread::Priority priority,
+                                   WorkerThread* worker)
     : fd_(std::move(fd)),
       priority_(priority),
       worker_(worker),
       readable_closure_(nullptr),
       writable_closure_(nullptr),
-      timeout_(0),
-      last_time_(worker->Now()),
+      last_time_(worker_->NowCached()),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           timeout_run_closure_(NewPermanentCallback(
               this, &SocketDescriptor::TimeoutClosure))),
@@ -61,9 +61,9 @@ void SocketDescriptor::NotifyWhenReadable(
     std::unique_ptr<PermanentClosure> closure) {
   DCHECK(THREAD_ID_IS_SELF(thread_));
   readable_closure_ = std::move(closure);
-  last_time_ = worker_->Now();
+  last_time_ = worker_->NowCached();
   active_read_ = true;
-  worker_->RegisterPollEvent(this, DescriptorPoller::kReadEvent);
+  worker_->RegisterPollEvent(this, DescriptorEventType::kReadEvent);
   VLOG(1) << "Notify when " << fd_.get()
           << " readable" << readable_closure_.get();
 }
@@ -72,9 +72,9 @@ void SocketDescriptor::NotifyWhenWritable(
     std::unique_ptr<PermanentClosure> closure) {
   DCHECK(THREAD_ID_IS_SELF(thread_));
   writable_closure_ = std::move(closure);
-  last_time_ = worker_->Now();
+  last_time_ = worker_->NowCached();
   active_write_ = true;
-  worker_->RegisterPollEvent(this, DescriptorPoller::kWriteEvent);
+  worker_->RegisterPollEvent(this, DescriptorEventType::kWriteEvent);
   write_poll_registered_ = true;
   VLOG(1) << "Notify when " << fd_.get()
           << " writable" << writable_closure_.get();
@@ -85,7 +85,7 @@ void SocketDescriptor::ClearReadable() {
   VLOG(1) << "Clear " << fd_.get() << " readable " << readable_closure_.get();
   readable_closure_.reset();
   active_read_ = false;
-  worker_->UnregisterPollEvent(this, DescriptorPoller::kReadEvent);
+  worker_->UnregisterPollEvent(this, DescriptorEventType::kReadEvent);
 }
 
 void SocketDescriptor::ClearWritable() {
@@ -94,31 +94,31 @@ void SocketDescriptor::ClearWritable() {
   writable_closure_.reset();
   active_write_ = false;
   if (write_poll_registered_) {
-    worker_->UnregisterPollEvent(this, DescriptorPoller::kWriteEvent);
+    worker_->UnregisterPollEvent(this, DescriptorEventType::kWriteEvent);
     write_poll_registered_ = false;
   }
 }
 
-void SocketDescriptor::NotifyWhenTimedout(double timeout,
+void SocketDescriptor::NotifyWhenTimedout(absl::Duration timeout,
                                           OneshotClosure* closure) {
   DCHECK(THREAD_ID_IS_SELF(thread_));
   DCHECK(!timeout_closure_);
   timeout_ = timeout;
   timeout_closure_.reset(closure);
-  last_time_ = worker_->Now();
+  last_time_ = worker_->NowCached();
   worker_->RegisterTimeoutEvent(this);
 }
 
-void SocketDescriptor::ChangeTimeout(double timeout) {
+void SocketDescriptor::ChangeTimeout(absl::Duration timeout) {
   DCHECK(THREAD_ID_IS_SELF(thread_));
   DCHECK(timeout_closure_);
   timeout_ = timeout;
-  last_time_ = worker_->Now();
+  last_time_ = worker_->NowCached();
 }
 
 void SocketDescriptor::ClearTimeout() {
   DCHECK(THREAD_ID_IS_SELF(thread_));
-  timeout_ = 0;
+  timeout_.reset();
   if (timeout_closure_) {
     timeout_closure_.reset();
   }
@@ -126,8 +126,9 @@ void SocketDescriptor::ClearTimeout() {
 }
 
 ssize_t SocketDescriptor::Read(void* ptr, size_t len) {
+  CHECK_GT(len, 0) << "fd=" << fd_.get();
   need_retry_ = false;
-  last_time_ = worker_->Now();
+  last_time_ = worker_->NowCached();
   ssize_t r = fd_.Read(ptr, len);
   if (r < 0)
     UpdateLastErrorStatus();
@@ -137,8 +138,9 @@ ssize_t SocketDescriptor::Read(void* ptr, size_t len) {
 }
 
 ssize_t SocketDescriptor::Write(const void* ptr, size_t len) {
+  CHECK_GT(len, 0) << "fd=" << fd_.get();
   need_retry_ = false;
-  last_time_ = worker_->Now();
+  last_time_ = worker_->NowCached();
   ssize_t r = fd_.Write(ptr, len);
   if (r < 0)
     UpdateLastErrorStatus();
@@ -151,7 +153,7 @@ bool SocketDescriptor::NeedRetry() const {
 
 int SocketDescriptor::ShutdownForSend() {
   need_retry_ = false;
-  last_time_ = worker_->Now();
+  last_time_ = worker_->NowCached();
   int r;
 #ifndef _WIN32
   r = shutdown(fd_.get(), SHUT_WR);
@@ -195,7 +197,7 @@ void SocketDescriptor::RestartWrite() {
   active_write_ = true;
   if (!write_poll_registered_) {
     VLOG(2) << "Register write again: fd=" << fd();
-    worker_->RegisterPollEvent(this, DescriptorPoller::kWriteEvent);
+    worker_->RegisterPollEvent(this, DescriptorEventType::kWriteEvent);
     write_poll_registered_ = true;
   }
 }
@@ -215,7 +217,7 @@ OneshotClosure* SocketDescriptor::GetReadableClosure() {
   OneshotClosure* c =
       GetClosure(&read_in_queue_, &active_read_, readable_closure_.get());
   if (c != nullptr) {
-    last_time_ = worker_->Now();
+    last_time_ = worker_->NowCached();
   }
   return c;
 }
@@ -225,15 +227,16 @@ OneshotClosure* SocketDescriptor::GetWritableClosure() {
   OneshotClosure* c =
       GetClosure(&write_in_queue_, &active_write_, writable_closure_.get());
   if (c != nullptr) {
-    last_time_ = worker_->Now();
+    last_time_ = worker_->NowCached();
   }
   return c;
 }
 
 OneshotClosure* SocketDescriptor::GetTimeoutClosure() {
   DCHECK(THREAD_ID_IS_SELF(thread_));
-  if (timeout_ > 0 && (worker_->Now() - last_time_) > timeout_ &&
-    !read_in_queue_ && !write_in_queue_ && !timeout_in_queue_) {
+  if (timeout_.has_value() &&
+      worker_->NowCached() - last_time_ > *timeout_ &&
+      !read_in_queue_ && !write_in_queue_ && !timeout_in_queue_) {
     return GetClosure(&timeout_in_queue_, nullptr, timeout_run_closure_.get());
   }
   return nullptr;
@@ -277,12 +280,13 @@ void SocketDescriptor::TimeoutClosure() {
     return;
   if (!active_read_ && !active_write_)
     return;
-  if (timeout_ > 0 && (worker_->Now() - last_time_) > timeout_) {
+  if (timeout_.has_value() &&
+      worker_->NowCached() - last_time_ > *timeout_) {
     // no need to delete closure. it deletes itself.
     OneshotClosure* closure = timeout_closure_.release();
     if (closure) {
       LOG(INFO) << "socket timeout fd=" << fd_.get()
-                << " timeout=" << timeout_;
+                << " timeout=" << *timeout_;
       closure->Run();
     }
   }
@@ -311,7 +315,7 @@ void SocketDescriptor::UpdateLastErrorStatus() {
 void SocketDescriptor::UnregisterWritable() {
   DCHECK(THREAD_ID_IS_SELF(thread_));
   if (!active_write_ && write_poll_registered_) {
-    worker_->UnregisterPollEvent(this, DescriptorPoller::kWriteEvent);
+    worker_->UnregisterPollEvent(this, DescriptorEventType::kWriteEvent);
     write_poll_registered_ = false;
   }
 }

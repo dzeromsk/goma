@@ -13,7 +13,7 @@ void BM_SimpleTimer(benchmark::State& state) {
 
   for (auto _ : state) {
     (void)_;
-    timer.GetInNanoseconds();
+    timer.GetDuration();
   }
 
   state.SetItemsProcessed(state.iterations());

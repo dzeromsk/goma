@@ -5,6 +5,7 @@
 #include "http_init.h"
 
 #include "absl/strings/ascii.h"
+#include "absl/strings/numbers.h"
 #include "file_helper.h"
 #include "glog/logging.h"
 #include "http.h"
@@ -182,11 +183,23 @@ void InitHttpClientOptions(HttpClient::Options* http_options) {
       FLAGS_HTTP_RPC_CAPTURE_RESPONSE_HEADER;
   http_options->ssl_extra_cert = FLAGS_SSL_EXTRA_CERT;
   http_options->ssl_extra_cert_data = FLAGS_SSL_EXTRA_CERT_DATA;
-  http_options->ssl_crl_max_valid_duration = FLAGS_SSL_CRL_MAX_VALID_DURATION;
-  http_options->socket_read_timeout_sec =
-      atof(FLAGS_HTTP_SOCKET_READ_TIMEOUT_SECS.c_str());
-  http_options->min_retry_backoff_ms = FLAGS_HTTP_RPC_MIN_RETRY_BACKOFF;
-  http_options->max_retry_backoff_ms = FLAGS_HTTP_RPC_MAX_RETRY_BACKOFF;
+  if (FLAGS_SSL_CRL_MAX_VALID_DURATION >= 0) {
+    http_options->ssl_crl_max_valid_duration =
+        absl::Seconds(FLAGS_SSL_CRL_MAX_VALID_DURATION);
+  }
+  double http_socket_read_timeout_secs = 0;
+  if (absl::SimpleAtod(FLAGS_HTTP_SOCKET_READ_TIMEOUT_SECS,
+      &http_socket_read_timeout_secs)) {
+    http_options->socket_read_timeout =
+        absl::Seconds(http_socket_read_timeout_secs);
+  } else {
+    LOG(ERROR) << "Could not parse FLAGS_HTTP_SOCKET_READ_TIMEOUT_SECS: "
+               << FLAGS_HTTP_SOCKET_READ_TIMEOUT_SECS;
+  }
+  http_options->min_retry_backoff =
+      absl::Milliseconds(FLAGS_HTTP_RPC_MIN_RETRY_BACKOFF);
+  http_options->max_retry_backoff =
+      absl::Milliseconds(FLAGS_HTTP_RPC_MAX_RETRY_BACKOFF);
 }
 
 }  // namespace devtools_goma

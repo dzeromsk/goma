@@ -1,0 +1,19 @@
+config("gflags_config") {
+  include_dirs = [ "//third_party/config/gflags/$os" ]
+}
+
+static_library("gflags") {
+  sources = [
+    "src/src/gflags.cc",
+    "src/src/gflags_completions.cc",
+    "src/src/gflags_reporting.cc",
+    "src/src/mutex.h",
+    "src/src/util.h",
+  ]
+
+  include_dirs = [ "src" ]
+
+  configs -= [ "//build/config/compiler:goma_code" ]
+  configs += [ "//build/config/compiler:no_goma_code" ]
+  public_configs = [ ":gflags_config" ]
+}

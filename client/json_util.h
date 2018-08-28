@@ -28,6 +28,12 @@ bool GetIntFromJson(const Json::Value& json, const std::string& key,
 bool GetInt64FromJson(const Json::Value& json, const std::string& key,
                       int64_t* value, std::string* error_message);
 
+// Attempts to fetch an array from |json| using |key| and store it in |*value|.
+// Returns true if successful. Returns false if |key| was not found, or if the
+// value was not an array.
+bool GetArrayFromJson(const Json::Value& json, const std::string& key,
+                      Json::Value* value, std::string* error_message);
+
 }  // namespace devtools_goma
 
 #endif  // DEVTOOLS_GOMA_CLIENT_JSON_UTIL_H_

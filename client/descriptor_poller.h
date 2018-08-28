@@ -10,8 +10,10 @@
 #include <map>
 #include <memory>
 
+#include "absl/time/time.h"
+#include "descriptor_event_type.h"
 #include "scoped_fd.h"
-#include "worker_thread_manager.h"
+#include "worker_thread.h"
 
 namespace devtools_goma {
 
@@ -20,9 +22,9 @@ class SocketDescriptor;
 
 class DescriptorPoller {
  public:
-  enum EventType { kReadEvent, kWriteEvent };
+  using EventType = DescriptorEventType;
 
-  typedef std::map<WorkerThreadManager::Priority, std::deque<OneshotClosure*>>
+  typedef std::map<WorkerThread::Priority, std::deque<OneshotClosure*>>
       CallbackQueue;
   typedef std::map<int, std::unique_ptr<SocketDescriptor>> DescriptorMap;
 
@@ -46,13 +48,13 @@ class DescriptorPoller {
   virtual void UnregisterTimeoutEvent(SocketDescriptor* d) = 0;
   virtual void UnregisterDescriptor(SocketDescriptor* d) = 0;
 
-  // Blocking; polls events over descriptors at most |timeout_millsec| and
-  // populates |callbacks| if any descriptors which has higher priority
-  // than |priority| had any events.
+  // Blocking; polls events over descriptors at most |timeout| and populates
+  // |callbacks| if any descriptors which has higher priority than |priority|
+  // had any events.
   // This must be called with |lock| locked and on a single polling thread.
   // Returns true if poll breakers broke poller.
   virtual bool PollEvents(const DescriptorMap& descriptors,
-                          int timeout_millisec,
+                          absl::Duration timeout,
                           int priority,
                           CallbackQueue* callbacks,
                           Lock* lock,
@@ -85,7 +87,7 @@ class DescriptorPollerBase : public DescriptorPoller {
 
   // Returns true if idle.
   bool PollEvents(const DescriptorMap& descriptors,
-                  int timeout_millisec,
+                  absl::Duration timeout,
                   int priority,
                   CallbackQueue* callbacks,
                   Lock* lock,
@@ -100,7 +102,7 @@ class DescriptorPollerBase : public DescriptorPoller {
 
   // Does actual polling.  Returns the number of file descriptors ready
   // for the requested I/O, zero if it has timed out, or -1 on failure.
-  virtual int PollEventsInternal(int timeout_millisec) = 0;
+  virtual int PollEventsInternal(absl::Duration timeout) = 0;
 
   // Called right after PollEventsInternal; with lock held.
   // Returns EventEnumerator with which caller can iterate over descriptors
@@ -113,7 +115,7 @@ class DescriptorPollerBase : public DescriptorPoller {
  private:
   std::unique_ptr<SocketDescriptor> poll_breaker_;
   ScopedSocket poll_signaler_;
-  WorkerThreadManager::ThreadId poll_thread_;
+  WorkerThread::ThreadId poll_thread_;
   DISALLOW_COPY_AND_ASSIGN(DescriptorPollerBase);
 };
 

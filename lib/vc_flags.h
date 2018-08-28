@@ -10,13 +10,13 @@
 
 
 #include "absl/strings/string_view.h"
-#include "compiler_flags.h"
+#include "cxx_flags.h"
 #include "flag_parser.h"
 using std::string;
 
 namespace devtools_goma {
 
-class VCFlags : public CompilerFlags {
+class VCFlags : public CxxFlags {
  public:
   VCFlags(const std::vector<string>& args, const string& cwd);
 
@@ -26,7 +26,7 @@ class VCFlags : public CompilerFlags {
     return commandline_macros_;
   }
 
-  bool is_cplusplus() const { return is_cplusplus_; }
+  bool is_cplusplus() const override { return is_cplusplus_; }
   bool ignore_stdinc() const { return ignore_stdinc_; }
   bool require_mspdbserv() const { return require_mspdbserv_; }
   bool has_Brepro() const { return has_Brepro_; }
@@ -48,6 +48,8 @@ class VCFlags : public CompilerFlags {
   const string& using_pch() const { return using_pch_; }
   const string& using_pch_filename() const { return using_pch_filename_; }
   const string& resource_dir() const { return resource_dir_; }
+
+  const string& implicit_macros() const { return implicit_macros_; }
 
   static bool IsClangClCommand(absl::string_view arg);
   static bool IsVCCommand(absl::string_view arg);
@@ -73,6 +75,7 @@ class VCFlags : public CompilerFlags {
   string using_pch_filename_;
   bool require_mspdbserv_;
   string resource_dir_;
+  string implicit_macros_;
 };
 
 }  // namespace devtools_goma

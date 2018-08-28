@@ -30,7 +30,7 @@ MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/subprocess.pb.h"
 MSVC_POP_WARNING()
 #include "subprocess_task.h"
-#include "worker_thread_manager.h"
+#include "worker_thread.h"
 
 using std::string;
 
@@ -96,7 +96,7 @@ SubProcessControllerClient::SubProcessControllerClient(int fd,
                                                        Options options)
     : wm_(nullptr),
       thread_id_(0),
-      d_(nullptr),
+      socket_descriptor_(nullptr),
       fd_(fd),
       server_pid_(pid),
       next_id_(0),
@@ -109,9 +109,9 @@ SubProcessControllerClient::~SubProcessControllerClient() {
   CHECK(quit_);
   CHECK(subproc_tasks_.empty());
   CHECK_EQ(periodic_closure_id_, kInvalidPeriodicClosureId);
-  ScopedSocket fd(wm_->DeleteSocketDescriptor(d_));
+  ScopedSocket fd(wm_->DeleteSocketDescriptor(socket_descriptor_));
   fd.Close();
-  d_ = nullptr;
+  socket_descriptor_ = nullptr;
   thread_id_ = 0;
   wm_ = nullptr;
 }
@@ -120,20 +120,21 @@ void SubProcessControllerClient::Setup(
     WorkerThreadManager* wm, string tmp_dir) {
   wm_ = wm;
   thread_id_ = wm_->GetCurrentThreadId();
-  d_ = wm_->RegisterSocketDescriptor(std::move(fd_),
-                                     WorkerThreadManager::PRIORITY_MED);
+  socket_descriptor_ =
+      wm_->RegisterSocketDescriptor(std::move(fd_), WorkerThread::PRIORITY_MED);
   SetInitialized();
-  d_->NotifyWhenReadable(
+  socket_descriptor_->NotifyWhenReadable(
       NewPermanentCallback(this, &SubProcessControllerClient::DoRead));
   SetTmpDir(tmp_dir);
   {
     AUTOLOCK(lock, &mu_);
     CHECK_EQ(periodic_closure_id_, kInvalidPeriodicClosureId);
     periodic_closure_id_ = wm_->RegisterPeriodicClosure(
-        FROM_HERE, 10 * 1000, NewPermanentCallback(
+        FROM_HERE, absl::Seconds(10), NewPermanentCallback(
             this, &SubProcessControllerClient::RunCheckSignaled));
   }
-  LOG(INFO) << "SubProcessControllerClient Initialized fd=" << d_->fd();
+  LOG(INFO) << "SubProcessControllerClient Initialized"
+            << " fd=" << socket_descriptor_->fd();
 }
 
 void SubProcessControllerClient::SetInitialized() {
@@ -191,7 +192,7 @@ void SubProcessControllerClient::Shutdown() {
       thread_id_,
       NewCallback(
           this, &SubProcessControllerClient::Delete),
-      WorkerThreadManager::PRIORITY_MED);
+      WorkerThread::PRIORITY_MED);
 }
 
 void SubProcessControllerClient::RegisterTask(SubProcessTask* task) {
@@ -224,7 +225,7 @@ void SubProcessControllerClient::RegisterTask(SubProcessTask* task) {
         thread_id_,
         devtools_goma::NewCallback(
             task, &SubProcessTask::Terminated, std::move(terminated)),
-        WorkerThreadManager::PRIORITY_MED);
+        WorkerThread::PRIORITY_MED);
     return;
   }
   VLOG(1) << task->req().trace_id() << ": RegisterTask id=" << id;
@@ -248,7 +249,7 @@ void SubProcessControllerClient::Register(std::unique_ptr<SubProcessReq> req) {
           this, &SubProcessControllerClient::SendRequest,
           SubProcessController::REGISTER,
           std::unique_ptr<google::protobuf::Message>(std::move(req))),
-      WorkerThreadManager::PRIORITY_MED);
+      WorkerThread::PRIORITY_MED);
 }
 
 void SubProcessControllerClient::RequestRun(
@@ -266,7 +267,7 @@ void SubProcessControllerClient::RequestRun(
           this, &SubProcessControllerClient::SendRequest,
           SubProcessController::REQUEST_RUN,
           std::unique_ptr<google::protobuf::Message>(std::move(run))),
-      WorkerThreadManager::PRIORITY_MED);
+      WorkerThread::PRIORITY_MED);
 }
 
 void SubProcessControllerClient::Kill(std::unique_ptr<SubProcessKill> kill) {
@@ -284,7 +285,7 @@ void SubProcessControllerClient::Kill(std::unique_ptr<SubProcessKill> kill) {
           this, &SubProcessControllerClient::SendRequest,
           SubProcessController::KILL,
           std::unique_ptr<google::protobuf::Message>(std::move(kill))),
-      WorkerThreadManager::PRIORITY_MED);
+      WorkerThread::PRIORITY_MED);
 }
 
 void SubProcessControllerClient::SetOption(
@@ -314,7 +315,7 @@ void SubProcessControllerClient::SetOption(
           this, &SubProcessControllerClient::SendRequest,
           SubProcessController::SET_OPTION,
           std::unique_ptr<google::protobuf::Message>(std::move(option))),
-      WorkerThreadManager::PRIORITY_MED);
+      WorkerThread::PRIORITY_MED);
 }
 
 void SubProcessControllerClient::Started(
@@ -367,7 +368,7 @@ void SubProcessControllerClient::Terminated(
           task->thread_id(),
           NewCallback(
               task, &SubProcessTask::Done),
-          WorkerThreadManager::PRIORITY_MED);
+          WorkerThread::PRIORITY_MED);
     }
   } else {
     std::ostringstream ss;
@@ -386,8 +387,8 @@ void SubProcessControllerClient::Terminated(
     AUTOLOCK(lock, &mu_);
     if (quit_ && subproc_tasks_.empty()) {
       LOG(INFO) << "all subproc_tasks done";
-      d_->StopRead();
-      d_->StopWrite();
+      socket_descriptor_->StopRead();
+      socket_descriptor_->StopWrite();
       CHECK(subproc_tasks_.empty());
       cond_.Signal();
     }
@@ -419,7 +420,7 @@ bool SubProcessControllerClient::BelongsToCurrentThread() const {
 
 void SubProcessControllerClient::Delete() {
   DCHECK(BelongsToCurrentThread());
-  d_->ClearReadable();
+  socket_descriptor_->ClearReadable();
 
   // Maybe not good to accessing g_client_instance which is being
   // deleted. So, guard `delete this`, too.
@@ -434,7 +435,7 @@ void SubProcessControllerClient::SendRequest(
   DCHECK(BelongsToCurrentThread());
   if (AddMessage(op, *message)) {
     VLOG(3) << "SendRequest has pending write";
-    d_->NotifyWhenWritable(
+    socket_descriptor_->NotifyWhenWritable(
         NewPermanentCallback(this, &SubProcessControllerClient::DoWrite));
   }
 }
@@ -442,14 +443,14 @@ void SubProcessControllerClient::SendRequest(
 void SubProcessControllerClient::DoWrite() {
   VLOG(2) << "DoWrite";
   DCHECK(BelongsToCurrentThread());
-  if (!WriteMessage(d_->wrapper())) {
+  if (!WriteMessage(socket_descriptor_->wrapper())) {
     VLOG(3) << "DoWrite no pending";
     wm_->RunClosureInThread(
         FROM_HERE,
         thread_id_,
         NewCallback(
             this, &SubProcessControllerClient::WriteDone),
-        WorkerThreadManager::PRIORITY_IMMEDIATE);
+        WorkerThread::PRIORITY_IMMEDIATE);
   }
 }
 
@@ -458,7 +459,7 @@ void SubProcessControllerClient::WriteDone() {
   DCHECK(BelongsToCurrentThread());
   if (has_pending_write())
     return;
-  d_->ClearWritable();
+  socket_descriptor_->ClearWritable();
 }
 
 void SubProcessControllerClient::DoRead() {
@@ -466,7 +467,7 @@ void SubProcessControllerClient::DoRead() {
   DCHECK(BelongsToCurrentThread());
   int op = 0;
   int len = 0;
-  if (!ReadMessage(d_->wrapper(), &op, &len)) {
+  if (!ReadMessage(socket_descriptor_->wrapper(), &op, &len)) {
     VLOG(2) << "pending read op=" << op << " len=" << len;
     return;
   }
@@ -512,7 +513,7 @@ void SubProcessControllerClient::DoRead() {
               devtools_goma::NewCallback(
                   this, &SubProcessControllerClient::Started,
                   std::move(started)),
-              WorkerThreadManager::PRIORITY_MED);
+              WorkerThread::PRIORITY_MED);
         } else {
           LOG(ERROR) << "broken SubProcessStarted";
         }
@@ -529,7 +530,7 @@ void SubProcessControllerClient::DoRead() {
               devtools_goma::NewCallback(
                   this, &SubProcessControllerClient::Terminated,
                   std::move(terminated)),
-              WorkerThreadManager::PRIORITY_MED);
+              WorkerThread::PRIORITY_MED);
         } else {
           LOG(ERROR) << "broken SubProcessTerminated";
         }
@@ -556,7 +557,7 @@ void SubProcessControllerClient::RunCheckSignaled() {
       thread_id_,
       NewCallback(
           this, &SubProcessControllerClient::CheckSignaled),
-      WorkerThreadManager::PRIORITY_MED);
+      WorkerThread::PRIORITY_MED);
 }
 
 void SubProcessControllerClient::CheckSignaled() {

@@ -325,56 +325,6 @@ std::unique_ptr<CppDirective> ParsePragma(CppInputStream* stream) {
   return nullptr;
 }
 
-// If ignoreable directive is found, nullptr can be returned.
-// For error, CppDirectiveError will be returned.
-std::unique_ptr<CppDirective> ParseDirective(absl::string_view directive,
-                                             CppInputStream* stream) {
-  if (directive == "include") {
-    return ParseInclude<CppDirectiveInclude>(stream);
-  }
-  if (directive == "import") {
-    return ParseInclude<CppDirectiveImport>(stream);
-  }
-  if (directive == "include_next") {
-    return ParseInclude<CppDirectiveIncludeNext>(stream);
-  }
-  if (directive == "define") {
-    return ParseDefine(stream);
-  }
-  if (directive == "undef") {
-    return ParseUndef(stream);
-  }
-  if (directive == "ifdef") {
-    return ParseIfdef(stream);
-  }
-  if (directive == "ifndef") {
-    return ParseIfndef(stream);
-  }
-  if (directive == "if") {
-    return ParseIf(stream);
-  }
-  if (directive == "else") {
-    return ParseElse(stream);
-  }
-  if (directive == "endif") {
-    return ParseEndif(stream);
-  }
-  if (directive == "elif") {
-    return ParseElif(stream);
-  }
-  if (directive == "pragma") {
-    return ParsePragma(stream);
-  }
-
-  if (directive == "error" || directive == "warning") {
-    return nullptr;
-  }
-
-  LOG(ERROR) << "unexpected directive_value=" << directive << " in "
-             << stream->filename() << " line " << stream->line();
-  return nullptr;
-}
-
 }  // annoymous namespace
 
 // static
@@ -439,6 +389,76 @@ bool CppDirectiveParser::Parse(const Content& content,
 
   *result = std::move(directives);
   return true;
+}
+
+// If ignoreable directive is found, nullptr can be returned.
+// For error, CppDirectiveError will be returned.
+std::unique_ptr<CppDirective> CppDirectiveParser::ParseDirective(
+    absl::string_view directive,
+    CppInputStream* stream) {
+  // https://en.cppreference.com/w/cpp/preprocessor
+
+  if (directive == "include") {
+    return ParseInclude<CppDirectiveInclude>(stream);
+  }
+  if (directive == "import") {
+    return ParseInclude<CppDirectiveImport>(stream);
+  }
+  if (directive == "include_next") {
+    return ParseInclude<CppDirectiveIncludeNext>(stream);
+  }
+  if (directive == "define") {
+    return ParseDefine(stream);
+  }
+  if (directive == "undef") {
+    return ParseUndef(stream);
+  }
+  if (directive == "ifdef") {
+    return ParseIfdef(stream);
+  }
+  if (directive == "ifndef") {
+    return ParseIfndef(stream);
+  }
+  if (directive == "if") {
+    return ParseIf(stream);
+  }
+  if (directive == "else") {
+    return ParseElse(stream);
+  }
+  if (directive == "endif") {
+    return ParseEndif(stream);
+  }
+  if (directive == "elif") {
+    return ParseElif(stream);
+  }
+  if (directive == "pragma") {
+    return ParsePragma(stream);
+  }
+
+  if (directive == "error" || directive == "warning") {
+    return nullptr;
+  }
+
+  // #line does not affect the result of include processor, so
+  // skip it.
+  if (directive == "line") {
+    return nullptr;
+  }
+
+  // The null directive (# followed by a line break) is allowed and has no
+  // effect.
+  if (directive == "") {
+    return nullptr;
+  }
+
+  has_unknown_directives_ = true;
+  LOG(WARNING) << "unexpected directive_value=" << directive << " in "
+               << stream->filename() << " line " << stream->line()
+               << " context around here: "
+               << absl::string_view(
+                      stream->cur(),
+                      std::min<ptrdiff_t>(stream->end() - stream->cur(), 30));
+  return nullptr;
 }
 
 }  // namespace devtools_goma

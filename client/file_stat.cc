@@ -14,6 +14,8 @@
 #else
 #include "filetime_win.h"
 #endif
+
+#include "absl/time/time.h"
 #include "counterz.h"
 #include "glog/logging.h"
 
@@ -33,8 +35,7 @@ bool InitFromInfo(const WIN32_FILE_ATTRIBUTE_DATA& info,
 
   file_stat->size = static_cast<off_t>(info.nFileSizeLow);
   file_stat->mtime =
-      absl::ToTimeT(
-          devtools_goma::ConvertFiletimeToAbslTime(info.ftLastWriteTime));
+      devtools_goma::ConvertFiletimeToAbslTime(info.ftLastWriteTime);
   return true;
 }
 
@@ -46,7 +47,7 @@ namespace devtools_goma {
 const off_t FileStat::kInvalidFileSize = -1;
 
 FileStat::FileStat(const string& filename)
-    : mtime(0), size(kInvalidFileSize), is_directory(false) {
+    : size(kInvalidFileSize), is_directory(false) {
   GOMA_COUNTERZ("FileStat");
 #ifndef _WIN32
   struct stat stat_buf;
@@ -67,27 +68,29 @@ FileStat::FileStat(const string& filename)
 
 #ifndef _WIN32
 void FileStat::InitFromStat(const struct stat& stat_buf) {
-  mtime = stat_buf.st_mtime;
+  mtime = absl::FromTimeT(stat_buf.st_mtime);
   size = stat_buf.st_size;
   is_directory = S_ISDIR(stat_buf.st_mode);
 }
 #endif
 
 bool FileStat::IsValid() const {
-  return size != kInvalidFileSize;
+  return size != kInvalidFileSize && mtime.has_value();
 }
 
-bool FileStat::CanBeNewerThan(const FileStat& old, time_t last_checked) const {
+bool FileStat::CanBeNewerThan(const FileStat& old,
+                              absl::Time last_checked) const {
   // If mtime >= last_checked - 1, the file might be updated within
   // the same second. We need to re-check the file for this case, too.
   // The minus one is for VMs, where mtime can delay 1 second.
-  return mtime >= last_checked - 1 || *this != old;
+  return (mtime.has_value() && *mtime >= last_checked - absl::Seconds(1)) ||
+         *this != old;
 }
 
 std::string FileStat::DebugString() const {
   std::stringstream ss;
   ss << "{";
-  ss << " mtime=" << mtime;
+  ss << " mtime=" << (mtime.has_value() ? absl::ToTimeT(*mtime) : 0);
   ss << " size=" << size;
   ss << " is_directory=" << is_directory;
   ss << "}";

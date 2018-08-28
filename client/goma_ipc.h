@@ -19,6 +19,7 @@
 #include <set>
 #include <string>
 
+#include "absl/time/time.h"
 #include "basictypes.h"
 
 using std::string;
@@ -37,21 +38,17 @@ class ScopedSocket;
 
 class GomaIPC {
  public:
-  static const int kDefaultTimeoutSec = 180;  // 3 min.
-  static const int kReadSelectTimeoutSec = 20;
-  static const int kCheckTimeoutSec = 30;
-
   struct Status {
-    Status() : initial_timeout_sec(kDefaultTimeoutSec),
-               read_timeout_sec(kReadSelectTimeoutSec),
-               check_timeout_sec(kCheckTimeoutSec),
+    Status() : initial_timeout(absl::Minutes(3)),
+               read_timeout(absl::Seconds(20)),
+               check_timeout(absl::Seconds(30)),
                health_check_on_timeout(true),
                connect_success(false), err(0), http_return_code(0),
-               req_size(0), resp_size(0), req_send_time(0), resp_recv_time(0) {}
+               req_size(0), resp_size(0) {}
 
-    int initial_timeout_sec;
-    int read_timeout_sec;
-    int check_timeout_sec;
+    absl::Duration initial_timeout;
+    absl::Duration read_timeout;
+    absl::Duration check_timeout;
     bool health_check_on_timeout;
 
     // Whether connect() was successful for this request.
@@ -67,8 +64,8 @@ class GomaIPC {
     // size of (maybe compressed) message.
     size_t req_size;
     size_t resp_size;
-    double req_send_time;
-    double resp_recv_time;
+    absl::Duration req_send_time;
+    absl::Duration resp_recv_time;
 
     string DebugString() const;
   };

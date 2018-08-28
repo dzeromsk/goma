@@ -31,7 +31,7 @@ config("compiler") {
   ldflags = []
   defines = []
   if (is_posix) {
-    cflags_cc += [ "-std=gnu++11" ]
+    cflags_cc += [ "-std=c++11" ]
 
     cflags_c += [ "-std=c99" ]
 

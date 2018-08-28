@@ -104,9 +104,9 @@ def GetPlatformSpecific(platform):
   Raises:
     ValueError: if platform is None or not supported.
   """
-  if platform == 'win64':
+  if platform in ('win', 'win64'):
     return WindowsSpecific(platform)
-  elif platform in ('goobuntu', 'chromeos', 'mac'):
+  elif platform in ('linux', 'mac', 'goobuntu', 'chromeos'):
     return PosixSpecific(platform)
   raise ValueError('You should specify supported platform name.')
 
@@ -2832,13 +2832,6 @@ class GomaEnvTest(GomaCtlTestCommon):
     os.environ['GOMA_LOG_CLEAN_INTERVAL'] = '-1'
     self.assertFalse(env.IsOldFile(filename))
 
-  def testFindCurlShouldFindCurl(self):
-    env = self._module._GOMA_ENVS[os.name]()
-    curl_path = env._FindCurlPath()
-    self.assertTrue(curl_path)
-    if os.name == 'nt':
-      self.assertTrue('\\depot_tools\\' in curl_path)
-
   def testMakeDirectory(self):
     env = self._module._GOMA_ENVS[os.name]()
     tmpdir = tempfile.mkdtemp()
@@ -3288,7 +3281,12 @@ def main():
   option_parser.add_option('--goma-dir', default=None,
                            help='absolute or relative to goma top dir')
   option_parser.add_option('--platform', help='goma platform type.',
-                           choices=['goobuntu', 'chromeos', 'mac', 'win64'])
+                           default={'linux2': 'linux',
+                                    'darwin': 'mac',
+                                    'win32': 'win',
+                                    'cygwin': 'win'}.get(sys.platform, None),
+                           choices=('linux', 'mac', 'win',
+                                    'goobuntu', 'chromeos', 'win64'))
   option_parser.add_option('--goma-service-account-json-file',
                            help='goma service account JSON file')
   option_parser.add_option('--small', action='store_true',

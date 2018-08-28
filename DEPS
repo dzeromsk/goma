@@ -3,12 +3,12 @@ vars = {
 }
 
 deps = {
-     # protobuf 3.5.1
+     # protobuf 3.6.1
      # Note: When you update protobuf, you will need to update
      # test/goma_data.pb.{h,cc}. Copying them from your output directory should
      # work.
      "client/third_party/protobuf/protobuf":
-     "https://github.com/google/protobuf.git@106ffc04be1abf3ff3399f54ccf149815b287dd9",
+     "https://github.com/google/protobuf.git@48cb18e5c419ddd23d9badcfe4e9df7bde1979b2",
 
      # google-glog
      "client/third_party/glog":
@@ -44,7 +44,7 @@ deps = {
 
      # chrome's deps/third_party/boringssl
      "client/third_party/boringssl/src":
-     "https://boringssl.googlesource.com/boringssl@20b6a4e2a18e6a2c961ae0cd9945b69ad42dc64e",
+     "https://boringssl.googlesource.com/boringssl@9c969bf4919e82c7fa8e1d32d0c7c81654027683",
 
      # google-breakpad
      "client/third_party/breakpad/breakpad":
@@ -80,9 +80,9 @@ deps = {
      "client/third_party/abseil/src":
      "https://github.com/abseil/abseil-cpp.git@8f612ebb152fb7e05643a2bcf78cb89a8c0641ad",
 
-     # google benchmark v1.3.0
+     # google benchmark v1.4.1
      "client/third_party/benchmark/src":
-     "https://github.com/google/benchmark.git@336bb8db986cc52cdf0cefa0a7378b9567d1afee",
+     "https://github.com/google/benchmark.git@e776aa0275e293707b6a0901e0e8d8a8a3679508",
 
      # clang format scripts
      "client/buildtools/clang_format/script":
@@ -99,7 +99,11 @@ deps = {
 
      # depot_tools
      'client/third_party/depot_tools':
-     Var('chromium_git') + '/chromium/tools/depot_tools.git'
+     Var('chromium_git') + '/chromium/tools/depot_tools.git',
+
+     # gflags 2.2.1
+     "client/third_party/gflags/src":
+     "https://github.com/gflags/gflags.git@46f73f88b18aee341538c0dfc22b1710a6abedef",
 }
 
 hooks = [

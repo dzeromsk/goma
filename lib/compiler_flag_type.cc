@@ -10,6 +10,8 @@ std::ostream& operator<<(std::ostream& os, CompilerFlagType type) {
   switch (type) {
     case CompilerFlagType::Unknown:
       return os << "unknown";
+    case CompilerFlagType::Fake:
+      return os << "fake";
     case CompilerFlagType::Gcc:
       return os << "gcc";
     case CompilerFlagType::Clexe:

@@ -99,9 +99,6 @@ class GomaClient {
   std::vector<std::pair<string, ScopedFd*>> rsp_files_;
 #endif
   std::unique_ptr<ExecResp> exec_resp_;
-  double req_send_time_;
-  double resp_recv_time_;
-  double resp_write_time_;
   ScopedFd stdin_file_;
   string stdin_filename_;
   string gomacc_path_;

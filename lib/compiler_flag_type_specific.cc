@@ -8,6 +8,8 @@
 #include "clang_tidy_execreq_normalizer.h"
 #include "clang_tidy_flags.h"
 #include "compiler_flags.h"
+#include "fake_execreq_normalizer.h"
+#include "fake_flags.h"
 #include "gcc_execreq_normalizer.h"
 #include "gcc_flags.h"
 #include "glog/logging.h"
@@ -38,6 +40,9 @@ CompilerFlagType CompilerFlagTypeFromArg(absl::string_view arg) {
   }
   if (ClangTidyFlags::IsClangTidyCommand(arg)) {
     return CompilerFlagType::ClangTidy;
+  }
+  if (FakeFlags::IsFakeCommand(arg)) {
+    return CompilerFlagType::Fake;
   }
 
   return CompilerFlagType::Unknown;
@@ -72,6 +77,8 @@ std::unique_ptr<CompilerFlags> CompilerFlagTypeSpecific::NewCompilerFlags(
       return absl::make_unique<JavacFlags>(args, cwd);
     case CompilerFlagType::Java:
       return absl::make_unique<JavaFlags>(args, cwd);
+    case CompilerFlagType::Fake:
+      return absl::make_unique<FakeFlags>(args, cwd);
   }
 }
 
@@ -89,6 +96,8 @@ string CompilerFlagTypeSpecific::GetCompilerName(absl::string_view arg) const {
       return JavacFlags::GetCompilerName(arg);
     case CompilerFlagType::Java:
       return JavaFlags::GetCompilerName(arg);
+    case CompilerFlagType::Fake:
+      return FakeFlags::GetCompilerName(arg);
   }
 }
 
@@ -107,6 +116,8 @@ CompilerFlagTypeSpecific::NewExecReqNormalizer() const {
       return absl::make_unique<JavacExecReqNormalizer>();
     case CompilerFlagType::Java:
       return absl::make_unique<JavaExecReqNormalizer>();
+    case CompilerFlagType::Fake:
+      return absl::make_unique<FakeExecReqNormalizer>();
   }
 }
 

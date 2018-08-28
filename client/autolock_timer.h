@@ -12,6 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "basictypes.h"
 #include "lockhelper.h"
 #include "simple_timer.h"
@@ -21,47 +22,44 @@ namespace devtools_goma {
 class AutoLockStat {
  public:
   explicit AutoLockStat(const char* auto_lock_name)
-      : name(auto_lock_name),
-        count_(0),
-        total_wait_time_ns_(0), max_wait_time_ns_(0),
-        total_hold_time_ns_(0), max_hold_time_ns_(0) {}
+      : name(auto_lock_name), count_(0) {}
   const char* name;
 
   void GetStats(int* count,
-                int64_t* total_wait_time_ns,
-                int64_t* max_wait_time_ns,
-                int64_t* total_hold_time_ns,
-                int64_t* max_hold_time_ns) {
+                absl::Duration* total_wait_time,
+                absl::Duration* max_wait_time,
+                absl::Duration* total_hold_time,
+                absl::Duration* max_hold_time) {
     AutoFastLock lock(&lock_);
     *count = count_;
-    *total_wait_time_ns = total_wait_time_ns_;
-    *max_wait_time_ns = max_wait_time_ns_;
-    *total_hold_time_ns = total_hold_time_ns_;
-    *max_hold_time_ns = max_hold_time_ns_;
+    *total_wait_time = total_wait_time_;
+    *max_wait_time = max_wait_time_;
+    *total_hold_time = total_hold_time_;
+    *max_hold_time = max_hold_time_;
   }
 
-  void UpdateWaitTime(int64_t wait_time_ns) {
+  void UpdateWaitTime(absl::Duration wait_time) {
     AutoFastLock lock(&lock_);
     ++count_;
-    total_wait_time_ns_ += wait_time_ns;
-    if (wait_time_ns > max_wait_time_ns_)
-      max_wait_time_ns_ = wait_time_ns;
+    total_wait_time_ += wait_time;
+    if (wait_time > max_wait_time_)
+      max_wait_time_ = wait_time;
   }
 
-  void UpdateHoldTime(int64_t hold_time_ns) {
+  void UpdateHoldTime(absl::Duration hold_time) {
     AutoFastLock lock(&lock_);
-    total_hold_time_ns_ += hold_time_ns;
-    if (hold_time_ns > max_hold_time_ns_)
-      max_hold_time_ns_ = hold_time_ns;
+    total_hold_time_ += hold_time;
+    if (hold_time > max_hold_time_)
+      max_hold_time_ = hold_time;
   }
 
  private:
   FastLock lock_;
   int count_ GUARDED_BY(lock_);
-  int64_t total_wait_time_ns_ GUARDED_BY(lock_);
-  int64_t max_wait_time_ns_ GUARDED_BY(lock_);
-  int64_t total_hold_time_ns_ GUARDED_BY(lock_);
-  int64_t max_hold_time_ns_ GUARDED_BY(lock_);
+  absl::Duration total_wait_time_ GUARDED_BY(lock_);
+  absl::Duration max_wait_time_ GUARDED_BY(lock_);
+  absl::Duration total_hold_time_ GUARDED_BY(lock_);
+  absl::Duration max_hold_time_ GUARDED_BY(lock_);
 
   DISALLOW_COPY_AND_ASSIGN(AutoLockStat);
 };
@@ -147,14 +145,14 @@ class AutoLockTimerBase {
     LockAcquireStrategy::Acquire(lock_);
     if (statp) {
       stat_ = statp;
-      stat_->UpdateWaitTime(timer_.GetInNanoseconds());
+      stat_->UpdateWaitTime(timer_.GetDuration());
       timer_.Start();
     }
   }
 
   ~AutoLockTimerBase() {
     if (stat_) {
-      stat_->UpdateHoldTime(timer_.GetInNanoseconds());
+      stat_->UpdateHoldTime(timer_.GetDuration());
     }
     LockAcquireStrategy::Release(lock_);
   }

@@ -29,6 +29,7 @@ MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 MSVC_POP_WARNING()
 #include "scoped_fd.h"
 #include "socket_factory.h"
+#include "worker_thread.h"
 #include "worker_thread_manager.h"
 
 #include <glog/logging.h>
@@ -81,7 +82,7 @@ class HttpRPCTest : public ::testing::Test {
         pool_,
         NewCallback(
             this, &HttpRPCTest::DoTestLookupFile, tc),
-        WorkerThreadManager::PRIORITY_LOW);
+        WorkerThread::PRIORITY_LOW);
   }
 
   void DoTestLookupFile(TestLookupFileContext* tc) {
@@ -107,7 +108,7 @@ class HttpRPCTest : public ::testing::Test {
         pool_,
         NewCallback(
             this, &HttpRPCTest::DoWaitTestLookupFile, tc),
-        WorkerThreadManager::PRIORITY_LOW);
+        WorkerThread::PRIORITY_LOW);
   }
 
   void DoWaitTestLookupFile(TestLookupFileContext* tc) {
@@ -158,6 +159,275 @@ class HttpRPCTest : public ::testing::Test {
   mutable Lock mu_;
   ConditionVariable cond_;
 };
+
+TEST_F(HttpRPCTest, EnableCompression) {
+  // TODO: cleanup as http_unittest.
+  std::unique_ptr<MockSocketFactory> socket_factory(
+      absl::make_unique<MockSocketFactory>(-1));
+  HttpClient::Options options;
+  options.dest_host_name = "clients5.google.com";
+  options.dest_port = 80;
+  HttpClient http_client(
+      std::move(socket_factory), nullptr, options, wm_.get());
+  HttpRPC::Options rpc_options;
+  rpc_options.compression_level = 3;
+  rpc_options.start_compression = true;
+  rpc_options.accept_encoding = "deflate";
+  rpc_options.content_type_for_protobuf = "binary/x-protocol-buffer";
+  std::unique_ptr<HttpRPC> http_rpc(
+      absl::make_unique<HttpRPC>(&http_client, rpc_options));
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate, gzip\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: gzip\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::GZIP)
+      << GetEncodingName(http_rpc->request_encoding_type());
+
+  rpc_options.accept_encoding = "gzip";
+  http_rpc = absl::make_unique<HttpRPC>(&http_client, rpc_options);
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::GZIP)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate, gzip\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: gzip\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::GZIP)
+      << GetEncodingName(http_rpc->request_encoding_type());
+
+  // accepts lzma2, but client can send deflate or gzip only.
+  rpc_options.accept_encoding = "lzma2";
+  http_rpc = absl::make_unique<HttpRPC>(&http_client, rpc_options);
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate, gzip\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: gzip\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::GZIP)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: lzma2\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate, gzip, lzma2\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+
+  rpc_options.accept_encoding = "deflate, lzma2";
+  http_rpc = absl::make_unique<HttpRPC>(&http_client, rpc_options);
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  rpc_options.accept_encoding = "lzma2, deflate";
+  http_rpc = absl::make_unique<HttpRPC>(&http_client, rpc_options);
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate, gzip\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: gzip\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::GZIP)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: lzma2\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate, gzip, lzma2\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: gzip, lzma2, deflate\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::GZIP)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: lzma2, gzip, deflate\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::GZIP)
+      << GetEncodingName(http_rpc->request_encoding_type());
+
+
+  rpc_options.accept_encoding = "deflate, gzip, lzma2";
+  http_rpc = absl::make_unique<HttpRPC>(&http_client, rpc_options);
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate, gzip\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: gzip, deflate\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::GZIP)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: gzip\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::GZIP)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: lzma2\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: deflate, gzip, lzma2\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::DEFLATE)
+      << GetEncodingName(http_rpc->request_encoding_type());
+  http_rpc->DisableCompression();
+  EXPECT_FALSE(http_rpc->IsCompressionEnabled());
+  http_rpc->EnableCompression("HTTP/1.1 200 OK\r\n"
+                              "Accept-Encoding: gzip, deflate, lzma2\r\n"
+                              "Content-Length: 0\r\n"
+                              "\r\n");
+  EXPECT_TRUE(http_rpc->IsCompressionEnabled());
+  EXPECT_TRUE(http_rpc->request_encoding_type() == EncodingType::GZIP)
+      << GetEncodingName(http_rpc->request_encoding_type());
+}
 
 TEST_F(HttpRPCTest, PingFail) {
   std::unique_ptr<MockSocketFactory> socket_factory(
@@ -968,7 +1238,7 @@ TEST_F(HttpRPCTest, TLSEngineServerTimeoutSendingHeaderShouldBeError) {
   rpc_options.content_type_for_protobuf = "binary/x-protocol-buffer";
   HttpRPC http_rpc(&http_client, rpc_options);
   HttpRPC::Status status;
-  status.timeout_secs.emplace_back(1);
+  status.timeouts.push_back(absl::Seconds(1));
   http_rpc.Ping(wm_.get(), "/pingz", &status);
   EXPECT_EQ(ERR_TIMEOUT, status.err);
   http_client.WaitNoActive();

@@ -134,9 +134,20 @@ static_library("subprocess_lib") {
   ]
 
   deps = [
-    ":client_util_lib",
     ":common",
+    ":file_path_util_lib",
     ":ioutil_lib",
+  ]
+}
+
+static_library("time_util_lib") {
+  sources = [
+    "time_util.cc",
+    "time_util.h",
+  ]
+  public_deps = [
+    "//third_party:glog",
+    "//third_party/abseil",
   ]
 }
 
@@ -215,8 +226,8 @@ static_library("gomacc_lib") {
     "$target_gen_dir/compiler_proxy_info.h",
   ]
   deps = [
-    ":client_util_lib",
     ":common",
+    ":file_path_util_lib",
     ":gen_compiler_proxy_info",
     ":ioutil_lib",
     ":subprocess_lib",
@@ -251,29 +262,12 @@ static_library("content_lib") {
   ]
 }
 
-static_library("client_util_lib") {
-  sources = [
-    "client_util.cc",
-    "client_util.h",
-  ]
-  public_deps = [
-    "//base",
-    "//third_party/abseil",
-  ]
-  deps = [
-    ":common",
-    ":ioutil_lib",
-    "//lib",
-    "//lib:vc_specific",
-    "//third_party:glog",
-  ]
-}
-
 # compiler_proxy_base contains sources for compiler_proxy.
 # This should not depend on language-specific (c/c++ specific, or java specific)
 # source code.
 static_library("compiler_proxy_base_lib") {
   sources = [
+    "descriptor_event_type.h",
     "descriptor_poller.cc",
     "descriptor_poller.h",
     "framework_path_resolver.cc",
@@ -304,6 +298,7 @@ static_library("compiler_proxy_base_lib") {
 
   deps = [
     ":ioutil_lib",
+    ":time_util_lib",
   ]
 
   public_deps = [
@@ -322,6 +317,7 @@ static_library("compiler_proxy_base_lib") {
     "//lib:vc_specific",
     "//lib:clang_tidy_specific",
     "//lib:java_specific",
+    "//lib:fake_specific",
   ]
 }
 
@@ -346,6 +342,8 @@ static_library("compiler_proxy_lib") {
     "compiler_info_state.h",
     "compiler_proxy_histogram.cc",
     "compiler_proxy_histogram.h",
+    "compiler_proxy_http_handler.cc",
+    "compiler_proxy_http_handler.h",
     "compiler_type_specific_collection.cc",
     "compiler_type_specific_collection.h",
     "goma_blob.cc",
@@ -400,6 +398,8 @@ static_library("compiler_proxy_lib") {
     "trustedipsmanager.h",
     "watchdog.cc",
     "watchdog.h",
+    "zero_copy_stream_impl.cc",
+    "zero_copy_stream_impl.h",
 
     # generated files.
     "$target_gen_dir/compiler_proxy_info.h",
@@ -422,7 +422,7 @@ static_library("compiler_proxy_lib") {
   include_dirs = [ "." ]
   deps = [
     ":breakpad_lib",
-    ":client_util_lib",
+    ":common",
     ":compiler_info_data_proto",
     ":compiler_info_lib",
     ":compiler_type_specific_lib",
@@ -430,6 +430,7 @@ static_library("compiler_proxy_lib") {
     ":deps_cache_lib",
     ":error_notice",
     ":file_hash_cache_lib",
+    ":file_path_util_lib",
     ":file_stat_cache_lib",
     ":ioutil_lib",
     ":jwt_lib",
@@ -437,12 +438,12 @@ static_library("compiler_proxy_lib") {
     ":local_output_cache_proto",  # for compile_task
     ":oauth2_lib",
     ":rand_util_lib",
-    ":rand_util_lib",
     ":scoped_tmp_file_lib",
     ":settings_proto",
     ":sha256_hash_cache_lib",
     ":subprocess_lib",
     ":subprocess_proto",
+    ":time_util_lib",
     "//client/clang_tidy:clang_tidy_compiler_info_builder_lib",
     "//client/clang_tidy:clang_tidy_compiler_type_specific",
     "//client/cxx:cxx_compiler_info_lib",
@@ -453,6 +454,9 @@ static_library("compiler_proxy_lib") {
     "//client/cxx/include_processor:cpp_include_processor_lib",
     "//client/cxx/include_processor:directive_filter_lib",
     "//client/cxx/include_processor:include_cache_lib",
+    "//client/fake:fake_compiler_info_builder_lib",
+    "//client/fake:fake_compiler_info_lib",
+    "//client/fake:fake_compiler_type_specific",
     "//client/java:jar_parser_lib",
     "//client/java:java_compiler_info_builder_lib",
     "//client/java:java_compiler_info_lib",
@@ -467,7 +471,6 @@ static_library("compiler_proxy_lib") {
     "//third_party/chromium_base:cpu",
     "//third_party/jsoncpp",
     "//third_party/protobuf:protobuf_lite",
-    "//third_party/tensorflow_core:flat_map",
   ]
   public_deps = [
     ":common",
@@ -530,6 +533,26 @@ static_library("base64_lib") {
   ]
   deps = [
     "//base",
+  ]
+}
+
+static_library("file_path_util_lib") {
+  sources = [
+    "file_path_util.cc",
+    "file_path_util.h",
+  ]
+  public_deps = [
+    "//base",
+    "//third_party/abseil",
+  ]
+  deps = [
+    ":common",
+    ":ioutil_lib",
+    "//lib",
+    "//lib:compiler_flag_type_specific",
+    "//lib:vc_specific",
+    "//third_party:glog",
+    "//third_party/tensorflow_core:flat_map",
   ]
 }
 
@@ -646,6 +669,7 @@ static_library("ioutil_lib") {
     ":common",
     "//lib",
     "//third_party:glog",
+    "//third_party:minizip",
   ]
 }
 
@@ -653,6 +677,9 @@ static_library("rand_util_lib") {
   sources = [
     "rand_util.cc",
     "rand_util.h",
+  ]
+  public_deps = [
+    "//third_party/abseil",
   ]
   deps = [
     "//third_party:glog",
@@ -787,8 +814,8 @@ executable("gomacc") {
   include_dirs = [ "." ]
   deps = [
     ":breakpad_lib",
-    ":client_util_lib",
     ":common",
+    ":file_path_util_lib",
     ":gomacc_lib",
     ":ioutil_lib",
     ":subprocess_lib",
@@ -850,6 +877,7 @@ executable("goma_fetch") {
     ":ioutil_lib",
     ":oauth2_lib",
     "//build/config:exe_and_shlib_deps",
+    "//third_party/gflags",
     "//third_party/protobuf:protobuf_lite",
   ]
 
@@ -1119,9 +1147,9 @@ static_library("goma_test_lib") {
   }
   deps = [
     ":common",
-    ":ioutil_lib",
     "//base",
     "//base:goma_unittest",
+    "//lib",
     "//third_party:glog",
   ]
   public_deps = [
@@ -1183,19 +1211,6 @@ executable("callback_unittest") {
   ]
 }
 
-executable("goma_blob_unittest") {
-  testonly = true
-  sources = [
-    "goma_blob_unittest.cc",
-  ]
-  deps = [
-    ":common",
-    ":compiler_proxy_lib",
-    ":goma_test_lib",
-    "//build/config:exe_and_shlib_deps",
-  ]
-}
-
 executable("compilation_database_reader_unittest") {
   testonly = true
   sources = [
@@ -1208,17 +1223,21 @@ executable("compilation_database_reader_unittest") {
   ]
 }
 
-executable("compiler_info_state_unittest") {
+executable("compile_task_unittest") {
   testonly = true
   sources = [
-    "compiler_info_state_unittest.cc",
+    "compile_task_unittest.cc",
   ]
   deps = [
-    ":compiler_info_lib",
+    ":breakpad_lib",
     ":compiler_proxy_lib",
     ":goma_test_lib",
+    ":local_output_cache_lib",
     "//build/config:exe_and_shlib_deps",
-    "//client/cxx/include_processor:cpp_parser_lib",
+    "//client/cxx:cxx_compiler_info_builder_lib",
+    "//client/cxx/include_processor:cpp_include_processor_lib",
+    "//client/java:jar_parser_lib",
+    "//lib:compiler_flag_type_specific",
   ]
 }
 
@@ -1255,6 +1274,33 @@ executable("compiler_info_cache_unittest") {
   ]
 }
 
+executable("compiler_info_state_unittest") {
+  testonly = true
+  sources = [
+    "compiler_info_state_unittest.cc",
+  ]
+  deps = [
+    ":compiler_info_lib",
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client/cxx/include_processor:cpp_parser_lib",
+  ]
+}
+
+executable("compile_stats_unittest") {
+  testonly = true
+  sources = [
+    "compile_stats_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    ":time_util_lib",
+    "//build/config:exe_and_shlib_deps",
+  ]
+}
+
 executable("content_cursor_unittest") {
   testonly = true
   sources = [
@@ -1264,6 +1310,40 @@ executable("content_cursor_unittest") {
     ":content_lib",
     ":goma_test_lib",
     "//build/config:exe_and_shlib_deps",
+  ]
+}
+
+executable("counterz_unittest") {
+  testonly = true
+  sources = [
+    "counterz_unittest.cc",
+  ]
+  deps = [
+    ":common",
+    ":goma_test_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:glog",
+  ]
+}
+
+executable("deps_cache_unittest") {
+  testonly = true
+  sources = [
+    "deps_cache_unittest.cc",
+  ]
+  deps = [
+    ":compiler_info_lib",
+    ":deps_cache_lib",
+    ":deps_cache_proto",
+    ":file_hash_cache_lib",
+    ":goma_test_lib",
+    ":subprocess_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client/cxx:cxx_compiler_info_lib",
+    "//client/cxx/include_processor:cpp_parser_lib",
+    "//client/cxx/include_processor:include_cache_lib",
+    "//client/java:java_compiler_info_lib",
+    "//lib:compiler_flag_type_specific",
   ]
 }
 
@@ -1279,6 +1359,22 @@ executable("env_flags_unittest") {
   ]
 }
 
+executable("file_path_util_unittest") {
+  testonly = true
+  sources = [
+    "file_path_util_unittest.cc",
+  ]
+  deps = [
+    ":common",
+    ":file_path_util_lib",
+    ":goma_test_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//lib",
+    "//lib:compiler_flag_type_specific",
+    "//third_party:glog",
+  ]
+}
+
 executable("file_stat_unittest") {
   testonly = true
   sources = [
@@ -1288,6 +1384,32 @@ executable("file_stat_unittest") {
     ":common",
     ":goma_test_lib",
     ":scoped_tmp_file_lib",
+    "//build/config:exe_and_shlib_deps",
+  ]
+}
+
+executable("filename_id_table_unittest") {
+  testonly = true
+  sources = [
+    "filename_id_table_unittest.cc",
+  ]
+  deps = [
+    ":deps_cache_lib",
+    ":deps_cache_proto",
+    ":goma_test_lib",
+    "//build/config:exe_and_shlib_deps",
+  ]
+}
+
+executable("goma_blob_unittest") {
+  testonly = true
+  sources = [
+    "goma_blob_unittest.cc",
+  ]
+  deps = [
+    ":common",
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
     "//build/config:exe_and_shlib_deps",
   ]
 }
@@ -1322,6 +1444,18 @@ executable("gomacc_argv_unittest") {
   ]
 }
 
+executable("hash_rewrite_parser_unittest") {
+  testonly = true
+  sources = [
+    "hash_rewrite_parser_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config:exe_and_shlib_deps",
+  ]
+}
+
 executable("histogram_unittest") {
   testonly = true
   sources = [
@@ -1330,6 +1464,7 @@ executable("histogram_unittest") {
   deps = [
     ":compiler_proxy_lib",
     ":goma_test_lib",
+    ":scoped_tmp_file_lib",
     "//build/config:exe_and_shlib_deps",
   ]
 }
@@ -1344,6 +1479,7 @@ executable("http_unittest") {
   deps = [
     ":compiler_proxy_lib",
     ":goma_test_lib",
+    ":scoped_tmp_file_lib",
     "//build/config:exe_and_shlib_deps",
   ]
 }
@@ -1379,29 +1515,17 @@ executable("http_util_unittest") {
   ]
 }
 
-executable("hash_rewrite_parser_unittest") {
-  testonly = true
-  sources = [
-    "hash_rewrite_parser_unittest.cc",
-  ]
-  deps = [
-    ":compiler_proxy_lib",
-    ":goma_test_lib",
-    "//build/config:exe_and_shlib_deps",
-  ]
-}
-
 executable("ioutil_unittest") {
   testonly = true
   sources = [
     "ioutil_unittest.cc",
   ]
   deps = [
-    ":common",
     ":goma_test_lib",
     ":ioutil_lib",
-    "//base",
     "//build/config:exe_and_shlib_deps",
+    "//lib",
+    "//third_party/abseil",
   ]
 }
 
@@ -1442,6 +1566,20 @@ executable("list_dir_cache_unittest") {
   deps = [
     ":compiler_proxy_lib",
     ":goma_test_lib",
+    "//build/config:exe_and_shlib_deps",
+  ]
+}
+
+executable("local_output_cache_unittest") {
+  testonly = true
+  sources = [
+    "local_output_cache_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":content_lib",
+    ":goma_test_lib",
+    ":local_output_cache_lib",
     "//build/config:exe_and_shlib_deps",
   ]
 }
@@ -1511,6 +1649,47 @@ executable("oauth2_unittest") {
   ]
 }
 
+executable("openssl_engine_unittest") {
+  testonly = true
+  sources = [
+    "openssl_engine_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":goma_test_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party/boringssl",
+  ]
+  if (os == "win") {
+    deps += [ "//client/certs:certs_resource" ]
+  }
+}
+
+executable("rand_util_unittest") {
+  testonly = true
+  sources = [
+    "rand_util_unittest.cc",
+  ]
+  deps = [
+    ":goma_test_lib",
+    ":rand_util_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party/boringssl",
+  ]
+}
+
+executable("sha256_hash_cache_unittest") {
+  testonly = true
+  sources = [
+    "sha256_hash_cache_unittest.cc",
+  ]
+  deps = [
+    ":goma_test_lib",
+    ":sha256_hash_cache_lib",
+    "//build/config:exe_and_shlib_deps",
+  ]
+}
+
 executable("simple_timer_unittest") {
   testonly = true
   sources = [
@@ -1549,6 +1728,18 @@ executable("threadpool_http_server_unittest") {
   ]
 }
 
+executable("time_util_unittest") {
+  testonly = true
+  sources = [
+    "time_util_unittest.cc",
+  ]
+  deps = [
+    ":goma_test_lib",
+    ":time_util_lib",
+    "//build/config:exe_and_shlib_deps",
+  ]
+}
+
 executable("trustedipsmanager_unittest") {
   testonly = true
   sources = [
@@ -1558,6 +1749,19 @@ executable("trustedipsmanager_unittest") {
     ":compiler_proxy_lib",
     ":goma_test_lib",
     "//build/config:exe_and_shlib_deps",
+  ]
+}
+
+executable("util_unittest") {
+  testonly = true
+  sources = [
+    "util_unittest.cc",
+  ]
+  deps = [
+    ":common",
+    ":goma_test_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party:glog",
   ]
 }
 
@@ -1587,137 +1791,18 @@ executable("worker_thread_manager_unittest") {
   ]
 }
 
-executable("client_util_unittest") {
+executable("zero_copy_stream_impl_unittest") {
   testonly = true
   sources = [
-    "client_util_unittest.cc",
+    "zero_copy_stream_impl_unittest.cc",
   ]
   deps = [
-    ":client_util_lib",
-    ":common",
-    ":goma_test_lib",
-    "//build/config:exe_and_shlib_deps",
-    "//third_party:glog",
-  ]
-}
-
-executable("util_unittest") {
-  testonly = true
-  sources = [
-    "util_unittest.cc",
-  ]
-  deps = [
-    ":common",
-    ":goma_test_lib",
-    "//build/config:exe_and_shlib_deps",
-    "//third_party:glog",
-  ]
-}
-
-executable("openssl_engine_unittest") {
-  testonly = true
-  sources = [
-    "openssl_engine_unittest.cc",
-  ]
-  deps = [
+    # TODO: factor out zero_copy_stream_lib from compiler_proxy_lib
     ":compiler_proxy_lib",
     ":goma_test_lib",
+    ":ioutil_lib",
     "//build/config:exe_and_shlib_deps",
-    "//third_party/boringssl",
-  ]
-  if (os == "win") {
-    deps += [ "//client/certs:certs_resource" ]
-  }
-}
-
-executable("rand_util_unittest") {
-  testonly = true
-  sources = [
-    "rand_util_unittest.cc",
-  ]
-  deps = [
-    ":goma_test_lib",
-    ":rand_util_lib",
-    "//build/config:exe_and_shlib_deps",
-    "//third_party/boringssl",
-  ]
-}
-
-executable("deps_cache_unittest") {
-  testonly = true
-  sources = [
-    "deps_cache_unittest.cc",
-  ]
-  deps = [
-    ":compiler_info_lib",
-    ":deps_cache_lib",
-    ":deps_cache_proto",
-    ":file_hash_cache_lib",
-    ":goma_test_lib",
-    ":subprocess_lib",
-    "//build/config:exe_and_shlib_deps",
-    "//client/cxx:cxx_compiler_info_lib",
-    "//client/cxx/include_processor:cpp_parser_lib",
-    "//client/cxx/include_processor:include_cache_lib",
-    "//client/java:java_compiler_info_lib",
-    "//lib:compiler_flag_type_specific",
-  ]
-}
-
-executable("filename_id_table_unittest") {
-  testonly = true
-  sources = [
-    "filename_id_table_unittest.cc",
-  ]
-  deps = [
-    ":deps_cache_lib",
-    ":deps_cache_proto",
-    ":goma_test_lib",
-    "//build/config:exe_and_shlib_deps",
-  ]
-}
-
-executable("compile_task_unittest") {
-  testonly = true
-  sources = [
-    "compile_task_unittest.cc",
-  ]
-  deps = [
-    ":breakpad_lib",
-    ":compiler_proxy_lib",
-    ":goma_test_lib",
-    ":local_output_cache_lib",
-    "//build/config:exe_and_shlib_deps",
-    "//client/cxx:cxx_compiler_info_builder_lib",
-    "//client/cxx/include_processor:cpp_include_processor_lib",
-    "//client/java:jar_parser_lib",
-    "//lib:compiler_flag_type_specific",
-  ]
-}
-
-executable("local_output_cache_unittest") {
-  testonly = true
-  sources = [
-    "local_output_cache_unittest.cc",
-  ]
-  deps = [
-    ":compiler_proxy_lib",
-    ":content_lib",
-    ":goma_test_lib",
-    ":local_output_cache_lib",
-    "//build/config:exe_and_shlib_deps",
-  ]
-}
-
-executable("sha256_hash_cache_unittest") {
-  testonly = true
-  sources = [
-    "sha256_hash_cache_unittest.cc",
-  ]
-  deps = [
-    ":goma_test_lib",
-    ":sha256_hash_cache_lib",
-    "//build/config:exe_and_shlib_deps",
+    "//third_party/abseil",
   ]
 }
 
@@ -1881,5 +1966,21 @@ executable("execreq_normalizer_diff") {
     "//lib:compiler_flag_type_specific",
     "//third_party:glog",
     "//third_party/protobuf:protobuf_lite",
+  ]
+}
+
+# fake is a fake compiler.
+# This works like a fake compiler.
+# It just copied input *.fake to *.out.
+executable("fake_compiler") {
+  output_name = "fake"
+  sources = [
+    "fake_compiler.cc",
+  ]
+
+  deps = [
+    "//base",
+    "//build/config:exe_and_shlib_deps",
+    "//third_party/abseil",
   ]
 }
