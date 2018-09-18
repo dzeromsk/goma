@@ -43,10 +43,10 @@ class ClangCompilerInfoBuilderHelper {
   static bool GetResourceDir(const string& c_display_output,
                              CompilerInfoData* compiler_info);
 
-  // Parse |gcc_output| to get list of additional inputs.
-  static ParseStatus ParseResourceOutput(const string& gcc_path,
+  // Parse |display_output| to get list of additional inputs.
+  static ParseStatus ParseResourceOutput(const string& compiler_path,
                                          const string& cwd,
-                                         const string& gcc_output,
+                                         const string& display_output,
                                          std::vector<ResourceList>* paths);
 
   // Parses "-xc -v -E /dev/null" output and returns real clang path.

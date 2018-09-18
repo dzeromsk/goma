@@ -265,14 +265,34 @@ ClangCompilerInfoBuilderHelper::ParseResourceOutput(
     // See Also:
     // https://github.com/llvm-mirror/clang/blob/69f63a0cc21da9f587125760f10610146c8c47c3/lib/Driver/ToolChains/Gnu.cpp#L1444
     if (absl::ConsumePrefix(&line, "Selected GCC installation: ")) {
-      const auto gcc_install_path = line;
+      const auto compiler_install_path = line;
       // TODO: consider supporting IAMCU?
-      string crtbegin_path = file::JoinPath(gcc_install_path, "crtbegin.o");
+      string crtbegin_path =
+          file::JoinPath(compiler_install_path, "crtbegin.o");
       const string abs_crtbegin_path =
           file::JoinPathRespectAbsolute(cwd, crtbegin_path);
       if (access(abs_crtbegin_path.c_str(), R_OK) == 0) {
         paths->emplace_back(std::move(crtbegin_path),
                             CompilerInfoData::CLANG_GCC_INSTALLATION_MARKER);
+
+        // Also look for some common multilib crtbegin.o markers.
+        string crtbegin_32_path =
+            file::JoinPath(compiler_install_path, "32", "crtbegin.o");
+        const string abs_crtbegin_32_path =
+            file::JoinPathRespectAbsolute(cwd, crtbegin_32_path);
+        if (access(abs_crtbegin_32_path.c_str(), R_OK) == 0) {
+          paths->emplace_back(std::move(crtbegin_32_path),
+                              CompilerInfoData::CLANG_GCC_INSTALLATION_MARKER);
+        }
+
+        string crtbegin_x32_path =
+            file::JoinPath(compiler_install_path, "x32", "crtbegin.o");
+        const string abs_crtbegin_x32_path =
+            file::JoinPathRespectAbsolute(cwd, crtbegin_x32_path);
+        if (access(abs_crtbegin_x32_path.c_str(), R_OK) == 0) {
+          paths->emplace_back(std::move(crtbegin_x32_path),
+                              CompilerInfoData::CLANG_GCC_INSTALLATION_MARKER);
+        }
       } else {
         LOG(ERROR) << "specified crtbegin.o not found."
                    << " argv0=" << argv0 << " cwd=" << cwd
