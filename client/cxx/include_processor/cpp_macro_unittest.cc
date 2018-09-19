@@ -13,7 +13,7 @@ namespace {
 
 bool IsParenBalanced(const string& s) {
   ArrayTokenList tokens;
-  EXPECT_TRUE(CppTokenizer::TokenizeAll(s, true, &tokens));
+  EXPECT_TRUE(CppTokenizer::TokenizeAll(s, SpaceHandling::kSkip, &tokens));
   return Macro::IsParenBalanced(tokens);
 }
 
@@ -35,7 +35,7 @@ TEST(CppMacro, ParenBalanced) {
 
 TEST(CppMacro, Balanced) {
   ArrayTokenList tokens;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("()", true, &tokens));
+  ASSERT_TRUE(CppTokenizer::TokenizeAll("()", SpaceHandling::kSkip, &tokens));
 
   Macro macro("foo", Macro::OBJ, tokens, 0, false);
   EXPECT_TRUE(macro.is_paren_balanced);
@@ -43,7 +43,7 @@ TEST(CppMacro, Balanced) {
 
 TEST(CppMacro, Unbalanced) {
   ArrayTokenList tokens;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("(", true, &tokens));
+  ASSERT_TRUE(CppTokenizer::TokenizeAll("(", SpaceHandling::kSkip, &tokens));
 
   Macro macro("foo", Macro::OBJ, tokens, 0, false);
   EXPECT_FALSE(macro.is_paren_balanced);

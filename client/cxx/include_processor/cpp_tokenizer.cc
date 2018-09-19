@@ -71,7 +71,7 @@ namespace devtools_goma {
 
 // static
 bool CppTokenizer::TokenizeAll(const std::string& str,
-                               bool skip_space,
+                               SpaceHandling space_handling,
                                ArrayTokenList* result) {
   std::unique_ptr<Content> content = Content::CreateFromString(str);
   CppInputStream stream(content.get(), "<content>");
@@ -80,7 +80,7 @@ bool CppTokenizer::TokenizeAll(const std::string& str,
   ArrayTokenList tokens;
   while (true) {
     CppToken token;
-    if (!NextTokenFrom(&stream, skip_space, &token, &error_reason)) {
+    if (!NextTokenFrom(&stream, space_handling, &token, &error_reason)) {
       break;
     }
     if (token.type == CppToken::END) {
@@ -102,7 +102,7 @@ bool CppTokenizer::TokenizeAll(const std::string& str,
 
 // static
 bool CppTokenizer::NextTokenFrom(CppInputStream* stream,
-                                 bool skip_space,
+                                 SpaceHandling space_handling,
                                  CppToken* token,
                                  std::string* error_reason) {
   for (;;) {
@@ -117,7 +117,7 @@ bool CppTokenizer::NextTokenFrom(CppInputStream* stream,
       return true;
     }
     if (IsCppBlank(c)) {
-      if (skip_space) {
+      if (space_handling == SpaceHandling::kSkip) {
         stream->SkipWhiteSpaces();
         continue;
       }

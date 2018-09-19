@@ -640,7 +640,16 @@ class GomaDriver(object):
       print
       return
     else:
-      raise Error('Failed to start compiler_proxy successfully.')
+      sys.stderr.write('Failed to start compiler_proxy.\n')
+      try:
+        subprocess.check_call(
+            [sys.executable,
+             os.path.join(self._env.GetScriptDir(), 'goma_auth.py'),
+             'info'])
+        sys.stderr.write('Temporary error?  try again\n')
+      except subprocess.CalledProcessError:
+        pass
+      sys.exit(1)
 
   def _StartCompilerProxy(self):
     self._GenericStartCompilerProxy(ensure=False)
@@ -1044,6 +1053,7 @@ class GomaDriver(object):
     print 'Usage: %s <subcommand>, available subcommands are:' % program_name
     print '  audit                 audit goma client.'
     print '  ensure_start          start compiler proxy if it is not running'
+    print '  ensure_stop           synchronous stop of compiler proxy'
     print '  histogram             show histogram'
     print '  jsonstatus [outfile]  show status report in JSON'
     print '  report                create a report file.'
@@ -1051,7 +1061,7 @@ class GomaDriver(object):
     print '  start                 start compiler proxy'
     print '  stat                  show statistics'
     print '  status                get compiler proxy status'
-    print '  stop                  stop compiler proxy'
+    print '  stop                  asynchronous stop of compiler proxy'
 
   def _DefaultAction(self):
     if self._args and not self._args[0] in ('-h', '--help', 'help'):
@@ -1349,7 +1359,7 @@ class GomaEnv(object):
 
     r = http_opener.open(http_req)
     if destination_file:
-      with open(os.path.join(self._dir, destination_file), 'w') as f:
+      with open(os.path.join(self._dir, destination_file), 'wb') as f:
         shutil.copyfileobj(r, f)
       return
     else:
@@ -1430,7 +1440,7 @@ class GomaEnv(object):
 
 
   def WriteFile(self, filename, content):
-    with open(filename, 'w') as f:
+    with open(filename, 'wb') as f:
       f.write(content)
 
   def CopyFile(self, from_file, to_file):
@@ -1446,7 +1456,7 @@ class GomaEnv(object):
 
   def _ReadBytesFromFile(self, filename, length):
     filename = os.path.join(self._dir, filename)
-    with open(filename) as f:
+    with open(filename, 'rb') as f:
       return f.read(length)
 
   def IsValidManifest(self, directory=''):
@@ -2048,6 +2058,7 @@ class GomaEnvPosix(GomaEnv):
     if _IsGomaFlagTrue('COMPILER_PROXY_DAEMON_MODE'):
       self._is_daemon_mode = True
     return PopenWithCheck([self._compiler_proxy_binary],
+                          stdout=open(os.devnull, "w"),
                           stderr=subprocess.STDOUT)
 
   def ExtractPackage(self, package_file, update_dir):
@@ -2343,6 +2354,14 @@ class GomaBackend(object):
       url = 'https:' + url[5:]
     self._download_base_url = url
     return url
+
+  def GetPingUrl(self):
+    """Get ping url.
+
+    Returns:
+       URL for ping
+    """
+    return 'https://%s/%s/ping' % (self._stubby_host, self._path_prefix)
 
   def RewriteRequest(self, request):
     """Rewrite request based on backend needs."""

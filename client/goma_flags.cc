@@ -373,9 +373,9 @@ GOMA_DEFINE_string(OAUTH2_CONFIG_FILE, "",
                    "The file is JSON-like format, and client_id, client_secret,"
                    " and refresh_token should be set. "
 #ifndef _WIN32
-                   "$HOME/.goma_oauth2_config"
+                   "$HOME/.goma_client_oauth2_config"
 #else
-                   "%USERPROFILE%\\.goma_oauth2_config"
+                   "%USERPROFILE%\\.goma_client_oauth2_config"
 #endif
                    " will be used if no other auth config set.");
 GOMA_DEFINE_string(GCE_SERVICE_ACCOUNT, "",
@@ -636,7 +636,8 @@ GOMA_DEFINE_string(INCLUDE_PROCESSOR_CPU_PROFILE_FILE,
 GOMA_DEFINE_int32(HTTP_RPC_COMPRESSION_LEVEL, 3,
                   "Compression level in HttpRPC [0..9]."
                   "0 forces to disable compression.");
-GOMA_DEFINE_string(HTTP_ACCEPT_ENCODING, "deflate",
+// TODO: drop deflate support http://b/111907136
+GOMA_DEFINE_string(HTTP_ACCEPT_ENCODING, "gzip, deflate",
                    "Accept-Encoding of goma's requests (e.g., lzma2)");
 GOMA_DEFINE_bool(HTTP_RPC_START_COMPRESSION, true,
                  "Starts with compressed request. "

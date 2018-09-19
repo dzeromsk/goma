@@ -7,16 +7,16 @@
 namespace devtools_goma {
 
 bool CppMacroExpanderCBV::ExpandMacro(const ArrayTokenList& input,
-                                      bool skip_space,
+                                      SpaceHandling space_handling,
                                       ArrayTokenList* output) {
   output->reserve(32);
-  return Expand(input.begin(), input.end(), skip_space, MacroSet(), Env(),
+  return Expand(input.begin(), input.end(), space_handling, MacroSet(), Env(),
                 output);
 }
 
 bool CppMacroExpanderCBV::Expand(ArrayTokenList::const_iterator input_begin,
                                  ArrayTokenList::const_iterator input_end,
-                                 bool skip_space,
+                                 SpaceHandling space_handling,
                                  const MacroSet& hideset,
                                  const Env& env,
                                  ArrayTokenList* output) {
@@ -24,7 +24,7 @@ bool CppMacroExpanderCBV::Expand(ArrayTokenList::const_iterator input_begin,
     const CppToken& token = *it;
 
     if (token.type == CppToken::SPACE) {
-      if (!skip_space) {
+      if (space_handling == SpaceHandling::kKeep) {
         output->push_back(token);
       }
       continue;
@@ -79,7 +79,7 @@ bool CppMacroExpanderCBV::Expand(ArrayTokenList::const_iterator input_begin,
       MacroSet new_hideset(hideset);
       new_hideset.Set(macro);
       if (!Expand(macro->replacement.begin(), macro->replacement.end(),
-                  skip_space, new_hideset, Env(), output)) {
+                  space_handling, new_hideset, Env(), output)) {
         return false;
       }
       continue;
@@ -107,7 +107,7 @@ bool CppMacroExpanderCBV::Expand(ArrayTokenList::const_iterator input_begin,
 
       Env new_env(args.size());
       for (size_t i = 0; i < args.size(); ++i) {
-        if (!Expand(args[i].first, args[i].second, skip_space, hideset, env,
+        if (!Expand(args[i].first, args[i].second, space_handling, hideset, env,
                     &new_env[i])) {
           return false;
         }
@@ -127,7 +127,7 @@ bool CppMacroExpanderCBV::Expand(ArrayTokenList::const_iterator input_begin,
         new_hideset.Set(macro);
 
         if (!Expand(macro->replacement.begin(), macro->replacement.end(),
-                    skip_space, new_hideset, new_env, output)) {
+                    space_handling, new_hideset, new_env, output)) {
           return false;
         }
       }

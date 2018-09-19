@@ -10,18 +10,19 @@
 namespace devtools_goma {
 
 ArrayTokenList CppMacroExpander::Expand(const ArrayTokenList& input_tokens,
-                                        bool skip_space) {
+                                        SpaceHandling space_handling) {
   ArrayTokenList result;
 
   // Try CBV one first.
-  if (CppMacroExpanderCBV(parser_).ExpandMacro(input_tokens, skip_space,
+  if (CppMacroExpanderCBV(parser_).ExpandMacro(input_tokens, space_handling,
                                                &result)) {
     return result;
   }
 
   // fallback to precise case.
   result.clear();
-  CppMacroExpanderNaive(parser_).ExpandMacro(input_tokens, skip_space, &result);
+  CppMacroExpanderNaive(parser_).ExpandMacro(input_tokens, space_handling,
+                                             &result);
 
   return result;
 }

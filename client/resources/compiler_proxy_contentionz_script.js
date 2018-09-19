@@ -6,9 +6,13 @@
 
 function addSortFunction(key) {
   var sorter = function(a, b) {
-    var avalue = parseFloat($(a).find(key).text());
-    var bvalue = parseFloat($(b).find(key).text());
-    return avalue > bvalue ? -1 : 1;
+    const aelem = $(a).find(key);
+    const belem = $(b).find(key);
+
+    const av = aelem.data("to-compare");
+    const bv = belem.data("to-compare");
+
+    return av > bv ? -1 : 1;
   }
 
   $('th' + key).click(

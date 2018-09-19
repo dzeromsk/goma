@@ -52,27 +52,31 @@ class CppErrorObserver : public CppParser::ErrorObserver {
   std::vector<string> errors_;
 };
 
-void CheckExpand(CheckFlag check_flag,
-                 const string& defines,
-                 const string& expand,
-                 const string& expected) {
+void CheckExpandInternal(CheckFlag check_flag,
+                         const string& defines,
+                         const string& expand,
+                         const string& expected,
+                         SpaceHandling space_handling) {
   CppErrorObserver error_observer;
   CppParser cpp_parser;
   cpp_parser.set_error_observer(&error_observer);
   cpp_parser.AddStringInput(defines, "(string)");
   EXPECT_TRUE(cpp_parser.ProcessDirectives());
 
+  // |expand| should not skip space for stringize.
   ArrayTokenList tokens;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll(expand, false, &tokens));
+  ASSERT_TRUE(CppTokenizer::TokenizeAll(expand, SpaceHandling::kKeep, &tokens));
 
   // For expected tokens, remove spaces since ExpandMacro() has also
-  // skip_space=true.
+  // space_handling=true.
   ArrayTokenList expected_tokens;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll(expected, true, &expected_tokens));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll(expected, space_handling, &expected_tokens));
 
   {
     ArrayTokenList expanded;
-    CppMacroExpanderNaive(&cpp_parser).ExpandMacro(tokens, true, &expanded);
+    CppMacroExpanderNaive(&cpp_parser)
+        .ExpandMacro(tokens, space_handling, &expanded);
     if (check_flag == CheckFlag::kError) {
       EXPECT_FALSE(error_observer.errors().empty())
           << "should fail, but succeeded\n"
@@ -94,8 +98,8 @@ void CheckExpand(CheckFlag check_flag,
   {
     error_observer.ClearError();
     ArrayTokenList expanded;
-    bool ok =
-        CppMacroExpanderCBV(&cpp_parser).ExpandMacro(tokens, true, &expanded);
+    bool ok = CppMacroExpanderCBV(&cpp_parser)
+                  .ExpandMacro(tokens, SpaceHandling::kSkip, &expanded);
     if (check_flag == CheckFlag::kPassAll) {
       EXPECT_TRUE(ok);
       EXPECT_EQ(expected_tokens, expanded)
@@ -112,6 +116,22 @@ void CheckExpand(CheckFlag check_flag,
                        << "expanded: " << DebugString(expanded);
     }
   }
+}
+
+void CheckExpand(CheckFlag check_flag,
+                 const string& defines,
+                 const string& expand,
+                 const string& expected) {
+  CheckExpandInternal(check_flag, defines, expand, expected,
+                      SpaceHandling::kSkip);
+}
+
+void CheckExpandKeepSpaces(CheckFlag check_flag,
+                           const string& defines,
+                           const string& expand,
+                           const string& expected) {
+  CheckExpandInternal(check_flag, defines, expand, expected,
+                      SpaceHandling::kKeep);
 }
 
 TEST(CppMacroExpanderTest, ExpandEmpty) {
@@ -542,15 +562,36 @@ TEST(CppMacroExpanderTest, Glue) {
               "GLUE(, \"foo\")",
               "\"foo\"");
 
-  CheckExpand(CheckFlag::kError,
-              "#define GLUE(X, Y) X ## Y\n",
-              "GLUE(\"foo\", \"bar\")",
-              "");
-
   CheckExpand(CheckFlag::kPassNaive,
               "#define GLUE(X, Y) X ## Y\n",
               "GLUE(|, |)",
               "||");
+}
+
+TEST(CppMacroExpanderTest, GlueInclude) {
+  // This test was added for b/114679387.
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define GLUE(X, Y) X ## Y\n"
+              "#define FOOBAR <GLUE(foo,bar).h>\n",
+              "#include FOOBAR",
+              "#include <foobar.h>");
+
+  CheckExpand(CheckFlag::kPassNaive,
+              "#define GLUE(X, Y) X ## Y\n"
+              "#define FOOBAR <GLUE(foo/,bar).h>\n",
+              "#include FOOBAR",
+              "#include <foo/bar.h>");
+
+  CheckExpandKeepSpaces(
+      CheckFlag::kPassNaive,
+      "#define BOOST_JOIN( X, Y ) BOOST_DO_JOIN( X, Y )\n"
+      "#define BOOST_DO_JOIN( X, Y ) BOOST_DO_JOIN2(X,Y)\n"
+      "#define BOOST_DO_JOIN2( X, Y ) X##Y\n"
+      "#define BOOST_ATOMIC_DETAIL_PLATFORM gcc_atomic\n"
+      "#define BOOST_ATOMIC_DETAIL_HEADER(prefix) "
+      "    <BOOST_JOIN(prefix, BOOST_ATOMIC_DETAIL_PLATFORM).hpp>\n",
+      "BOOST_ATOMIC_DETAIL_HEADER(boost/atomic/detail/caps_)",
+      "<boost/atomic/detail/caps_gcc_atomic.hpp>");
 }
 
 TEST(CppMacroExpanderTest, Complex) {

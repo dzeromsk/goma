@@ -10,6 +10,7 @@
 #ifndef _WIN32
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -109,10 +110,11 @@ void SubProcessController::Initialize(
     LOG(INFO) << "SubProcessControllerServer launched";
     SubProcessControllerServer* server =
         new SubProcessControllerServer(sockfd[0], options);
-    server->Loop();
+    bool shutdowned = server->Loop();
     delete server;
-    LOG(INFO) << "SubProcessControllerServer terminated";
-    exit(0);
+    LOG(INFO) << "SubProcessControllerServer terminated shutdowned="
+              << shutdowned;
+    OnPeerShutdowned(shutdowned);
   }
   close(sockfd[0]);
   SubProcessControllerClient::Create(sockfd[1], pid, options);
@@ -183,16 +185,17 @@ bool SubProcessController::WriteMessage(const IOChannel* fd) {
   VLOG(2) << "WriteMessage fd=" << *fd
           << " pending_write=" << pending_write_.size();
   if (pending_write_.empty())
-    return false;
+    return true;
 
   int r = fd->Write(&pending_write_[0], pending_write_.size());
   if (r <= 0) {
     if (errno == EINTR || errno == EAGAIN)
       return true;
-    PLOG(FATAL) << "write " << *fd << " failed " << r;
+    PLOG(ERROR) << "write " << *fd << " failed " << r;
+    return false;
   }
   pending_write_ = pending_write_.substr(r);
-  return !pending_write_.empty();
+  return true;
 }
 
 bool SubProcessController::ReadMessage(const IOChannel* fd,
@@ -215,7 +218,9 @@ bool SubProcessController::ReadMessage(const IOChannel* fd,
     if (errno == EINTR || errno == EAGAIN)
       return false;
 #endif
-    PLOG(FATAL) << "read " << *fd << " failed " << r;
+    PLOG(ERROR) << "read " << *fd << " failed " << r;
+    *op = CLOSED;
+    return true;
   }
   read_len_ += r;
   if (read_len_ >= kMessageHeaderLen) {
@@ -243,5 +248,22 @@ void SubProcessController::ReadDone() {
   pending_read_.clear();
   read_len_ = 0;
 }
+
+#ifndef _WIN32
+void SubProcessController::OnPeerShutdowned(bool shutdowned) {
+  pid_t peer = getppid();
+  // compiler_proxy (subprocess controller client) was killed or crashed?
+  if (kill(peer, 0) == 0) {
+    if (shutdowned) {
+      LOG(INFO) << "peer is alive. normal shutdown sequence";
+      exit(0);
+    }
+    LOG(FATAL) << "peer is alive, but connection closed? "
+               << " pid=" << peer;
+  }
+  PLOG(ERROR) << "peer is not alive. unexpected compiler_proxy dies?";
+  exit(0);
+}
+#endif
 
 }  // namespace devtools_goma

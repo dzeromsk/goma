@@ -101,7 +101,7 @@ SubProcessControllerServer::~SubProcessControllerServer() {
   LOG(INFO) << "SubProcessControllerServer deleted.";
 }
 
-void SubProcessControllerServer::Loop() {
+bool SubProcessControllerServer::Loop() {
   VLOG(1) << "Loop";
 #ifndef _WIN32
   SetupSigchldHandler();
@@ -172,6 +172,10 @@ void SubProcessControllerServer::Loop() {
       DoSignal();
     }
 #endif
+    if (shutdowned_ && subprocs_.empty()) {
+      LOG(INFO) << "shutdown: no subprocs";
+      break;
+    }
   }
   LOG(INFO) << "Terminating...";
   FlushLogFiles();
@@ -192,10 +196,18 @@ void SubProcessControllerServer::Loop() {
   }
   FlushLogFiles();
   subprocs_.clear();
+  return shutdowned_;
 }
 
 void SubProcessControllerServer::Register(std::unique_ptr<SubProcessReq> req) {
   LOG(INFO) << "id=" << req->id() << " Register " << req->trace_id();
+  if (shutdowned_) {
+    LOG(INFO) << "shutdowning: refuse Regsiter id=" << req->id();
+    SubProcessTerminated terminated;
+    terminated.set_id(req->id());
+    SendNotify(SubProcessController::TERMINATED, terminated);
+    return;
+  }
   bool dont_kill = false;
   if (options_.dont_kill_subprocess ||
       !CanKillCommand(req->prog(), options_.dont_kill_commands)) {
@@ -212,6 +224,10 @@ void SubProcessControllerServer::Register(std::unique_ptr<SubProcessReq> req) {
 void SubProcessControllerServer::RequestRun(
     std::unique_ptr<SubProcessRun> run) {
   VLOG(1) << "id=" << run->id() << " Run";
+  if (shutdowned_) {
+    LOG(WARNING) << "shutdowning: ignore RequestRun id=" << run->id();
+    return;
+  }
   SubProcessImpl* s = LookupSubProcess(run->id());
   if (s == nullptr) {
     LOG(WARNING) << "id=" << run->id() << " request run unknown id "
@@ -230,6 +246,9 @@ void SubProcessControllerServer::Kill(std::unique_ptr<SubProcessKill> kill) {
                  << "(maybe already killed?)";
     return;
   }
+  if (shutdowned_) {
+    LOG(WARNING) << "shutdowning: Kill id=" << kill->id();
+  }
   if (!s->Kill()) {
     std::unique_ptr<SubProcessTerminated> terminated(s->Wait(false));
     if (terminated != nullptr) {
@@ -242,6 +261,10 @@ void SubProcessControllerServer::Kill(std::unique_ptr<SubProcessKill> kill) {
 
 void SubProcessControllerServer::SetOption(
     std::unique_ptr<SubProcessSetOption> opt) {
+  if (shutdowned_) {
+    LOG(INFO) << "shutdowning: ignore SetOption";
+    return;
+  }
   if (opt->has_max_subprocs() &&
       options_.max_subprocs != opt->max_subprocs()) {
     if (opt->max_subprocs() > 0) {
@@ -415,7 +438,10 @@ void SubProcessControllerServer::SendNotify(
 
 void SubProcessControllerServer::DoWrite() {
   VLOG(2) << "DoWrite";
-  WriteMessage(&sock_fd_);
+  if (!WriteMessage(&sock_fd_)) {
+    LOG(ERROR) << "write error";
+    sock_fd_.reset(-1);
+  }
 }
 
 void SubProcessControllerServer::DoRead() {
@@ -428,6 +454,7 @@ void SubProcessControllerServer::DoRead() {
   VLOG(2) << "op=" << op << " len=" << len;
   switch (op) {
     case SubProcessController::CLOSED:
+      LOG(ERROR) << "read: closed";
       sock_fd_.reset(-1);
       break;
 
@@ -470,6 +497,12 @@ void SubProcessControllerServer::DoRead() {
         }
       }
       break;
+
+    case SubProcessController::SHUTDOWN:
+      LOG(INFO) << "shutdown requested";
+      shutdowned_ = true;
+      break;
+
     default:
       LOG(FATAL) << "Unknown SubProcessController::Op " << op;
   }

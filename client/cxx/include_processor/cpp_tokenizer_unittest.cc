@@ -128,22 +128,27 @@ TEST(CppTokenizerTest, TokenizeDefineString) {
       "#define KOTORI \"piyo\\\"piyo\""));
   CppInputStream stream(content.get(), "<content>");
 
-  EXPECT_TRUE(CppTokenizer::NextTokenFrom(&stream, true, &t, &error));
+  EXPECT_TRUE(
+      CppTokenizer::NextTokenFrom(&stream, SpaceHandling::kSkip, &t, &error));
   EXPECT_EQ(t.type, CppToken::SHARP);
 
-  EXPECT_TRUE(CppTokenizer::NextTokenFrom(&stream, true, &t, &error));
+  EXPECT_TRUE(
+      CppTokenizer::NextTokenFrom(&stream, SpaceHandling::kSkip, &t, &error));
   EXPECT_EQ(t.type, CppToken::IDENTIFIER);
   EXPECT_EQ(t.string_value, "define");
 
-  EXPECT_TRUE(CppTokenizer::NextTokenFrom(&stream, true, &t, &error));
+  EXPECT_TRUE(
+      CppTokenizer::NextTokenFrom(&stream, SpaceHandling::kSkip, &t, &error));
   EXPECT_EQ(t.type, CppToken::IDENTIFIER);
   EXPECT_EQ(t.string_value, "KOTORI");
 
-  EXPECT_TRUE(CppTokenizer::NextTokenFrom(&stream, true, &t, &error));
+  EXPECT_TRUE(
+      CppTokenizer::NextTokenFrom(&stream, SpaceHandling::kSkip, &t, &error));
   EXPECT_EQ(t.type, CppToken::STRING);
   EXPECT_EQ(t.string_value, "piyo\\\"piyo");
 
-  EXPECT_TRUE(CppTokenizer::NextTokenFrom(&stream, true, &t, &error));
+  EXPECT_TRUE(
+      CppTokenizer::NextTokenFrom(&stream, SpaceHandling::kSkip, &t, &error));
   EXPECT_EQ(t.type, CppToken::END);
 }
 
@@ -151,7 +156,8 @@ TEST(CppTokenizerTest, TokenizeIdentifier) {
   const string content = "A B $X X$ $X$ __$X";
 
   ArrayTokenList tokens;
-  EXPECT_TRUE(CppTokenizer::TokenizeAll(content, true, &tokens));
+  EXPECT_TRUE(
+      CppTokenizer::TokenizeAll(content, SpaceHandling::kSkip, &tokens));
   // [A][B][$X][X$][$X$][__$X]
   ASSERT_EQ(6U, tokens.size());
 
@@ -167,12 +173,14 @@ TEST(CppTokenizerTest, TokenizeAll) {
   const string content = "A B 1+2";
 
   ArrayTokenList tokens_wos;
-  EXPECT_TRUE(CppTokenizer::TokenizeAll(content, true, &tokens_wos));
+  EXPECT_TRUE(
+      CppTokenizer::TokenizeAll(content, SpaceHandling::kSkip, &tokens_wos));
   // [A][B][1][+][2]
   EXPECT_EQ(5U, tokens_wos.size());
 
   ArrayTokenList tokens_ws;
-  EXPECT_TRUE(CppTokenizer::TokenizeAll(content, false, &tokens_ws));
+  EXPECT_TRUE(
+      CppTokenizer::TokenizeAll(content, SpaceHandling::kKeep, &tokens_ws));
   // [A][ ][B][ ][1][+][2]
   EXPECT_EQ(7U, tokens_ws.size());
 }

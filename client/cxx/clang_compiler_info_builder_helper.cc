@@ -274,7 +274,6 @@ ClangCompilerInfoBuilderHelper::ParseResourceOutput(
       if (access(abs_crtbegin_path.c_str(), R_OK) == 0) {
         paths->emplace_back(std::move(crtbegin_path),
                             CompilerInfoData::CLANG_GCC_INSTALLATION_MARKER);
-
         // Also look for some common multilib crtbegin.o markers.
         string crtbegin_32_path =
             file::JoinPath(compiler_install_path, "32", "crtbegin.o");

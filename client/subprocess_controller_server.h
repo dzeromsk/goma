@@ -36,7 +36,9 @@ class SubProcessControllerServer: public SubProcessController {
                              SubProcessController::Options options);
   ~SubProcessControllerServer() override;
 
-  void Loop();
+  // Returns true if client requested shutdown.
+  // Returns false if unexpected shutdown.
+  bool Loop();
 
  private:
   SubProcessImpl* LookupSubProcess(int id);
@@ -71,6 +73,7 @@ class SubProcessControllerServer: public SubProcessController {
 #endif
   int timeout_millisec_;
   SubProcessController::Options options_;
+  bool shutdowned_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(SubProcessControllerServer);
 };

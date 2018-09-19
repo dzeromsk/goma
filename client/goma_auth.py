@@ -26,7 +26,9 @@ OAUTH_TOKEN_ENDPOINT = 'https://www.googleapis.com/oauth2/v3/token'
 TOKEN_INFO_ENDPOINT = 'https://www.googleapis.com/oauth2/v3/tokeninfo'
 OOB_CALLBACK_URN = 'urn:ietf:wg:oauth:2.0:oob'
 
-DEFAULT_GOMA_OAUTH2_CONFIG_FILE_NAME = '.goma_oauth2_config'
+GOMA_SETTINGS_URI = 'https://cxx-compiler-service.appspot.com/settings'
+
+DEFAULT_GOMA_OAUTH2_CONFIG_FILE_NAME = '.goma_client_oauth2_config'
 
 OAUTH_STATE_LENGTH = 64
 
@@ -323,6 +325,22 @@ def VerifyRefreshToken(config):
   return ''
 
 
+def CheckSettings():
+  """Check settings with current login user.
+
+  Returns:
+    true if user is ready to use Goma.
+  """
+  cmd = [GOMA_FETCH, GOMA_SETTINGS_URI]
+  try:
+    subprocess.check_output(cmd, stderr=subprocess.STDOUT)  # discard outputs.
+    print 'Ready to use Goma'
+    return True
+  except subprocess.CalledProcessError:
+    print 'Current user is not registered with Goma service. Unable to use Goma'
+  return False
+
+
 def Login():
   """Performs interactive login and caches authentication token.
 
@@ -349,6 +367,8 @@ def Login():
     return 1
 
   config.Save()
+  if not CheckSettings():
+    return 1
   return 0
 
 
@@ -376,6 +396,8 @@ def Info():
   err = VerifyRefreshToken(config)
   if err:
     sys.stderr.write(err + '\n')
+    return 1
+  if not CheckSettings():
     return 1
   return 0
 

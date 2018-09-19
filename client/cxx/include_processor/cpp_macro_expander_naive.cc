@@ -90,7 +90,7 @@ bool HasVariadicArgs(const Macro& macro,
 }  // anonymous namespace
 
 void CppMacroExpanderNaive::ExpandMacro(const ArrayTokenList& input_tokens,
-                                        bool skip_space,
+                                        SpaceHandling space_handling,
                                         ArrayTokenList* output_tokens) {
   TokenHSList input;
   for (const auto& t : input_tokens) {
@@ -100,7 +100,7 @@ void CppMacroExpanderNaive::ExpandMacro(const ArrayTokenList& input_tokens,
   TokenHSList output;
   TokenHSListRange input_range(input.begin(), input.end());
   // TODO: check error?
-  Expand(&input, input_range, skip_space, &output);
+  Expand(&input, input_range, space_handling, &output);
 
   for (const auto& o : output) {
     output_tokens->push_back(o.token);
@@ -109,13 +109,14 @@ void CppMacroExpanderNaive::ExpandMacro(const ArrayTokenList& input_tokens,
 
 bool CppMacroExpanderNaive::Expand(TokenHSList* input,
                                    TokenHSListRange input_range,
-                                   bool skip_space,
+                                   SpaceHandling space_handling,
                                    TokenHSList* output) {
   DCHECK(output);
 
   while (input_range.begin != input_range.end) {
     if (input_range.begin->token.type != CppToken::IDENTIFIER) {
-      if (input_range.begin->token.type != CppToken::SPACE || !skip_space) {
+      if (input_range.begin->token.type != CppToken::SPACE ||
+          space_handling == SpaceHandling::kKeep) {
         output->push_back(*input_range.begin);
       }
       ++input_range.begin;
@@ -510,10 +511,9 @@ bool CppMacroExpanderNaive::Substitute(
 
     // Case 5. param <remainder>
     if (it->IsMacroParamType()) {
-      bool skip_space = false;
       TokenHSList actual = actuals[it->v.param_index];
       if (!Expand(&actual, TokenHSListRange(actual.begin(), actual.end()),
-                  skip_space, output)) {
+                  SpaceHandling::kKeep, output)) {
         return false;
       }
       ++it;
@@ -564,23 +564,32 @@ bool CppMacroExpanderNaive::Glue(TokenHSList* output, const TokenHS& ths) {
   string s = s1 + s2;
 
   ArrayTokenList tokens;
-  if (!CppTokenizer::TokenizeAll(s, true, &tokens)) {
+  if (!CppTokenizer::TokenizeAll(s, SpaceHandling::kSkip, &tokens)) {
     string error_message =
         "does not give a valid preprocessing token: failed to tokenize: " + s;
     parser_->Error(error_message);
     LOG(WARNING) << error_message;
     return false;
   }
-  if (tokens.size() != 1) {
-    string error_message =
-        "does not give a valid preprocessing token: more than one token: " + s;
-    parser_->Error(error_message);
-    LOG(WARNING) << error_message;
-    return false;
-  }
 
-  output->back().hideset.Intersection(ths.hideset);
-  output->back().token = std::move(tokens[0]);
+  // Usually "##" should generate one valid token, however, multiple tokens are
+  // allowed in the case of #include. Here, we allow "##" to generate multiple
+  // tokens anyway.
+  //
+  // For example, take the following code:
+  //    #define F(X, Y) X ## Y
+  //    #define D F(sys/, foo.h)
+  //    #include D
+  // This code causes an error like:
+  // > pasting "/" and "foo" does not give a valid preprocessing token.
+
+  auto new_hideset = output->back().hideset;
+  new_hideset.Intersection(ths.hideset);
+  // Replace the previous last-token with all the new token(s).
+  output->pop_back();
+  for (auto& token : tokens) {
+    output->emplace_back(std::move(token), new_hideset);
+  }
   return true;
 }
 
@@ -688,6 +697,18 @@ bool CppMacroExpanderNaive::GetMacroArgument(const TokenHSListRange& range,
   }
 
   arg_range->end = *cur;
+
+  // We have to drop trailing spaces from |arg_range|.
+  while (arg_range->begin != arg_range->end) {
+    auto end_it = arg_range->end;
+    --end_it;
+    if (end_it->token.type == CppToken::SPACE) {
+      arg_range->end = end_it;
+      continue;
+    }
+
+    break;
+  }
 
   return paren_depth == 0;
 }

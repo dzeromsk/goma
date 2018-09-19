@@ -569,7 +569,8 @@ void CppParser::ProcessIncludeInternal(const CppDirectiveIncludeBase& d) {
 
   DCHECK_EQ(' ', d.delimiter());
 
-  ArrayTokenList expanded = CppMacroExpander(this).Expand(d.tokens(), false);
+  ArrayTokenList expanded =
+      CppMacroExpander(this).Expand(d.tokens(), SpaceHandling::kKeep);
 
   if (expanded.empty()) {
     Error("#include expects \"filename\" or <filename>");
@@ -675,7 +676,8 @@ int CppParser::EvalCondition(const ArrayTokenList& orig_tokens) {
   }
 
   // 2. Expands macros.
-  ArrayTokenList expanded = CppMacroExpander(this).Expand(tokens, true);
+  ArrayTokenList expanded =
+      CppMacroExpander(this).Expand(tokens, SpaceHandling::kSkip);
 
   // 3. Evaluates the expanded integer constant expression.
   return CppIntegerConstantEvaluator(expanded, this).GetValue();
@@ -771,7 +773,8 @@ bool CppParser::ProcessHasIncludeInternal(const ArrayTokenList& tokens,
   }
 
   ArrayTokenList tokenlist(tokens.begin(), tokens.end());
-  ArrayTokenList expanded = CppMacroExpander(this).Expand(tokenlist, false);
+  ArrayTokenList expanded =
+      CppMacroExpander(this).Expand(tokenlist, SpaceHandling::kKeep);
   if (expanded.empty()) {
     Error("__has_include expects \"filename\" or <filename>");
     return false;
@@ -822,7 +825,8 @@ CppParser::Token CppParser::ProcessHasCheckMacro(
     return Token(0);
   }
 
-  ArrayTokenList expanded = CppMacroExpander(this).Expand(tokens, true);
+  ArrayTokenList expanded =
+      CppMacroExpander(this).Expand(tokens, SpaceHandling::kSkip);
   if (expanded.empty()) {
     Error(name + " expects an identifier");
     return Token(0);

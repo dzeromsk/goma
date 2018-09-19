@@ -7,6 +7,7 @@
 
 #include "cpp_parser.h"
 #include "cpp_token.h"
+#include "space_handling.h"
 
 namespace devtools_goma {
 
@@ -14,7 +15,8 @@ class CppMacroExpander {
  public:
   explicit CppMacroExpander(CppParser* parser) : parser_(parser) {}
 
-  ArrayTokenList Expand(const ArrayTokenList& input_tokens, bool skip_space);
+  ArrayTokenList Expand(const ArrayTokenList& input_tokens,
+                        SpaceHandling space_handling);
 
  private:
   CppParser* parser_;

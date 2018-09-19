@@ -11,6 +11,7 @@
 #include "cpp_macro_set.h"
 #include "cpp_token.h"
 #include "gtest/gtest_prod.h"
+#include "space_handling.h"
 
 namespace devtools_goma {
 
@@ -43,7 +44,7 @@ class CppMacroExpanderNaive {
   explicit CppMacroExpanderNaive(CppParser* parser) : parser_(parser) {}
 
   void ExpandMacro(const ArrayTokenList& input,
-                   bool skip_space,
+                   SpaceHandling space_handling,
                    ArrayTokenList* output);
 
  private:
@@ -56,7 +57,7 @@ class CppMacroExpanderNaive {
 
   bool Expand(TokenHSList* input,
               TokenHSListRange input_range,
-              bool skip_space,
+              SpaceHandling space_handling,
               TokenHSList* output);
 
   bool Substitute(const Macro& macro,
@@ -97,6 +98,7 @@ class CppMacroExpanderNaive {
   FRIEND_TEST(CppMacroExpanderNaiveTest, GetMacroArgumentsEmptyArg);
   FRIEND_TEST(CppMacroExpanderNaiveTest, GetMacroArgumentsNoParen);
   FRIEND_TEST(CppMacroExpanderNaiveTest, GetMacroArgumentsUnterminatedParen);
+  FRIEND_TEST(CppMacroExpanderNaiveTest, GetMacroArgumentsWithSpaces);
   FRIEND_TEST(CppMacroExpanderNaiveTest, GetVaOptArgument);
 };
 

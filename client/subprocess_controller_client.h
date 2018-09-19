@@ -91,6 +91,7 @@ class SubProcessControllerClient: public SubProcessController {
 
   void DoRead();
 
+  void OnClosed();
   void RunCheckSignaled();
   void CheckSignaled();
 
@@ -111,6 +112,7 @@ class SubProcessControllerClient: public SubProcessController {
   Options current_options_ GUARDED_BY(mu_);
   PeriodicClosureId periodic_closure_id_ GUARDED_BY(mu_);
   bool quit_ GUARDED_BY(mu_);
+  bool closed_ GUARDED_BY(mu_);
 
   mutable Lock initialized_mu_;
   bool initialized_ GUARDED_BY(initialized_mu_);

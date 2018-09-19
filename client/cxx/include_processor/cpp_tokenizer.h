@@ -10,6 +10,7 @@
 #include "cpp_input_stream.h"
 #include "cpp_token.h"
 #include "gtest/gtest_prod.h"
+#include "space_handling.h"
 
 namespace devtools_goma {
 
@@ -20,14 +21,14 @@ class CppTokenizer {
   void operator=(const CppTokenizer&) = delete;
 
   static bool NextTokenFrom(CppInputStream* stream,
-                            bool skip_space,
+                            SpaceHandling space_handling,
                             CppToken* token,
                             std::string* error_reason);
 
   // utility function to get all tokens
   // Returns true if succeeds, false otherwise.
   static bool TokenizeAll(const std::string& str,
-                          bool skip_space,
+                          SpaceHandling space_handling,
                           ArrayTokenList* result);
 
   // Reads string CppToken.

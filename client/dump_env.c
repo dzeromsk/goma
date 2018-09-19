@@ -11,9 +11,11 @@ int main(int argc, char** argv, char** envp) {
   for (i = 0; i < argc; i++) {
     fprintf(stdout, "%s\n", argv[i]);
   }
+  fflush(stdout);
   for (env = envp; *env; env++) {
     fprintf(stderr, "%s\n", *env);
   }
+  fflush(stderr);
 
   return 0;
 }

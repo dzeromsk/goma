@@ -1241,6 +1241,11 @@ void CompileTask::ProcessFileRequest() {
     ProcessFinished("aborted before file req");
     return;
   }
+  if (canceled_) {
+    ProcessPendingFileRequest();
+    ProcessFinished("canceled before file req");
+    return;
+  }
   state_ = FILE_REQ;
   if (ShouldStopGoma()) {
     ProcessPendingFileRequest();
@@ -1409,6 +1414,10 @@ void CompileTask::ProcessFileRequestDone() {
     ProcessFinished("aborted in file req");
     return;
   }
+  if (canceled_) {
+    ProcessFinished("canceled in file req");
+    return;
+  }
   if (!input_file_success_) {
     if (IsSubprocRunning()) {
       VLOG(1) << trace_id_ << " file request failed,"
@@ -1508,6 +1517,10 @@ void CompileTask::ProcessCallExec() {
   CHECK_EQ(FILE_REQ, state_);
   if (abort_) {
     ProcessFinished("aborted before call exec");
+    return;
+  }
+  if (canceled_) {
+    ProcessFinished("canceled before call exec");
     return;
   }
   CHECK(!requester_env_.verify_command().empty() ||
@@ -1611,6 +1624,10 @@ void CompileTask::ProcessCallExecDone() {
 
   if (abort_) {
     ProcessFinished("aborted in call exec");
+    return;
+  }
+  if (canceled_) {
+    ProcessFinished("canceled in call exec");
     return;
   }
 
@@ -1763,6 +1780,10 @@ void CompileTask::ProcessFileResponse() {
   CHECK(state_ == CALL_EXEC || state_ == LOCAL_OUTPUT) << state_;
   if (abort_) {
     ProcessFinished("aborted before file resp");
+    return;
+  }
+  if (canceled_) {
+    ProcessFinished("canceled before file resp");
     return;
   }
   state_ = FILE_RESP;
@@ -1954,7 +1975,13 @@ void CompileTask::ProcessFileResponseDone() {
     ProcessFinished("aborted in file resp");
     return;
   }
+  if (canceled_) {
+    ProcessFinished("canceled in file resp");
+    return;
+  }
   if (!output_file_success_) {
+    // TODO: remove following if (!abort_).
+    // I belive it should always be true, or abort_ must be protected by mutex.
     if (!abort_) {
       if (!(precompiling_ && service_->enable_gch_hack()) &&
           IsSubprocRunning()) {
@@ -2053,10 +2080,11 @@ void CompileTask::ProcessFileResponseDone() {
 }
 
 void CompileTask::ProcessFinished(const string& msg) {
-  if (abort_ || !msg.empty()) {
+  if (abort_ || canceled_ || !msg.empty()) {
     LOG(INFO) << trace_id_ << " finished " << msg
               << " state=" << StateName(state_)
-              << " abort=" << abort_;
+              << " abort=" << abort_
+              << " canceled=" << canceled_;
   } else {
     VLOG(1) << trace_id_ << " finished " << msg
             << " state=" << StateName(state_);
@@ -3430,6 +3458,11 @@ void CompileTask::SetupRequestDone(bool ok) {
     return;
   }
 
+  if (canceled_) {
+    ProcessFinished("canceled in setup");
+    return;
+  }
+
   if (!ok) {
     if (should_fallback_) {
       VLOG(1) << trace_id_ << " should fallback by setup failure";
@@ -3668,6 +3701,8 @@ struct CompileTask::IncludeProcessorResponseParam {
   CompilerTypeSpecific::IncludeProcessorResult result;
   // return borrowed file_stat_cache to CompileTask.
   std::unique_ptr<FileStatCache> file_stat_cache;
+  // true if include processor was canceled.
+  bool canceled = false;
 };
 
 void CompileTask::StartIncludeProcessor() {
@@ -3724,6 +3759,23 @@ void CompileTask::RunIncludeProcessor(
       DurationToIntMs(include_processor_wait_time));
   stats_->include_processor_wait_time = include_processor_wait_time;
 
+  if (canceled_ || abort_) {
+    LOG(INFO) << trace_id_
+              << " won't run include processor because result won't be used."
+              << " canceled=" << canceled_
+              << " abort=" << abort_;
+    auto response_param = absl::make_unique<IncludeProcessorResponseParam>();
+    response_param->canceled = true;
+    response_param->file_stat_cache = std::move(request_param->file_stat_cache);
+    response_param->file_stat_cache->ReleaseOwner();
+    service_->wm()->RunClosureInThread(
+        FROM_HERE, thread_id_,
+        NewCallback(this, &CompileTask::RunIncludeProcessorDone,
+                    std::move(response_param)),
+        WorkerThread::PRIORITY_LOW);
+    return;
+  }
+
   LOG_IF(WARNING, stats_->include_processor_wait_time > absl::Seconds(1))
       << trace_id_ << " SLOW start IncludeProcessor"
       << " in " << stats_->include_processor_wait_time;
@@ -3758,6 +3810,10 @@ void CompileTask::RunIncludeProcessorDone(
 
   input_file_stat_cache_ = std::move(response_param->file_stat_cache);
   input_file_stat_cache_->AcquireOwner();
+  if (response_param->canceled) {
+    UpdateRequiredFilesDone(false);
+    return;
+  }
   required_files_ = std::move(response_param->result.required_files);
 
   if (!response_param->result.system_library_paths.empty()) {

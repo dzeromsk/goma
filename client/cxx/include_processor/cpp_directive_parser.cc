@@ -25,7 +25,8 @@ namespace {
 
 bool ReadIdent(CppInputStream* stream, string* ident, string* error_reason) {
   CppToken token;
-  if (!CppTokenizer::NextTokenFrom(stream, true, &token, error_reason)) {
+  if (!CppTokenizer::NextTokenFrom(stream, SpaceHandling::kSkip, &token,
+                                   error_reason)) {
     *error_reason = "no token found";
     return false;
   }
@@ -39,21 +40,23 @@ bool ReadIdent(CppInputStream* stream, string* ident, string* error_reason) {
   return true;
 }
 
-std::vector<CppToken> ReadTokens(CppInputStream* stream, bool skip_spaces) {
+std::vector<CppToken> ReadTokens(CppInputStream* stream,
+                                 SpaceHandling space_handling) {
   std::vector<CppToken> result;
 
   // Note: first space is always skipped.
   CppToken token;
   string error_reason;
-  if (!CppTokenizer::NextTokenFrom(stream, true, &token, &error_reason)) {
+  if (!CppTokenizer::NextTokenFrom(stream, SpaceHandling::kSkip, &token,
+                                   &error_reason)) {
     LOG(ERROR) << error_reason;
     return result;
   }
 
   while (token.type != CppToken::END && token.type != CppToken::NEWLINE) {
     result.push_back(std::move(token));
-    if (!CppTokenizer::NextTokenFrom(stream, skip_spaces,
-                                     &token, &error_reason)) {
+    if (!CppTokenizer::NextTokenFrom(stream, space_handling, &token,
+                                     &error_reason)) {
       LOG(ERROR) << error_reason;
       break;
     }
@@ -62,11 +65,11 @@ std::vector<CppToken> ReadTokens(CppInputStream* stream, bool skip_spaces) {
   return result;
 }
 
-CppToken NextToken(CppInputStream* stream, bool skip_spaces) {
+CppToken NextToken(CppInputStream* stream, SpaceHandling space_handling) {
   string error_reason;
   CppToken token;
-  if (!CppTokenizer::NextTokenFrom(stream, skip_spaces,
-                                   &token, &error_reason)) {
+  if (!CppTokenizer::NextTokenFrom(stream, space_handling, &token,
+                                   &error_reason)) {
     return CppToken(CppToken::END);
   }
 
@@ -85,7 +88,7 @@ std::unique_ptr<CppDirective> ReadObjectMacro(
     const string& name, CppInputStream* stream) {
   SmallCppTokenVector replacement;
 
-  CppToken token = NextToken(stream, true);
+  CppToken token = NextToken(stream, SpaceHandling::kSkip);
   while (token.type != CppToken::NEWLINE && token.type != CppToken::END) {
     // Remove contiguous spaces (i.e. '   ' => ' ')
     // Remove preceding spaces for ## (i.e. ' ##' => '##')
@@ -94,10 +97,12 @@ std::unique_ptr<CppDirective> ReadObjectMacro(
       TrimTokenSpace(&replacement);
     }
 
-    bool is_double_sharp = token.type == CppToken::DOUBLESHARP;
+    SpaceHandling space_handling_after_double_sharp =
+        token.type == CppToken::DOUBLESHARP ? SpaceHandling::kSkip
+                                            : SpaceHandling::kKeep;
     replacement.push_back(std::move(token));
     // Remove trailing spaces for ## (i.e. '## ' => '##')
-    token = NextToken(stream, is_double_sharp);
+    token = NextToken(stream, space_handling_after_double_sharp);
   }
 
   TrimTokenSpace(&replacement);
@@ -114,7 +119,7 @@ std::unique_ptr<CppDirective> ReadFunctionMacro(const string& name,
   size_t param_index = 0;
   bool is_vararg = false;
   for (;;) {
-    CppToken token = NextToken(stream, true);
+    CppToken token = NextToken(stream, SpaceHandling::kSkip);
     if (token.type == CppToken::NEWLINE || token.type == CppToken::END) {
       return CppDirective::Error("missing ')' in the macro parameter list");
     }
@@ -125,7 +130,7 @@ std::unique_ptr<CppDirective> ReadFunctionMacro(const string& name,
                                    token.string_value);
       }
       param_index++;
-      token = NextToken(stream, true);
+      token = NextToken(stream, SpaceHandling::kSkip);
       if (token.IsPuncChar(',')) {
         continue;
       }
@@ -134,7 +139,7 @@ std::unique_ptr<CppDirective> ReadFunctionMacro(const string& name,
       }
     } else if (token.type == CppToken::TRIPLEDOT) {
       is_vararg = true;
-      token = NextToken(stream, true);
+      token = NextToken(stream, SpaceHandling::kSkip);
       if (!token.IsPuncChar(')')) {
         return CppDirective::Error(
             "vararg must be the last of ""the macro parameter list");
@@ -149,7 +154,7 @@ std::unique_ptr<CppDirective> ReadFunctionMacro(const string& name,
 
   SmallCppTokenVector replacement;
 
-  CppToken token = NextToken(stream, true);
+  CppToken token = NextToken(stream, SpaceHandling::kSkip);
   while (token.type != CppToken::NEWLINE && token.type != CppToken::END) {
     if (token.type == CppToken::IDENTIFIER) {
       auto iter = params.find(token.string_value);
@@ -175,10 +180,12 @@ std::unique_ptr<CppDirective> ReadFunctionMacro(const string& name,
       TrimTokenSpace(&replacement);
     }
 
-    bool is_double_sharp = token.type == CppToken::DOUBLESHARP;
+    SpaceHandling space_handling_after_double_sharp =
+        token.type == CppToken::DOUBLESHARP ? SpaceHandling::kSkip
+                                            : SpaceHandling::kKeep;
     replacement.push_back(std::move(token));
     // Remove trailing spaces for ## (i.e. '## ' => '##')
-    token = NextToken(stream, is_double_sharp);
+    token = NextToken(stream, space_handling_after_double_sharp);
   }
 
   TrimTokenSpace(&replacement);
@@ -221,19 +228,19 @@ std::unique_ptr<CppDirective> ParseInclude(CppInputStream* stream) {
 
   // Include path is neither <filepath> nor "filepath".
   // Keep tokens as is.
-  std::vector<CppToken> tokens = ReadTokens(stream, false);
+  std::vector<CppToken> tokens = ReadTokens(stream, SpaceHandling::kKeep);
   return std::unique_ptr<CppDirective>(
       new CppDirectiveIncludeCtor(std::move(tokens)));
 }
 
 std::unique_ptr<CppDirective> ParseDefine(CppInputStream* stream) {
-  CppToken name = NextToken(stream, true);
+  CppToken name = NextToken(stream, SpaceHandling::kSkip);
   if (name.type != CppToken::IDENTIFIER) {
     return CppDirective::Error("invalid preprocessing macro name token: ",
                                name.DebugString());
   }
 
-  CppToken token = NextToken(stream, false);
+  CppToken token = NextToken(stream, SpaceHandling::kKeep);
   if (token.IsPuncChar('(')) {
     return ReadFunctionMacro(name.string_value, stream);
   }
@@ -289,7 +296,7 @@ std::unique_ptr<CppDirective> ParseIfndef(CppInputStream* stream) {
 std::unique_ptr<CppDirective> ParseIf(CppInputStream* stream) {
   // Since when evaluating #if, all spaces are skipped.
   // So let's skip spaces here, too.
-  std::vector<CppToken> tokens = ReadTokens(stream, true);
+  std::vector<CppToken> tokens = ReadTokens(stream, SpaceHandling::kSkip);
   if (tokens.empty()) {
     return CppDirective::Error("faield to parse #if: no conditions");
   }
@@ -309,7 +316,7 @@ std::unique_ptr<CppDirective> ParseEndif(CppInputStream* stream ALLOW_UNUSED) {
 std::unique_ptr<CppDirective> ParseElif(CppInputStream* stream) {
   // Since when evaluating #elif, all spaces are skipped.
   // So let's skip spaces here, too.
-  std::vector<CppToken> tokens = ReadTokens(stream, true);
+  std::vector<CppToken> tokens = ReadTokens(stream, SpaceHandling::kSkip);
   if (tokens.empty()) {
     return CppDirective::Error("faield to parse #elif: no conditions");
   }
@@ -317,7 +324,7 @@ std::unique_ptr<CppDirective> ParseElif(CppInputStream* stream) {
 }
 
 std::unique_ptr<CppDirective> ParsePragma(CppInputStream* stream) {
-  CppToken token(NextToken(stream, true));
+  CppToken token(NextToken(stream, SpaceHandling::kSkip));
   if (token.type == CppToken::IDENTIFIER && token.string_value == "once") {
     return std::unique_ptr<CppDirective>(new CppDirectivePragma(true));
   }

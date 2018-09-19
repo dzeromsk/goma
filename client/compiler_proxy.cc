@@ -5,9 +5,6 @@
 //
 // Compiler proxy reimplemented as asynchronous.
 
-// #define HAVE_HEAP_PROFILER 1
-// #define HAVE_CPU_PROFILER 1
-
 #include <stdio.h>
 
 #ifndef _WIN32
@@ -64,13 +61,6 @@
 #include "trustedipsmanager.h"
 #include "util.h"
 #include "watchdog.h"
-
-#if HAVE_HEAP_PROFILER
-#include <gperftools/heap-profiler.h>
-#endif
-#if HAVE_CPU_PROFILER
-#include <gperftools/profiler.h>
-#endif
 
 using std::string;
 
@@ -455,13 +445,6 @@ int main(int argc, char* argv[], const char* envp[]) {
 
   handler.reset();
   wm.Finish();
-#ifndef _WIN32
-  // compiler_proxy only creates subprocess controller server as child process,
-  // so waits for the status of it;
-  int status;
-  PCHECK(wait(&status) > 0);
-  LOG(INFO) << "wait:" << status;
-#endif
 
   if (FLAGS_ENABLE_GLOBAL_FILE_STAT_CACHE ||
       FLAGS_ENABLE_GLOBAL_FILE_ID_CACHE) {

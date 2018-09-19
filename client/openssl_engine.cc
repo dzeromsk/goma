@@ -764,7 +764,7 @@ void DownloadCrl(
   for (;;) {
     char* buf;
     int buf_size;
-    resp->Buffer(&buf, &buf_size);
+    resp->NextBuffer(&buf, &buf_size);
     ssize_t len = sock->ReadWithTimeout(buf, buf_size, kCrlIoTimeout);
     if (len < 0) {
       LOG(ERROR) << "read failure:"
@@ -772,7 +772,7 @@ void DownloadCrl(
                  << " len=" << len
                  << " resp has_header=" << resp->HasHeader()
                  << " resp status_code=" << resp->status_code()
-                 << " resp len=" << resp->len();
+                 << " resp total_recv_len=" << resp->total_recv_len();
       return;
     }
     if (resp->Recv(len)) {
@@ -882,7 +882,9 @@ void OpenSSLContext::Init(
   CHECK(ctx_);
 
   // Disable legacy protocols.
-  SSL_CTX_set_min_proto_version(ctx_, TLS1_VERSION);
+  SSL_CTX_set_min_proto_version(ctx_, TLS1_2_VERSION);
+  // Allow BoringSSL to accept TLS 1.3.
+  SSL_CTX_set_max_proto_version(ctx_, TLS1_3_VERSION);
 
   OpenSSLSessionCache::Setup(ctx_);
 

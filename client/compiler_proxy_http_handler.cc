@@ -47,6 +47,13 @@
 #include "subprocess_controller_client.h"
 #include "util.h"
 
+#if HAVE_HEAP_PROFILER
+#include <gperftools/heap-profiler.h>
+#endif
+#if HAVE_CPU_PROFILER
+#include <gperftools/profiler.h>
+#endif
+
 #define GOMA_DECLARE_FLAGS_ONLY
 #include "goma_flags.cc"
 

@@ -317,12 +317,12 @@ class HttpClient {
     void SetTraceId(const string& trace_id);
     void Reset();
 
-    // Buffer returns a buffer pointer and buffer's size.
+    // NextBuffer returns a buffer pointer and buffer's size.
     // Received data should be filled in buf[0..buf_size), and call
     // Recv with number data received in the buffer.
-    void Buffer(char** buf, int* buf_size);
+    void NextBuffer(char** buf, int* buf_size);
 
-    // Recv receives r bytes in the buffer specified by Buffer().
+    // Recv receives r bytes in the buffer specified by NextBuffer().
     // Returns true if all HTTP response is received so ready to parse.
     // Returns false if more data is needed to parse response.
     bool Recv(int r);
@@ -331,11 +331,7 @@ class HttpClient {
     void Parse();
 
     // Number of bytes already received.
-    size_t len() const { return len_; }
-
-    // Maximum buffer size at the moment.
-    // HttpResponse grows buffer size in Buffer if necessary.
-    size_t buffer_size() const { return buffer_.size(); }
+    size_t total_recv_len() const { return total_recv_len_; }
 
     // status_code reports HTTP status code.
     int status_code() const { return status_code_; }
@@ -346,6 +342,11 @@ class HttpClient {
 
     // represents whether response has 'Connection: close' header.
     bool HasConnectionClose() const;
+
+    // returns string of the total response size if Content-Length exists
+    // in HTTP header.
+    // Otherwise, "unknown".
+    string TotalResponseSize() const;
 
    protected:
     // ParseBody parses body.
@@ -364,6 +365,36 @@ class HttpClient {
     string trace_id_;
 
    private:
+    // Buffer is the default buffer used for receiving HTTP response.
+    class Buffer {
+     public:
+      // Next returns a buffer pointer and buffer's size.
+      // Received data should be filled in buf[0..buf_size), and call
+      // Process with number data received in the buffer.
+      void Next(char** buf, int* buf_size);
+
+      // Process make buffer understand |data_size| of the buffer returned
+      // by Next function is used.
+      void Process(int data_size);
+
+      // Contents returns the buffer contents.
+      // Since buffer_ may have invalid area (allocated but not used),
+      // we won't return a reference to |buffer_|.
+      //
+      // Note: returned data will become invalid if destructor or
+      // Reset is called.
+      absl::string_view Contents() const;
+
+      // Reset the buffer to be used for other input.
+      void Reset();
+
+      string DebugString() const;
+
+     private:
+      string buffer_;
+      size_t len_ = 0UL;
+    };
+
     // BodyRecv receives r bytes in body.
     // Returns true if no more data needed.
     // Returns false if need more data.
@@ -371,9 +402,14 @@ class HttpClient {
 
     string request_path_;
 
-    string buffer_;  // whole buffer
-    size_t len_ = 0UL;     // received length in buffer_
+    size_t total_recv_len_ = 0UL;
     size_t body_offset_ = 0UL;  // position to start response body in buffer_
+    absl::optional<size_t> content_length_;  // size of the content if known.
+
+    // buffer is the default place to put the received data.
+    // when start receiving response body, received data would be written
+    // to body_ instead.
+    Buffer buffer_;
 
     // body becomes non nullptr when start receiving response body.
     Body *body_ = nullptr;

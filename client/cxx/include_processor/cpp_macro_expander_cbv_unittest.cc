@@ -11,8 +11,9 @@ namespace devtools_goma {
 
 TEST(CppMacroExpanderCBVTest, GetMacroArguments) {
   ArrayTokenList tokens;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll(
-      "macro(a1, a2(b1, b2), a3, a4(c1(d))) + 1", false, &tokens));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("macro(a1, a2(b1, b2), a3, a4(c1(d))) + 1",
+                                SpaceHandling::kKeep, &tokens));
 
   ArrayTokenList::const_iterator it = tokens.cbegin();
   CppMacroExpanderCBV::ArgRangeVector args;
@@ -24,25 +25,29 @@ TEST(CppMacroExpanderCBVTest, GetMacroArguments) {
   // args[0] is a1
   ArrayTokenList args0(args[0].first, args[0].second);
   ArrayTokenList args0_expected;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("a1", false, &args0_expected));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("a1", SpaceHandling::kKeep, &args0_expected));
   EXPECT_EQ(args0_expected, args0);
 
   // args[1] is a2(b1, b2)
   ArrayTokenList args1(args[1].first, args[1].second);
   ArrayTokenList args1_expected;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("a2(b1, b2)", false, &args1_expected));
+  ASSERT_TRUE(CppTokenizer::TokenizeAll("a2(b1, b2)", SpaceHandling::kKeep,
+                                        &args1_expected));
   EXPECT_EQ(args1_expected, args1);
 
   // args[2] is a3
   ArrayTokenList args2(args[2].first, args[2].second);
   ArrayTokenList args2_expected;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("a3", false, &args2_expected));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("a3", SpaceHandling::kKeep, &args2_expected));
   EXPECT_EQ(args2_expected, args2);
 
   // args[3] is a4(c1(d))
   ArrayTokenList args3(args[3].first, args[3].second);
   ArrayTokenList args3_expected;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("a4(c1(d))", false, &args3_expected));
+  ASSERT_TRUE(CppTokenizer::TokenizeAll("a4(c1(d))", SpaceHandling::kKeep,
+                                        &args3_expected));
   EXPECT_EQ(args3_expected, args3);
 
   // *it must be on ')'.
@@ -51,7 +56,8 @@ TEST(CppMacroExpanderCBVTest, GetMacroArguments) {
 
 TEST(CppMacroExpanderCBVTest, GetMacroArgumentsEmptyArg) {
   ArrayTokenList tokens;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("macro(a1,)", false, &tokens));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("macro(a1,)", SpaceHandling::kKeep, &tokens));
 
   ArrayTokenList::const_iterator it = tokens.cbegin();
   CppMacroExpanderCBV::ArgRangeVector args;
@@ -63,13 +69,15 @@ TEST(CppMacroExpanderCBVTest, GetMacroArgumentsEmptyArg) {
   // args[0] is a1
   ArrayTokenList args0(args[0].first, args[0].second);
   ArrayTokenList args0_expected;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("a1", false, &args0_expected));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("a1", SpaceHandling::kKeep, &args0_expected));
   EXPECT_EQ(args0_expected, args0);
 
   // args[1] is empty
   ArrayTokenList args1(args[1].first, args[1].second);
   ArrayTokenList args1_expected;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("", false, &args1_expected));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("", SpaceHandling::kKeep, &args1_expected));
   EXPECT_EQ(args1_expected, args1);
 
   // *it must be on ')'.
@@ -78,8 +86,9 @@ TEST(CppMacroExpanderCBVTest, GetMacroArgumentsEmptyArg) {
 
 TEST(CppMacroExpanderCBVTest, GetMacroArgumentsPlentyOrShort) {
   ArrayTokenList tokens;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll(
-      "macro(a1, a2(b1, b2), a3, a4(c1(d))) + 1", false, &tokens));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("macro(a1, a2(b1, b2), a3, a4(c1(d))) + 1",
+                                SpaceHandling::kKeep, &tokens));
 
   {
     ArrayTokenList::const_iterator it = tokens.cbegin();
@@ -98,7 +107,8 @@ TEST(CppMacroExpanderCBVTest, GetMacroArgumentsPlentyOrShort) {
 
 TEST(CppMacroExpanderCBVTest, GetMacroArgumentsEmpty) {
   ArrayTokenList tokens;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("macro() + 1", false, &tokens));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("macro() + 1", SpaceHandling::kKeep, &tokens));
 
   {
     ArrayTokenList::const_iterator it = tokens.cbegin();
@@ -123,7 +133,8 @@ TEST(CppMacroExpanderCBVTest, GetMacroArgumentsEmpty) {
 TEST(CppMacroExpanderCBVTest, GetMacroArgumentsFail) {
   {
     ArrayTokenList tokens;
-    ASSERT_TRUE(CppTokenizer::TokenizeAll("macro(", false, &tokens));
+    ASSERT_TRUE(
+        CppTokenizer::TokenizeAll("macro(", SpaceHandling::kKeep, &tokens));
 
     ArrayTokenList::const_iterator it = tokens.cbegin();
     CppMacroExpanderCBV::ArgRangeVector args;
@@ -133,7 +144,8 @@ TEST(CppMacroExpanderCBVTest, GetMacroArgumentsFail) {
 
   {
     ArrayTokenList tokens;
-    ASSERT_TRUE(CppTokenizer::TokenizeAll("macro((1, 2), ", false, &tokens));
+    ASSERT_TRUE(CppTokenizer::TokenizeAll("macro((1, 2), ",
+                                          SpaceHandling::kKeep, &tokens));
 
     ArrayTokenList::const_iterator it = tokens.cbegin();
     CppMacroExpanderCBV::ArgRangeVector args;
@@ -143,7 +155,8 @@ TEST(CppMacroExpanderCBVTest, GetMacroArgumentsFail) {
 
   {
     ArrayTokenList tokens;
-    ASSERT_TRUE(CppTokenizer::TokenizeAll("macro)", false, &tokens));
+    ASSERT_TRUE(
+        CppTokenizer::TokenizeAll("macro)", SpaceHandling::kKeep, &tokens));
 
     ArrayTokenList::const_iterator it = tokens.cbegin();
     CppMacroExpanderCBV::ArgRangeVector args;

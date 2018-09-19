@@ -103,6 +103,7 @@ SubProcessControllerClient::SubProcessControllerClient(int fd,
       current_options_(std::move(options)),
       periodic_closure_id_(kInvalidPeriodicClosureId),
       quit_(false),
+      closed_(false),
       initialized_(false) {}
 
 SubProcessControllerClient::~SubProcessControllerClient() {
@@ -165,6 +166,15 @@ void SubProcessControllerClient::Quit() {
   for (size_t i = 0; i < kills.size(); ++i) {
     Kill(std::move(kills[i]));
   }
+  wm_->RunClosureInThread(
+      FROM_HERE,
+      thread_id_,
+      devtools_goma::NewCallback(
+          this, &SubProcessControllerClient::SendRequest,
+          SubProcessController::SHUTDOWN,
+          std::unique_ptr<google::protobuf::Message>(
+              absl::make_unique<SubProcessShutdown>())),
+      WorkerThread::PRIORITY_MED);
   {
     AUTOLOCK(lock, &mu_);
     if (periodic_closure_id_ != kInvalidPeriodicClosureId) {
@@ -180,8 +190,8 @@ void SubProcessControllerClient::Shutdown() {
     AUTOLOCK(lock, &mu_);
     CHECK(quit_);
     CHECK_EQ(periodic_closure_id_, kInvalidPeriodicClosureId);
-    while (!subproc_tasks_.empty()) {
-      LOG(INFO) << "wait for subproc_tasks_ become empty";
+    while (!subproc_tasks_.empty() || !closed_) {
+      LOG(INFO) << "wait for subproc_tasks_ become empty and peer closed";
       cond_.Wait(&mu_);
     }
   }
@@ -387,8 +397,6 @@ void SubProcessControllerClient::Terminated(
     AUTOLOCK(lock, &mu_);
     if (quit_ && subproc_tasks_.empty()) {
       LOG(INFO) << "all subproc_tasks done";
-      socket_descriptor_->StopRead();
-      socket_descriptor_->StopWrite();
       CHECK(subproc_tasks_.empty());
       cond_.Signal();
     }
@@ -424,9 +432,36 @@ void SubProcessControllerClient::Delete() {
 
   // Maybe not good to accessing g_client_instance which is being
   // deleted. So, guard `delete this`, too.
-  AUTOLOCK(lock, g_mu);
-  delete this;
-  g_client_instance = nullptr;
+#ifndef _WIN32
+  pid_t server_pid = server_pid_;
+#endif
+  {
+    AUTOLOCK(lock, g_mu);
+    delete this;
+    g_client_instance = nullptr;
+  }
+#ifndef _WIN32
+  int status = 0;
+  if (waitpid(server_pid, &status, 0) == -1) {
+    PLOG(ERROR) << "SubProcessControllerServer wait failed pid="
+                << server_pid;
+    return;
+  }
+  int exit_status = -1;
+  if (WIFEXITED(status)) {
+    exit_status = WEXITSTATUS(status);
+  }
+  int signaled = 0;
+  if (WIFSIGNALED(status)) {
+    signaled = WTERMSIG(status);
+  }
+  LOG(INFO) << "SubProcessControllerServer exited"
+            << " status=" << exit_status
+            << " signal=" << signaled;
+  if (exit_status != 0 && signaled != 0) {
+    LOG(ERROR) << "unexpected SubProcessController exit";
+  }
+#endif
 }
 
 void SubProcessControllerClient::SendRequest(
@@ -444,6 +479,9 @@ void SubProcessControllerClient::DoWrite() {
   VLOG(2) << "DoWrite";
   DCHECK(BelongsToCurrentThread());
   if (!WriteMessage(socket_descriptor_->wrapper())) {
+    LOG(FATAL) << "Unexpected peer shutdown in WriteMessage";
+  }
+  if (!has_pending_write()) {
     VLOG(3) << "DoWrite no pending";
     wm_->RunClosureInThread(
         FROM_HERE,
@@ -474,33 +512,23 @@ void SubProcessControllerClient::DoRead() {
   VLOG(2) << "DoRead op=" << op << " len=" << len;
   switch (op) {
     case SubProcessController::CLOSED:
-#ifndef _WIN32
-      LOG(ERROR) << "SubProcessControllerServer died unexpectedly."
-                 << " pid=" << server_pid_;
       {
-        // subprocess controller server process was killed or crashed?
-        int status = 0;
-        if (waitpid(server_pid_, &status, 0) == -1) {
-          PLOG(FATAL) << "SubProcessControllerServer wait failed pid="
-                      << server_pid_;
-        }
-        int exit_status = WEXITSTATUS(status);
-        int signaled = 0;
-        if (WIFSIGNALED(status)) {
-          signaled = WTERMSIG(status);
-        }
-        LOG(INFO) << "SubProcessControllerServer exited "
-                  << " status=" << exit_status
-                  << " signal=" << signaled;
-        if (exit_status != 0 && signaled != 0) {
-          LOG(FATAL) << "unexpected SubProcessControllerServer exit";
+        AUTOLOCK(lock, &mu_);
+        if (quit_) {
+          VLOG(1) << "peer shutdown in quit";
+          CHECK(subproc_tasks_.empty())
+              << "SubProcessControllerServer closed but subproc_tasks exist:"
+              << subproc_tasks_.size();
+          wm_->RunClosureInThread(
+              FROM_HERE,
+              thread_id_,
+              devtools_goma::NewCallback(
+                  this, &SubProcessControllerClient::OnClosed),
+              WorkerThread::PRIORITY_MED);
+          break;
         }
       }
-      exit(0);
-#else
-      // subprocess controller server is a thread, not a process on Windows.
-      LOG(FATAL) << "SubProcessControllerServer died unexpectedly.";
-#endif
+      LOG(FATAL) << "Unexpected peer shutdown in ReadMessage";
 
     // Note: STARTED and TERMINATED should run closure with the same priority
     // Otherwise, they may not be executed in order.
@@ -542,6 +570,19 @@ void SubProcessControllerClient::DoRead() {
   }
   ReadDone();
   return;
+}
+
+void SubProcessControllerClient::OnClosed() {
+  AUTOLOCK(lock, &mu_);
+  if (closed_) {
+    return;
+  }
+  LOG(INFO) << "peer closed";
+  CHECK(subproc_tasks_.empty());
+  closed_ = true;
+  socket_descriptor_->StopRead();
+  socket_descriptor_->StopWrite();
+  cond_.Signal();
 }
 
 void SubProcessControllerClient::RunCheckSignaled() {

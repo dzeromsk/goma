@@ -81,7 +81,13 @@ void FakeCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
   (void)data->mutable_fake();
 
   // Set target.
-  data->set_target("fake");
+#ifdef _WIN32
+  data->set_target("x86_64-pc-windows-msvc");
+#elif defined(__MACH__)
+  data->set_target("x86_64-apple-darwin");
+#else
+  data->set_target("x86_64-unknown-linux-gnu");
+#endif
 
   if (!GetFakeCompilerVersion(local_compiler_path, compiler_info_envs,
                               flags.cwd(), data->mutable_version())) {

@@ -115,15 +115,27 @@ class GomaIPCSocketFactory : public GomaIPC::ChanFactory {
 
   std::unique_ptr<IOChannel> New() override {
     ScopedSocket socket_fd(socket(AF_GOMA_IPC, SOCK_STREAM, 0));
-    if (!socket_fd.valid())
+    if (!socket_fd.valid()) {
+      PLOG(ERROR) << "failed to create socket";
       return nullptr;
-    if (connect(socket_fd.get(), addr_, addr_len_) != -1) {
+    }
+    int ret;
+    while ((ret = connect(socket_fd.get(), addr_, addr_len_)) < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+    if (ret == 0) {
       if (!socket_fd.SetNonBlocking()) {
         LOG(ERROR) << "GOMA: failed to set nonblocking: " << socket_fd.get();
         return nullptr;
       }
       return std::unique_ptr<IOChannel>(new ScopedSocket(std::move(socket_fd)));
     }
+    LOG_IF(WARNING, ret != -1) << "POSIX spec mentions connect shall return"
+                               << " etiher of 0 or -1 but got " << ret;
+    PLOG(ERROR) << "failed to connect to: " << socket_path_;
     return nullptr;
   }
 

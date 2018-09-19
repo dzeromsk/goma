@@ -13,7 +13,7 @@ namespace {
 
 TokenHSList TokenHSListFrom(const string& s) {
   ArrayTokenList tokens;
-  EXPECT_TRUE(CppTokenizer::TokenizeAll(s, false, &tokens));
+  EXPECT_TRUE(CppTokenizer::TokenizeAll(s, SpaceHandling::kKeep, &tokens));
 
   TokenHSList ths;
   for (auto&& t : tokens) {
@@ -49,25 +49,29 @@ TEST(CppMacroExpanderNaiveTest, GetMacroArguments) {
   // args[0] is a1
   ArrayTokenList args0(ToTokens(arg_ranges[0]));
   ArrayTokenList args0_expected;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("a1", false, &args0_expected));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("a1", SpaceHandling::kKeep, &args0_expected));
   EXPECT_EQ(args0_expected, args0);
 
   // args[1] is a2(b1, b2)
   ArrayTokenList args1(ToTokens(arg_ranges[1]));
   ArrayTokenList args1_expected;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("a2(b1, b2)", false, &args1_expected));
+  ASSERT_TRUE(CppTokenizer::TokenizeAll("a2(b1, b2)", SpaceHandling::kKeep,
+                                        &args1_expected));
   EXPECT_EQ(args1_expected, args1);
 
   // args[2] is a3
   ArrayTokenList args2(ToTokens(arg_ranges[2]));
   ArrayTokenList args2_expected;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("a3", false, &args2_expected));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("a3", SpaceHandling::kKeep, &args2_expected));
   EXPECT_EQ(args2_expected, args2);
 
   // args[3] is a4(c1(d))
   ArrayTokenList args3(ToTokens(arg_ranges[3]));
   ArrayTokenList args3_expected;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("a4(c1(d))", false, &args3_expected));
+  ASSERT_TRUE(CppTokenizer::TokenizeAll("a4(c1(d))", SpaceHandling::kKeep,
+                                        &args3_expected));
   EXPECT_EQ(args3_expected, args3);
 
   // *cur must be on ')'.
@@ -105,13 +109,49 @@ TEST(CppMacroExpanderNaiveTest, GetMacroArgumentsEmptyArg) {
   // args[0] is a
   ArrayTokenList args0(ToTokens(arg_ranges[0]));
   ArrayTokenList args0_expected;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("a", false, &args0_expected));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("a", SpaceHandling::kKeep, &args0_expected));
   EXPECT_EQ(args0_expected, args0);
 
   // args[1] is empty
   ArrayTokenList args1(ToTokens(arg_ranges[1]));
   ArrayTokenList args1_expected;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll("", false, &args1_expected));
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("", SpaceHandling::kKeep, &args1_expected));
+  EXPECT_EQ(args1_expected, args1);
+
+  // *cur must be on ')'.
+  EXPECT_EQ(CppToken(CppToken::PUNCTUATOR, ')'), cur->token);
+}
+
+TEST(CppMacroExpanderNaiveTest, GetMacroArgumentsWithSpaces) {
+  // [FOO][(][ ][1][ ][,][ ][F][ ][(][ ][1][ ][,][ ][2][ ][)][ ][)][ ][X]
+  //    0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16 17 18 19 20 21
+
+  TokenHSList tokens = TokenHSListFrom("FOO( 1 , F ( 1 , 2 ) ) X");
+  ASSERT_EQ(22, tokens.size());
+
+  std::vector<TokenHSListRange> arg_ranges;
+  TokenHSList::iterator cur = tokens.begin();
+  EXPECT_EQ(
+      CppMacroExpanderNaive::GetMacroArgumentsResult::kOk,
+      CppMacroExpanderNaive::GetMacroArguments(
+          TokenHSListRange(tokens.begin(), tokens.end()), &cur, &arg_ranges));
+
+  ASSERT_EQ(2U, arg_ranges.size());
+
+  // args[0] is "1"
+  ArrayTokenList args0(ToTokens(arg_ranges[0]));
+  ArrayTokenList args0_expected;
+  ASSERT_TRUE(
+      CppTokenizer::TokenizeAll("1", SpaceHandling::kKeep, &args0_expected));
+  EXPECT_EQ(args0_expected, args0);
+
+  // args[1] is "F(1, 2)"
+  ArrayTokenList args1(ToTokens(arg_ranges[1]));
+  ArrayTokenList args1_expected;
+  ASSERT_TRUE(CppTokenizer::TokenizeAll("F ( 1 , 2 )", SpaceHandling::kKeep,
+                                        &args1_expected));
   EXPECT_EQ(args1_expected, args1);
 
   // *cur must be on ')'.
@@ -180,7 +220,7 @@ TEST(CppMacroExpanderNaiveTest, GetMacroArgumentsUnterminatedParen) {
 TEST(CppMacroExpanderNaiveTest, GetVaOptArgument) {
   const string s = "( 1, F(1, 2) ) X";
   ArrayTokenList tokens;
-  ASSERT_TRUE(CppTokenizer::TokenizeAll(s, false, &tokens));
+  ASSERT_TRUE(CppTokenizer::TokenizeAll(s, SpaceHandling::kKeep, &tokens));
 
   // [(][ ][1][,][ ][F][(][1][,][ ][2][)][ ][)][ ][X]
   //  0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15
@@ -194,6 +234,7 @@ TEST(CppMacroExpanderNaiveTest, GetVaOptArgument) {
       tokens.begin(), tokens.end(), &argument_begin, &argument_end,
       &right_paren_pos));
   EXPECT_EQ(2, argument_begin - tokens.begin());
+  // The trailing space is omitted, so argument_end is 12 instead of 13.
   EXPECT_EQ(12, argument_end - tokens.begin());
   EXPECT_EQ(13, right_paren_pos - tokens.begin());
 }

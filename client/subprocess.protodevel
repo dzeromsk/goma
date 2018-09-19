@@ -137,3 +137,7 @@ message SubProcessTerminated {
   optional int32 run_ms = 10;
   optional int64 mem_kb = 11;
 };
+
+// Shutdown subprocess controller server.
+message SubProcessShutdown {
+};

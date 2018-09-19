@@ -69,11 +69,14 @@ class SubProcessController {
     CLOSED = -1,
     NOP = 0,
 
+    // request: client -> server
     REGISTER = 1,
     REQUEST_RUN = 2,
     KILL = 3,
     SET_OPTION = 4,
+    SHUTDOWN = 5,
 
+    // response: server -> client
     STARTED = 10,
     TERMINATED = 11,
   };
@@ -122,8 +125,8 @@ class SubProcessController {
   bool has_pending_write() const;
 
   // Writes pending_write_ message through fd.
-  // Returns true if it has still more data to send.
-  // Returns false if there is no more data to send.
+  // Returns true if no data to write, or data successfuly written.
+  // Returns false if I/O error happens.
   bool WriteMessage(const IOChannel* fd);
 
   // Reads message through fd.
@@ -141,6 +144,8 @@ class SubProcessController {
 
 #ifdef _WIN32
   static unsigned __stdcall StartServer(void* thread_params);
+#else
+  [[noreturn]] static void OnPeerShutdowned(bool shutdowned);
 #endif
 
   static const size_t kMessageHeaderLen;

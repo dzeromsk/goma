@@ -99,20 +99,39 @@ void AutoLockStats::Report(std::ostringstream* ss,
       absl::Duration max_hold_time;
       stat->GetStats(&count, &total_wait_time, &max_wait_time, &total_hold_time,
                      &max_hold_time);
+
+      absl::Duration avg_wait_time;
+      if (count != 0) {
+        avg_wait_time = total_wait_time / count;
+      }
+      absl::Duration avg_hold_time;
+      if (count != 0) {
+        avg_hold_time = total_hold_time / count;
+      }
+
+      double total_wait_secs = absl::ToDoubleSeconds(total_wait_time);
+      double max_wait_secs = absl::ToDoubleSeconds(max_wait_time);
+      double ave_wait_secs = absl::ToDoubleSeconds(avg_wait_time);
+      double total_hold_secs = absl::ToDoubleSeconds(total_hold_time);
+      double max_hold_secs = absl::ToDoubleSeconds(max_hold_time);
+      double ave_hold_secs = absl::ToDoubleSeconds(avg_hold_time);
+
+      // Keep number data in data-to-compare. It can be used for comparison.
       (*ss) << "<tr><td>" << stat->name << "</td>"
-            << "<td class=\"count\">" << count << "</td>"
-            << "<td class=\"total-wait\">"
-            << total_wait_time << "</td>"
-            << "<td class=\"max-wait\">"
-            << max_wait_time << "</td>"
-            << "<td class=\"ave-wait\">"
-            << total_wait_time / count << "</td>"
-            << "<td class=\"total-hold\">"
-            << total_hold_time << "</td>"
-            << "<td class=\"max-hold\">"
-            << max_hold_time << "</td>"
-            << "<td class=\"ave-hold\">"
-            << total_hold_time / count << "</td>"
+            << "<td class=\"count\" data-to-compare=\"" << count << "\">"
+            << count << "</td>"
+            << "<td class=\"total-wait\" data-to-compare=\"" << total_wait_secs
+            << "\">" << total_wait_time << "</td>"
+            << "<td class=\"max-wait\" data-to-compare=\"" << max_wait_secs
+            << "\">" << max_wait_time << "</td>"
+            << "<td class=\"ave-wait\" data-to-compare=\"" << ave_wait_secs
+            << "\">" << avg_wait_time << "</td>"
+            << "<td class=\"total-hold\" data-to-compare=\"" << total_hold_secs
+            << "\">" << total_hold_time << "</td>"
+            << "<td class=\"max-hold\" data-to-compare=\"" << max_hold_secs
+            << "\">" << max_hold_time << "</td>"
+            << "<td class=\"ave-hold\" data-to-compare=\"" << ave_hold_secs
+            << "\">" << avg_hold_time << "</td>"
             << "</tr>\n";
     }
   }

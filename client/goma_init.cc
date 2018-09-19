@@ -82,6 +82,8 @@ void InitLogging(const char* argv0) {
 #ifndef _WIN32
   google::InstallFailureSignalHandler();
 #endif
+  LOG(INFO) << "public goma client";
+
   LOG(INFO) << "goma built revision " << kBuiltRevisionString;
 #ifndef NDEBUG
   LOG(ERROR) << "WARNING: DEBUG BINARY -- Performance may suffer";

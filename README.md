@@ -1,6 +1,4 @@
-# Goma
-
-[TOC]
+# Goma client
 
 *Goma* is a distributed compiler service for open-source project such as
 Chromium and Android. It's some kind of replacement of distcc+ccache.
@@ -8,7 +6,9 @@ Chromium and Android. It's some kind of replacement of distcc+ccache.
 NOTE: currently the Goma backend is not available for non googlers.
 We're working so that chromium developers can use it. Stay tuned.
 
-# How Goma works
+[TOC]
+
+## How Goma works
 
 Goma hooks a compile request, and sends it to a backend compile server.
 If you have plenty of backend servers, a lot of compile can be processed in
@@ -17,27 +17,20 @@ parallel, for example, -j100, -j500 or -j1000.
 Also, the Goma backend caches the compile result. If the same compile request
 comes, the cached result is returned from the Goma cache server.
 
-# How to build
+## How to build
 
 Goma client can be built on Linux, Mac, and Win.
 
-## Install dependencies
+### Prerequisite
 
+1. Use 64bit platform (Linux, Mac or Win).
 1. Install [depot\_tools](http://commondatastorage.googleapis.com/chrome-infra-docs/flat/depot_tools/docs/html/depot_tools_tutorial.html#_setting_up).
-2. Install dependencies.
-
-On debian or ubuntu,
-
-```
-$ sudo apt-get install libssl-dev libc6-dev-i386
-```
-
-On Mac, install Xcode.
-
-On Windows, install Visual Studio 2017. Community edition is OK.
+1. Install dependencies.
+   * On Mac, install Xcode.
+   * On Windows, install Visual Studio 2017. Community edition is OK.
 
 
-## Checkout source
+### Checkout source
 
 
 ```shell
@@ -48,7 +41,22 @@ $ cd client
 
 We assume the Goma client code is checked out to `${GOMA_SRC}`.
 
-## Build
+If you want to develop goma client, make goma client source unmanaged by
+gclient. Open `.gclient` file, and check `"managed"` value.
+If it's `True`, changed it to `False`. Otherwise, gclient will manage
+your repository, so your checkout can be unintentionally changed with
+`gclient sync`.
+
+Move to `client` directory (which is under git repo),
+and configure git repository with your username and emails.
+
+```shell
+$ cd client
+$ git config user.email 'foo@example.com'
+$ git config user.name 'Your Name'
+```
+
+### Build
 
 ```shell
 $ cd "${GOMA_SRC}/client"
@@ -57,7 +65,7 @@ $ gn gen --args='is_debug=false' out/Release
 $ ninja -C out/Release
 ```
 
-### Several important gn args
+#### Several important gn args
 
 The build option can be modified with gn args.
 
@@ -74,16 +82,28 @@ use_lld=true/false
   Use lld for link (it will be fast)
 ```
 
-## Run unittest
+### Run unittest
 
 ```shell
 $ cd "${GOMA_SRC}/client"
 $ ./build/run_unittest.py --target=Release --build-dir=out
 ```
 
-# How to use
+### Coding style
 
-## For Chromium/Android development
+Follow Google code style.
+
+
+- [C++](https://google.github.io/styleguide/cppguide.html)
+- [Python](https://github.com/google/styleguide/blob/gh-pages/pyguide.md)
+
+For C++11 features, we prefer to follow chromium guideline:
+http://chromium-cpp.appspot.com/
+
+
+## How to use
+
+### For Chromium/Android development
 
 Goma can be integrated with Chromium/Android development easily.
 
@@ -94,7 +114,7 @@ Goma can be integrated with Chromium/Android development easily.
 $ "$GOMA_SRC/client/out/Release/goma_ctl.py" start
 ```
 
-### For Chromium
+#### For Chromium
 
 In Chromium src, specify the following args in `gn args`
 
@@ -115,9 +135,9 @@ More details are avairable in chromium's build instructions.
 * [docs/windows\_build\_instructions.md](https://chromium.googlesource.com/chromium/src/+/master/docs/windows_build_instructions.md)
 * [docs/mac\_build\_instructions.md](https://chromium.googlesource.com/chromium/src/+/master/docs/mac_build_instructions.md)
 
-### For Android
+#### For Android
 
-```
+```shell
 $ source build/envsetup.sh
 $ lunch aosp_arm-eng
 $ GOMA_DIR=${GOMA_SRC}/client/out/Release USE_GOMA=true make -j4
@@ -126,29 +146,25 @@ $ GOMA_DIR=${GOMA_SRC}/client/out/Release USE_GOMA=true make -j4
 Here, `-j4` is not related to Goma parallelism. Android internally sets
 `-j500` (or `-j` with `NINJA_REMOTE_NUM_JOBS` environment variable) for Goma.
 
-## For general development
+### For general development
 
 1. Build Goma client
 2. Start `compiler_proxy`
 
-```
+```shell
 $ ./goma_ctl.py ensure_start
 ```
 
 3. Change your build script so that `gomacc` is prepended to compiler command.
    For example:
 
-```
+```shell
 $ gomacc clang++ -c foo.cc
 ```
 
 4. Build your product with `make -j100`, `ninja -j100` or larger -j.
    Check http://localhost:8080 to see compiler\_proxy is actually working.
 
-
-### Tips
-
 * You can use [autoninja](https://chromium.googlesource.com/chromium/tools/depot_tools.git/+/master/autoninja) in depot_tools instead of specifying gomacc manually.
-
 
 

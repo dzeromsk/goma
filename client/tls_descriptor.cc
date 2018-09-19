@@ -9,12 +9,13 @@
 #include <utility>
 
 #include "absl/strings/escaping.h"
+#include "absl/strings/str_cat.h"
 #include "callback.h"
 #include "compiler_proxy_info.h"
 #include "compiler_specific.h"
-#include "socket_descriptor.h"
 #include "glog/logging.h"
 #include "http_util.h"
+#include "socket_descriptor.h"
 
 namespace devtools_goma {
 
@@ -161,10 +162,10 @@ bool TLSDescriptor::NeedRetry() const {
 }
 
 string TLSDescriptor::GetLastErrorMessage() const {
-  string err_msg = socket_descriptor_->GetLastErrorMessage();
-  if (!err_msg.empty())
-    err_msg.append(" ,");
-  return err_msg + "TLS engine:" + engine_->GetLastErrorMessage();
+  return absl::StrCat(
+      "fd:", socket_descriptor_->fd(), " ",
+      "socket:", socket_descriptor_->GetLastErrorMessage(), " ",
+      "tls_engine:", engine_->GetLastErrorMessage());
 }
 
 void TLSDescriptor::StopRead() {

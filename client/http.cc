@@ -22,6 +22,7 @@
 #include <string>
 
 #include "absl/memory/memory.h"
+#include "absl/strings/escaping.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
@@ -529,7 +530,7 @@ class HttpClient::Task {
     CHECK(descriptor_);
     char* buf;
     int buf_size;
-    resp_->Buffer(&buf, &buf_size);
+    resp_->NextBuffer(&buf, &buf_size);
     ssize_t read_size = descriptor_->Read(buf, buf_size);
     VLOG(7) << "DoRead " << descriptor_
             << " buf_size=" << buf_size
@@ -544,14 +545,15 @@ class HttpClient::Task {
       std::ostringstream err_message;
       err_message << status_->trace_id
                   << " Read failed ret=" << read_size
-                  << " @" << resp_->len()
-                  << " of " << resp_->buffer_size()
-                  << " : " << descriptor_->GetLastErrorMessage();
-      err_message << " : received=" << resp_->Header();
+                  << " @" << resp_->total_recv_len()
+                  << " of " << resp_->TotalResponseSize()
+                  << " : " << descriptor_->GetLastErrorMessage()
+                  << " : received=" << resp_->Header();
       RunCallback(FAIL, err_message.str());
       return;
     }
-    if (status_->wait_time == absl::ZeroDuration() && resp_->len() == 0) {
+    if (status_->wait_time == absl::ZeroDuration() &&
+        resp_->total_recv_len() == 0) {
       status_->wait_time = timer_.GetDuration();
       timer_.Start();
       descriptor_->ChangeTimeout(client_->options().socket_read_timeout);
@@ -564,7 +566,7 @@ class HttpClient::Task {
       timer_.Start();
       resp_->Parse();
       status_->resp_parse_time = timer_.GetDuration();
-      status_->resp_size = resp_->len();
+      status_->resp_size = resp_->total_recv_len();
       if (resp_->status_code() != 200 || resp_->result() == FAIL) {
         DCHECK_EQ(close_state_, HttpClient::ERROR_CLOSE);
         CaptureResponseHeader();
@@ -611,13 +613,13 @@ class HttpClient::Task {
         err_message << "sending request header "
                     << request_stream_->ByteCount()
                     << " " << timer_.GetDuration();
-      } else if (resp_->len() == 0) {
+      } else if (resp_->total_recv_len() == 0) {
         err_message << "waiting response "
                     << " " << timer_.GetDuration();
       } else {
         err_message << "receiving response "
-                    << resp_->len()
-                    << " of " << resp_->buffer_size()
+                    << resp_->total_recv_len()
+                    << " of " << resp_->TotalResponseSize()
                     << " " << timer_.GetDuration();
       }
       LOG(WARNING) << status_->trace_id << " " << err_message.str();
@@ -1844,8 +1846,10 @@ void HttpClient::Response::SetTraceId(const string& trace_id) {
 
 void HttpClient::Response::Reset() {
   result_ = FAIL;
-  len_ = 0;
-  body_offset_ = 0;
+  buffer_.Reset();
+  total_recv_len_ = 0UL;
+  body_offset_ = 0UL;
+  content_length_.reset();
   status_code_ = 0;
   body_ = nullptr;
 }
@@ -1855,48 +1859,45 @@ bool HttpClient::Response::HasHeader() const {
 }
 
 absl::string_view HttpClient::Response::Header() const {
+  absl::string_view contents = buffer_.Contents();
   if (body_offset_ > 0) {
-    return absl::string_view(buffer_.data(), body_offset_);
+    DCHECK_GE(contents.size(), body_offset_);
+    return contents.substr(0, body_offset_);
   }
-  absl::string_view::size_type header_size = buffer_.find("\r\n\r\n");
-  if (header_size == string::npos) {
-    header_size = len_;
+  absl::string_view::size_type header_size = contents.find("\r\n\r\n");
+  if (header_size == absl::string_view::npos) {
+    return contents;
   }
-  return absl::string_view(buffer_.data(), header_size);
+  return contents.substr(0, header_size);
 }
 
-void HttpClient::Response::Buffer(char** buf, int* buf_size) {
+void HttpClient::Response::NextBuffer(char** buf, int* buf_size) {
   if (!body_) {
-    *buf_size = buffer_.size() - len_;
-    if (*buf_size < kNetworkBufSize / 2) {
-      buffer_.resize(buffer_.size() + kNetworkBufSize);
-    }
-    *buf = &buffer_[len_];
-    *buf_size = buffer_.size() - len_;
+    buffer_.Next(buf, buf_size);
   } else {
     body_->Next(buf, buf_size);
   }
   CHECK_GT(*buf_size, 0)
-      << " response len=" << len_
-      << " size=" << buffer_.size()
+      << " buffer=" << buffer_.DebugString()
       << " body_offset=" << body_offset_;
 }
 
 bool HttpClient::Response::Recv(int r) {
+  total_recv_len_ += r;
   if (body_) {
     return BodyRecv(r);
   }
+  buffer_.Process(r);
   // header
   if (r == 0) {  // EOF
     LOG(WARNING) << trace_id_ <<
         " not received a header but connection closed by a peer.";
     err_message_ = "connection closed before receiving a header.";
     result_ = FAIL;
-    body_offset_ = len_;
+    body_offset_ = total_recv_len_;
     return true;
   }
-  len_ += r;
-  absl::string_view resp(buffer_.data(), len_);
+  absl::string_view resp = buffer_.Contents();
   size_t content_length = string::npos;
   bool is_chunked = false;
   if (!ParseHttpResponse(resp, &status_code_, &body_offset_,
@@ -1906,12 +1907,16 @@ bool HttpClient::Response::Recv(int r) {
     return false;
   }
   VLOG(2) << "header ready " << status_code_
+          << " resp_len=" << resp.size()
+          << " status_code=" << status_code_
           << " offset=" << body_offset_
           << " content_length=" << content_length
           << " is_chunked=" << is_chunked
-          << " len=" << len_;
-  // Apiary returns 204 No Content for SaveLog.
-  if (status_code_ == 204 && body_offset_ == len_) {
+          << " total_recv_len=" << total_recv_len_;
+  if (content_length != string::npos) {
+    content_length_ = content_length;
+  }
+  if (status_code_ == 204 && body_offset_ == resp.size()) {
     // Go to next step quickly since Status 204 has nothing to parse.
     result_ = OK;
     return true;
@@ -1921,14 +1926,14 @@ bool HttpClient::Response::Recv(int r) {
     LOG(WARNING) << trace_id_ << " read "
                  << " http=" << status_code_
                  << " path=" << request_path_
-                 << " Details:" << resp;
+                 << " Details:" << absl::CEscape(resp);
     std::ostringstream err;
     err << "Got HTTP error:" << status_code_;
     err_message_ = err.str();
     result_ = FAIL;
     return true;
   }
-  if (body_offset_ == len_ && content_length == 0) {
+  if (body_offset_ == resp.size() && content_length == 0) {
     // nothing to parse for body.
     result_ = OK;
     return true;
@@ -1944,10 +1949,9 @@ bool HttpClient::Response::Recv(int r) {
     result_ = FAIL;
     return true;
   }
-  if (body_offset_ < len_) {
+  if (body_offset_ < resp.size()) {
     // header buffer_ has head of body.
-    absl::string_view body(buffer_.data(), len_);
-    body.remove_prefix(body_offset_);
+    absl::string_view body = resp.substr(body_offset_);
     VLOG(3) << trace_id_ << " body " << body.size() << " after header";
     do {
       char* buf = nullptr;
@@ -2004,6 +2008,13 @@ bool HttpClient::Response::HasConnectionClose() const {
   return ExtractHeaderField(Header(), kConnection) == "close";
 }
 
+string HttpClient::Response::TotalResponseSize() const {
+  if (body_offset_ > 0 && content_length_.has_value()) {
+    return absl::StrCat(body_offset_ + *content_length_);
+  }
+  return "unknown";
+}
+
 void HttpClient::Response::Parse() {
   if (result_ == OK) {
     return;
@@ -2015,6 +2026,40 @@ void HttpClient::Response::Parse() {
     return;
   }
   ParseBody();
+}
+
+void HttpClient::Response::Buffer::Next(char** buf, int* buf_size) {
+  *buf_size = buffer_.size() - len_;
+  if (*buf_size < kNetworkBufSize / 2) {
+    buffer_.resize(buffer_.size() + kNetworkBufSize);
+  }
+  *buf = &buffer_[len_];
+  *buf_size = buffer_.size() - len_;
+}
+
+void HttpClient::Response::Buffer::Process(int data_size) {
+  DCHECK_GE(data_size, 0) << "data size should be larger than or equals to 0."
+                          << " data_size=" << data_size;
+  DCHECK_GE(buffer_.size(), len_ + data_size)
+      << "input data go over buffer_'s capacity."
+      << " buffer_.size()=" << buffer_.size()
+      << " len_=" << len_
+      << " data_size=" << data_size;
+  len_ += data_size;
+}
+
+absl::string_view HttpClient::Response::Buffer::Contents() const {
+  return absl::string_view(buffer_.data(), len_);
+}
+
+void HttpClient::Response::Buffer::Reset() {
+  len_ = 0UL;
+  memset(&buffer_[0], 0, buffer_.size());
+}
+
+string HttpClient::Response::Buffer::DebugString() const {
+  return absl::StrCat("buffer_size=", buffer_.size(),
+                      " len=", len_);
 }
 
 HttpResponse::Body::Body(size_t content_length,

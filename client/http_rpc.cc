@@ -345,8 +345,7 @@ void HttpRPC::CallDone(std::unique_ptr<CallData> call) {
   if (call->resp()->status_code() != 200) {
     // Apiary returns 415 to reject Content-Encoding.
     if (call->resp()->status_code() == 400 ||
-        call->resp()->status_code() == 415 ||
-        call->resp()->result() == FAIL) {
+        call->resp()->status_code() == 415) {
       DisableCompression();
     }
   } else {

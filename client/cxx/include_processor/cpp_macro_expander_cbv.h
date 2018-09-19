@@ -9,6 +9,7 @@
 
 #include "absl/container/inlined_vector.h"
 #include "cpp_parser.h"
+#include "space_handling.h"
 
 namespace devtools_goma {
 
@@ -168,7 +169,7 @@ class CppMacroExpanderCBV {
   explicit CppMacroExpanderCBV(CppParser* parser) : parser_(parser) {}
 
   bool ExpandMacro(const ArrayTokenList& input,
-                   bool skip_space,
+                   SpaceHandling space_handling,
                    ArrayTokenList* output);
 
  private:
@@ -201,7 +202,7 @@ class CppMacroExpanderCBV {
 
   bool Expand(ArrayTokenList::const_iterator input_begin,
               ArrayTokenList::const_iterator input_end,
-              bool skip_space,
+              SpaceHandling space_handling,
               const MacroSet& hideset,
               const Env& env,
               ArrayTokenList* output);

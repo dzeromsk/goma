@@ -68,13 +68,12 @@ class Fetcher {
       status_ = HttpClient::Status();
       client_->Do(req_, resp_, &status_);
       if (!status_.err) {
-        if (status_.http_return_code >= 400 && status_.http_return_code < 500) {
-          break;
-        }
-        if (status_.http_return_code == 200 ||
-            status_.http_return_code == 204) {
-          break;
-        }
+        LOG(INFO) << "http code:" << status_.http_return_code;
+        break;
+      }
+      if (status_.http_return_code >= 400 && status_.http_return_code < 500) {
+        LOG(WARNING) << "http code:" << status_.http_return_code;
+        break;
       }
       if (i + 1 < FLAGS_FETCH_RETRY) {
         LOG(WARNING) << "fetch fail try=" << i

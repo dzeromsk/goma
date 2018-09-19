@@ -26,7 +26,7 @@ void BM_MacroExpandRecursive(benchmark::State& state) {
   cpp_parser.ProcessDirectives();
 
   ArrayTokenList tokens;
-  CHECK(CppTokenizer::TokenizeAll("F99(1)", false, &tokens));
+  CHECK(CppTokenizer::TokenizeAll("F99(1)", SpaceHandling::kKeep, &tokens));
 
   // Test expectedly converted.
   {
@@ -39,14 +39,15 @@ void BM_MacroExpandRecursive(benchmark::State& state) {
     }
     expected.push_back(CppToken(1));
 
-    ArrayTokenList actual = CppMacroExpander(&cpp_parser).Expand(tokens, true);
+    ArrayTokenList actual =
+        CppMacroExpander(&cpp_parser).Expand(tokens, SpaceHandling::kSkip);
     CHECK_EQ(expected, actual);
   }
 
   for (auto _ : state) {
     (void)_;
 
-    (void)CppMacroExpander(&cpp_parser).Expand(tokens, true);
+    (void)CppMacroExpander(&cpp_parser).Expand(tokens, SpaceHandling::kSkip);
   }
 
   state.SetItemsProcessed(state.iterations());

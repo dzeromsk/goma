@@ -41,6 +41,7 @@ static_library("cpp_directive_lib") {
     "include_guard_detector.h",
     "include_item.h",
     "predefined_macros.h",
+    "space_handling.h",
   ]
 
   deps = [

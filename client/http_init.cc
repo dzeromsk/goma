@@ -6,6 +6,7 @@
 
 #include "absl/strings/ascii.h"
 #include "absl/strings/numbers.h"
+#include "absl/strings/string_view.h"
 #include "file_helper.h"
 #include "glog/logging.h"
 #include "http.h"
@@ -173,8 +174,10 @@ void InitHttpClientOptions(HttpClient::Options* http_options) {
   } else {
     const string homedir = GetHomeDir();
     if (!homedir.empty()) {
+      static constexpr absl::string_view kConfigFile =
+          ".goma_client_oauth2_config";
       FLAGS_OAUTH2_CONFIG_FILE =
-          file::JoinPath(homedir, ".goma_oauth2_config");
+          file::JoinPath(homedir, kConfigFile);
       LOG(INFO) << "Use OAUTH2_CONFIG_FILE=" << FLAGS_OAUTH2_CONFIG_FILE;
       InitOAuth2(http_options);
     }
