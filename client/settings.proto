@@ -16,7 +16,7 @@ message Settings {
 }
 
 message SettingsReq {
-  string hostname = 1;
+  reserved 1;
   string use_case = 2;
 }
 

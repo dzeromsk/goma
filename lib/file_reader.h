@@ -20,8 +20,7 @@
 #include <string>
 #include <vector>
 
-
-#include "scoped_fd.h"
+#include "lib/scoped_fd.h"
 using std::string;
 
 namespace devtools_goma {

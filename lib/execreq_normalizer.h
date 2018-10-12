@@ -10,12 +10,10 @@
 #include <string>
 #include <vector>
 
-
-#include "compiler_specific.h"
-#include "flag_parser.h"
-#include "path_util.h"
 #include "absl/types/optional.h"
-
+#include "base/compiler_specific.h"
+#include "lib/flag_parser.h"
+#include "lib/path_util.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_data.pb.h"
 MSVC_POP_WARNING()
@@ -123,6 +121,7 @@ class ConfigurableExecReqNormalizer : public ExecReqNormalizer {
 
   void NormalizeExecReqSubprograms(ExecReq* req) const;
   void NormalizeExecReqEnvs(ExecReq* req) const;
+  void NormalizeExecReqOutputFilesAndDirs(ExecReq* req) const;
 };
 
 class AsIsExecReqNormalizer : public ConfigurableExecReqNormalizer {

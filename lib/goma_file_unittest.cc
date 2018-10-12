@@ -2,12 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "lib/goma_file.h"
 
-#include "goma_file.h"
-
-#include <gtest/gtest.h>
-
-#include "compiler_specific.h"
+#include "base/compiler_specific.h"
+#include "gtest/gtest.h"
 using std::string;
 
 TEST(StringOutput, EmptyContent) {

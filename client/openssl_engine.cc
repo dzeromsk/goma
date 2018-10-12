@@ -1488,9 +1488,12 @@ int OpenSSLEngine::Connect() {
 }
 
 string OpenSSLEngine::GetErrorString() const {
+  auto err = ERR_peek_last_error();
+  if (err == 0) {
+    return "ok";
+  }
   char error_message[1024];
-  ERR_error_string_n(ERR_peek_last_error(),
-                     error_message, sizeof error_message);
+  ERR_error_string_n(err, error_message, sizeof error_message);
   return error_message;
 }
 

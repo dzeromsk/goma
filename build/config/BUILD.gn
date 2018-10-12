@@ -16,19 +16,20 @@ config("release") {
 config("default_libs") {
   if (os == "win") {
     libs = [
-      "kernel32.lib",
-      "user32.lib",
-      "gdi32.lib",
-      "winspool.lib",
-      "comdlg32.lib",
       "advapi32.lib",
-      "shell32.lib",
-      "ole32.lib",
-      "oleaut32.lib",
-      "uuid.lib",
-      "odbc32.lib",
-      "odbccp32.lib",
+      "delayimp.lib",
       "psapi.lib",
+      "shell32.lib",
+    ]
+
+    # These are to avoid loading gdi32.dll.
+    # See b/115990434
+    ldflags = [
+      # This is for absl/base/internal/sysinfo.cc .
+      "/DELAYLOAD:shlwapi.dll",
+
+      # This is for GetUserNameA.
+      "/DELAYLOAD:advapi32.dll",
     ]
   }
 }
@@ -46,4 +47,17 @@ group("exe_and_shlib_deps") {
   #if (use_afl) {
   #  public_deps += [ "//third_party/afl" ]
   #}
+}
+
+config("feature_flags") {
+  defines = []
+  if (is_asan) {
+    defines += [ "ADDRESS_SANITIZER" ]
+  }
+  if (is_tsan) {
+    defines += [ "THREAD_SANITIZER" ]
+  }
+  if (is_msan) {
+    defines += [ "MEMORY_SANITIZER" ]
+  }
 }

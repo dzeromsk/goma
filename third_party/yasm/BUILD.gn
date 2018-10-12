@@ -58,7 +58,10 @@ if (current_toolchain == host_toolchain) {
     sources = [
       "source/patched-yasm/tools/genmacro/genmacro.c",
     ]
-    configs -= [ "//build/config/compiler:goma_code" ]
+    configs -= [
+      "//build/config/compiler:goma_code",
+      "//build/config/sanitizers:default_sanitizer_flags",
+    ]
     configs += [
       ":yasm_config",
       "//build/config/compiler:no_goma_code",
@@ -75,7 +78,10 @@ if (current_toolchain == host_toolchain) {
     sources = [
       "source/patched-yasm/libyasm/genmodule.c",
     ]
-    configs -= [ "//build/config/compiler:goma_code" ]
+    configs -= [
+      "//build/config/compiler:goma_code",
+      "//build/config/sanitizers:default_sanitizer_flags",
+    ]
     configs += [
       ":yasm_config",
       "//build/config/compiler:no_goma_code",
@@ -94,7 +100,10 @@ if (current_toolchain == host_toolchain) {
       "source/patched-yasm/tools/genperf/perfect.c",
     ]
 
-    configs -= [ "//build/config/compiler:goma_code" ]
+    configs -= [
+      "//build/config/compiler:goma_code",
+      "//build/config/sanitizers:default_sanitizer_flags",
+    ]
     configs += [
       ":yasm_config",
       "//build/config/compiler:no_goma_code",
@@ -136,7 +145,10 @@ if (current_toolchain == host_toolchain) {
     sources = [
       "source/patched-yasm/genstring.c",
     ]
-    configs -= [ "//build/config/compiler:goma_code" ]
+    configs -= [
+      "//build/config/compiler:goma_code",
+      "//build/config/sanitizers:default_sanitizer_flags",
+    ]
     configs += [
       ":yasm_config",
       "//build/config/compiler:no_goma_code",
@@ -153,7 +165,10 @@ if (current_toolchain == host_toolchain) {
     sources = [
       "source/patched-yasm/modules/preprocs/nasm/genversion.c",
     ]
-    configs -= [ "//build/config/compiler:goma_code" ]
+    configs -= [
+      "//build/config/compiler:goma_code",
+      "//build/config/sanitizers:default_sanitizer_flags",
+    ]
     configs += [
       ":yasm_config",
       "//build/config/compiler:no_goma_code",
@@ -193,7 +208,10 @@ if (current_toolchain == host_toolchain) {
       "source/patched-yasm/tools/re2c/translate.c",
     ]
 
-    configs -= [ "//build/config/compiler:goma_code" ]
+    configs -= [
+      "//build/config/compiler:goma_code",
+      "//build/config/sanitizers:default_sanitizer_flags",
+    ]
     configs += [
       ":yasm_config",
       "//build/config/compiler:no_goma_code",
@@ -305,7 +323,10 @@ if (current_toolchain == host_toolchain) {
       "$target_gen_dir/module.c",
     ]
 
-    configs -= [ "//build/config/compiler:goma_code" ]
+    configs -= [
+      "//build/config/compiler:goma_code",
+      "//build/config/sanitizers:default_sanitizer_flags",
+    ]
     configs += [
       ":yasm_config",
       "//build/config/compiler:no_goma_code",

@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#include "java_execreq_normalizer.h"
+#include "lib/java_execreq_normalizer.h"
 
 #include "glog/logging.h"
 using std::string;

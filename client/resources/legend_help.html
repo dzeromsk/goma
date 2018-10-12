@@ -1,0 +1,68 @@
+<html>
+<head>
+  <title>The meaning of colors in finished tasks</title>
+  <link rel="stylesheet" href="/static/compiler_proxy_status_style.css">
+</head>
+<body>
+  <h1>The meaning of colors in finished tasks</h1>
+
+<p>compiler_proxy's console (<a href="http://localhost:8088/">http://localhost:8088/</a>) shows finished tasks with several colors:
+
+  <ul>
+    <li><span class="task-status-success">Succeeded</span>:
+      The task has run in a backend server and it succeeded
+    <li><span class="task-status-cachehit">Cache hit</span>:
+      Goma reused cached result
+    <li><span class="task-status-local-cachehit">Local Cache hit</span>:
+      Goma reused local cached result
+
+    <li><span class="task-status-local-fallback">Local fallback</span>:
+      The task finished locally. This happens when
+      1) the local command finishes before Goma respond or
+      2) Goma decided to run the task locally (e.g., for preprocess and link,
+      Goma doesn't use its backends)
+    <li><span class="task-status-retry">Retry</span>:
+      The first request failed but the retried request succeeded.
+      compiler_proxy remembers files it has already sent to backends and
+      doesn't send them again. This status can happen Goma's backends
+      don't have some of these files actually, due to cache expiration.
+      You should be able to consider this state as success unless you see many
+      (like >30%).
+    <li><span class="task-status-gomaerror">Goma Error</span>
+      Something wrong has happened in Goma's backends. Several reasons can
+      cause this:
+      <ol>
+        <li>this type of request isn't supported by Goma yet
+        <li>backends are unhealthy
+        <li>Goma's bug
+        <li>cache expiration, etc.
+      </ol>
+      Anyway, compiler_proxy will run local fallback whenever this happens
+      and your compilation should succeed. You may be able to ignore these
+      failures unless a lot of tasks are going to this state. When many tasks
+      fail due to this reason, Goma's performance can be significantly
+      worse than usual.
+    <li><span class="task-status-failure">Failed</span>
+      Local task failed. Usually, this means your source code has some errors.
+      If you are sure your source code is OK, this may indicate a serious bug
+      in Goma. Please let us know.
+
+    <li><span class="task-status-conftestfailure">Failed but
+        maybe during ./configure</span>:
+      Same as above but the input filename contains "conftest" so this may
+      happened during ./configure.
+
+    <li><span class="task-status-mismatch">Mismatch</span>:
+      compiler version, compiler hash, or subprogram (e.g. .so files that
+      a compiler uses) is mismatched between client and server.
+      It means, the Goma server didn't use the same compiler as the compiler
+      you used in your client, maybe because the Goma server doesn't have
+      the same compiler.
+   <li><span class="task-status-cancel">Canceled</span>:
+     Goma canceled this task. This should happen only when you stopped
+     your build (e.g., SIGINT for make).
+  </ul>
+
+</body>
+</html>
+

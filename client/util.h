@@ -139,13 +139,6 @@ inline bool Chdir(const char* path) {
 #endif
 }
 
-// Convert node name to short and lower case nodename.
-// e.g.
-// slave123 -> slave123 (Linux CCompute)
-// vm123-m1.golo.chromium.org -> vm123-m1 (Mac golo)
-// BUILD123-M1 -> build123-m1 (Windows golo)
-string ToShortNodename(const string& nodename);
-
 // Returns sum of all integers in |input|, which is a repeated field of int32s.
 int64_t SumRepeatedInt32(
     const google::protobuf::RepeatedField<google::protobuf::int32>& input);

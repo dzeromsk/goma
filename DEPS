@@ -44,7 +44,7 @@ deps = {
 
      # chrome's deps/third_party/boringssl
      "client/third_party/boringssl/src":
-     "https://boringssl.googlesource.com/boringssl@e77c27d734e64c35feca142c995cf9bae896f85e",
+     "https://boringssl.googlesource.com/boringssl@e3418028023f6399bee43d78db1ee7f374f52dc2",
 
      # google-breakpad
      "client/third_party/breakpad/breakpad":
@@ -78,7 +78,7 @@ deps = {
 
      # abseil
      "client/third_party/abseil/src":
-     "https://github.com/abseil/abseil-cpp.git@d6df769173bf0263489f98874b93034db0e479a2",
+     "https://github.com/abseil/abseil-cpp.git@445998d7ac4e5d3c50411d377e3b50e960d2d6c2",
 
      # google benchmark v1.4.1
      "client/third_party/benchmark/src":
@@ -196,6 +196,13 @@ hooks = [
        'name': 'win_toolchain',
        'pattern': '.',
        'action': ['python', 'client/build/vs_toolchain.py', 'update'],
+     },
+     # Update the Mac toolchain if necessary.
+     {
+       'name': 'mac_toolchain',
+       'pattern': '.',
+       'condition': 'checkout_ios or checkout_mac',
+       'action': ['python', 'client/build/mac_toolchain.py'],
      },
 
      # Ensure that the DEPS'd "depot_tools" has its self-update capability

@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-
 #include "absl/types/optional.h"
 using std::string;
 

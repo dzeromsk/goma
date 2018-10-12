@@ -1,14 +1,16 @@
 #!/usr/bin/env python
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
-# Note: copy of chromium's src/build/mac/find_sdk.py
 # Use of this source code is governed by a BSD-style license that can be
 # found in the chromium's LICENSE file.
+#
+# Copy of chromium's src/build/mac/find_sdk.py
 
 """Prints the lowest locally available SDK version greater than or equal to a
-given minimum sdk version to standard output.
+given minimum sdk version to standard output. If --developer_dir is passed, then
+the script will use the Xcode toolchain located at DEVELOPER_DIR.
 
 Usage:
-  python find_sdk.py 10.6  # Ignores SDKs < 10.6
+  python find_sdk.py [--developer_dir DEVELOPER_DIR] 10.6  # Ignores SDKs < 10.6
 """
 
 import os
@@ -16,8 +18,14 @@ import re
 import subprocess
 import sys
 
-
 from optparse import OptionParser
+
+
+class SdkError(Exception):
+  def __init__(self, value):
+    self.value = value
+  def __str__(self):
+    return repr(self.value)
 
 
 def parse_version(version_str):
@@ -35,11 +43,15 @@ def main():
                     help="user-specified SDK path; bypasses verification")
   parser.add_option("--print_sdk_path",
                     action="store_true", dest="print_sdk_path", default=False,
-                    help="Additionaly print the path the SDK (appears first).")
+                    help="Additionally print the path the SDK (appears first).")
+  parser.add_option("--developer_dir", help='Path to Xcode.')
   options, args = parser.parse_args()
   if len(args) != 1:
     parser.error('Please specify a minimum SDK version')
   min_sdk_version = args[0]
+
+  if options.developer_dir:
+    os.environ['DEVELOPER_DIR'] = options.developer_dir
 
   job = subprocess.Popen(['xcode-select', '-print-path'],
                          stdout=subprocess.PIPE,
@@ -48,16 +60,17 @@ def main():
   if job.returncode != 0:
     print >> sys.stderr, out
     print >> sys.stderr, err
-    raise Exception(('Error %d running xcode-select, you might have to run '
-      '|sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer| '
-      'if you are using Xcode 4.') % job.returncode)
-  # The Developer folder moved in Xcode 4.3.
-  xcode43_sdk_path = os.path.join(
+    raise Exception('Error %d running xcode-select' % job.returncode)
+  sdk_dir = os.path.join(
       out.rstrip(), 'Platforms/MacOSX.platform/Developer/SDKs')
-  if os.path.isdir(xcode43_sdk_path):
-    sdk_dir = xcode43_sdk_path
-  else:
-    sdk_dir = os.path.join(out.rstrip(), 'SDKs')
+  # Xcode must be installed, its license agreement must be accepted, and its
+  # command-line tools must be installed. Stand-alone installations (in
+  # /Library/Developer/CommandLineTools) are not supported.
+  # https://bugs.chromium.org/p/chromium/issues/detail?id=729990#c1
+  if not os.path.isdir(sdk_dir) or not '.app/Contents/Developer' in sdk_dir:
+    raise SdkError('Install Xcode, launch it, accept the license ' +
+      'agreement, and run `sudo xcode-select -s /path/to/Xcode.app` ' +
+      'to continue.')
   sdks = [re.findall('^MacOSX(10\.\d+)\.sdk$', s) for s in os.listdir(sdk_dir)]
   sdks = [s[0] for s in sdks if s]  # [['10.5'], ['10.6']] => ['10.5', '10.6']
   sdks = [s for s in sdks  # ['10.5', '10.6'] => ['10.6']
@@ -78,11 +91,11 @@ def main():
     print >> sys.stderr, ''
     print >> sys.stderr, '                                           ^^^^^^^'
     print >> sys.stderr, ''
-    return min_sdk_version
+    sys.exit(1)
 
   if options.print_sdk_path:
-    print subprocess.check_output(['xcodebuild', '-version', '-sdk',
-                                   'macosx' + best_sdk, 'Path']).strip()
+    print subprocess.check_output(
+        ['xcrun', '-sdk', 'macosx' + best_sdk, '--show-sdk-path']).strip()
 
   return best_sdk
 

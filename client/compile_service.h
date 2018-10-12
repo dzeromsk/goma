@@ -279,6 +279,12 @@ class CompileService {
   bool use_relative_paths_in_argv() const {
     return use_relative_paths_in_argv_;
   }
+  void SetSendExpectedOutputs(bool send_expected_outputs) {
+    send_expected_outputs_ = send_expected_outputs;
+  }
+  bool send_expected_outputs() const {
+    return send_expected_outputs_;
+  }
 
   void SetCommandCheckLevel(const string& level) {
     command_check_level_ = level;
@@ -563,6 +569,7 @@ class CompileService {
   std::vector<absl::Duration> timeouts_;
   bool enable_gch_hack_;
   bool use_relative_paths_in_argv_;
+  bool send_expected_outputs_;
   string command_check_level_;
 
   // Set hermetic_mode in ExecReq, that is, don't choose different compiler

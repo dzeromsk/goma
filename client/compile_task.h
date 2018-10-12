@@ -245,6 +245,7 @@ class CompileTask {
   bool MakeWeakRelativeInArgv();
 #endif
   void UpdateExpandedArgs();
+  void SetExpectedOutputs();
   void ModifyRequestArgs();
   void ModifyRequestEnvs();
   void UpdateCommandSpec();

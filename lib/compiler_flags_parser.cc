@@ -2,12 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "lib/compiler_flags_parser.h"
 
-#include "compiler_flags_parser.h"
-
-#include "compiler_flag_type_specific.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
+#include "lib/compiler_flag_type_specific.h"
 
 namespace devtools_goma {
 

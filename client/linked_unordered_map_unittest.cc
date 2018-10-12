@@ -13,13 +13,12 @@
 
 #include "absl/memory/memory.h"
 #include "goma_hash.h"
-#include "sha256hash_hasher.h"
 
 namespace devtools_goma {
 
 namespace {
-template<typename K, typename V, typename H>
-std::vector<K> ListKeys(const LinkedUnorderedMap<K, V, H>& m) {
+template <typename K, typename V>
+std::vector<K> ListKeys(const LinkedUnorderedMap<K, V>& m) {
   std::vector<K> keys;
   for (const auto& entry : m) {
     keys.push_back(entry.first);
@@ -121,7 +120,7 @@ TEST(LinkedUnorderedMap, MoveToBack) {
 }
 
 TEST(LinkedUnorderedMap, CustomHashFunction) {
-  LinkedUnorderedMap<SHA256HashValue, std::string, SHA256HashValueHasher> m;
+  LinkedUnorderedMap<SHA256HashValue, std::string> m;
 
   SHA256HashValue h1, h2;
   ASSERT_TRUE(SHA256HashValue::ConvertFromHexString(

@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#include "clang_tidy_flags.h"
+#include "lib/clang_tidy_flags.h"
 
 #include "absl/memory/memory.h"
 #include "absl/strings/ascii.h"
-#include "gcc_flags.h"
-#include "path.h"
-#include "path_util.h"
+#include "base/path.h"
+#include "lib/gcc_flags.h"
+#include "lib/path_util.h"
 
 namespace devtools_goma {
 

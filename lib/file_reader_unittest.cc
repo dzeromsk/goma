@@ -3,13 +3,12 @@
 // found in the LICENSE file.
 
 
-
-#include "file_reader.h"
+#include "lib/file_reader.h"
 
 #include <memory>
 
-#include <glog/logging.h>
-#include <gtest/gtest.h>
+#include "glog/logging.h"
+#include "gtest/gtest.h"
 using std::string;
 
 namespace devtools_goma {

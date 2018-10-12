@@ -2,18 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#include "execreq_normalizer.h"
+#include "lib/execreq_normalizer.h"
 
 #include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
-#include "compiler_flag_type_specific.h"
-#include "compiler_flags.h"
-#include "execreq_verifier.h"
+#include "base/path.h"
 #include "google/protobuf/text_format.h"
 #include "google/protobuf/util/message_differencer.h"
 #include "gtest/gtest.h"
-#include "path.h"
+#include "lib/compiler_flag_type_specific.h"
+#include "lib/compiler_flags.h"
+#include "lib/execreq_verifier.h"
+#include "lib/vc_flags.h"
 using google::protobuf::TextFormat;
 using google::protobuf::util::MessageDifferencer;
 
@@ -168,6 +168,7 @@ const char kExecReqToNormalizeWin[] =
     "\\\\Microsoft Visual Studio 9.0\\\\VC\\\\INCLUDE\"\n"
     "}\n"
     "arg: \"cl\"\n"
+    "arg: \"/c\"\n"
     "arg: \"/TP\"\n"
     "arg: \"/showIncludes\"\n"
     "arg: \"/Z7\"\n"
@@ -179,7 +180,9 @@ const char kExecReqToNormalizeWin[] =
     "  filename: \"C:\\\\src\\\\goma\\\\client\\\\test\\\\vc\\\\stdafx.cpp\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: "
+    "\"C:\\\\src\\\\goma\\\\client\\\\build\\\\Debug\\\\vc\\\\stdafx.obj\"\n";
 
 const char kExecReqToNormalizeWinClang[] =
     "command_spec {\n"
@@ -194,6 +197,7 @@ const char kExecReqToNormalizeWinClang[] =
     "\\\\Microsoft Visual Studio 9.0\\\\VC\\\\INCLUDE\"\n"
     "}\n"
     "arg: \"clang-cl\"\n"
+    "arg: \"/c\"\n"
     "arg: \"/TP\"\n"
     "arg: \"-fprofile-instr-generate\"\n"
     "arg: \"-fcoverage-mapping\"\n"
@@ -205,7 +209,9 @@ const char kExecReqToNormalizeWinClang[] =
     "  filename: \"C:\\\\src\\\\goma\\\\client\\\\test\\\\vc\\\\stdafx.cpp\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: "
+    "\"C:\\\\src\\\\goma\\\\client\\\\build\\\\Debug\\\\vc\\\\stdafx.obj\"\n";
 
 const char kExecReqToNormalizeWinClangFCPath[] =
     "command_spec {\n"
@@ -220,6 +226,7 @@ const char kExecReqToNormalizeWinClangFCPath[] =
     "\"..\\\\..\\third_party\\\\cxx_system_include_path\"\n"
     "}\n"
     "arg: \"clang-cl\"\n"
+    "arg: \"/c\"\n"
     "arg: \"/Fo..\\\\..\\\\build\\\\Debug\\\\vc\\\\stdafx.obj\"\n"
     "arg: \"stdafx.cpp\"\n"
     "cwd: \"C:\\\\src\\\\alice\\\\chromium\"\n"
@@ -232,7 +239,9 @@ const char kExecReqToNormalizeWinClangFCPath[] =
     "  filename: \"C:\\\\src\\\\alice\\\\chromium\\\\a.cc\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: "
+    "\"..\\\\..\\\\build\\\\Debug\\\\vc\\\\stdafx.obj\"\n";
 
 void NormalizeExecReqForCacheKey(
     int id,
@@ -248,6 +257,18 @@ void NormalizeExecReqForCacheKey(
                              req);
 }
 
+bool ValidateOutputFilesAndDirs(const ExecReq& req) {
+  std::vector<string> args(req.arg().begin(), req.arg().end());
+  std::vector<string> expected_output_files(req.expected_output_files().begin(),
+                                            req.expected_output_files().end());
+  std::vector<string> expected_output_dirs(req.expected_output_dirs().begin(),
+                                           req.expected_output_dirs().end());
+  VCFlags flags(args, req.cwd());
+
+  return expected_output_files == flags.output_files() &&
+         expected_output_dirs == flags.output_dirs();
+}
+
 }  // namespace
 
 TEST(VCExecReqNormalizerTest, NormalizeExecReqForCacheKeyForClExe) {
@@ -257,6 +278,7 @@ TEST(VCExecReqNormalizerTest, NormalizeExecReqForCacheKeyForClExe) {
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalizeWin, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -271,6 +293,11 @@ TEST(VCExecReqNormalizerTest, NormalizeExecReqForCacheKeyForClExe) {
   EXPECT_EQ("C:\\src\\goma\\client\\test\\vc\\stdafx.cpp",
             req.input(0).filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("C:\\src\\goma\\client\\build\\Debug\\vc\\stdafx.obj",
+            req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // cl.exe with different cwd and /showIncludes option
@@ -285,6 +312,8 @@ TEST(VCExecReqNormalizerTest, NormalizeExecReqForCacheKeyForClExeCWD) {
 
   ASSERT_TRUE(devtools_goma::VerifyExecReq(alice_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(bob_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(alice_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(bob_req));
 
   devtools_goma::NormalizeExecReqForCacheKey(
       0, true, false, kTestOptions, std::map<string, string>(), &alice_req);
@@ -322,6 +351,8 @@ TEST(VCExecReqNormalizerTest, NormalizeExecReqForCacheKeyForClang) {
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalizeWinClang, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
+
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -336,6 +367,11 @@ TEST(VCExecReqNormalizerTest, NormalizeExecReqForCacheKeyForClang) {
   EXPECT_EQ("C:\\src\\goma\\client\\test\\vc\\stdafx.cpp",
             req.input(0).filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("C:\\src\\goma\\client\\build\\Debug\\vc\\stdafx.obj",
+            req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // When keep_args in exec req normalizer can be non kAsIs, arg can be
@@ -353,6 +389,7 @@ command_spec {
   cxx_system_include_path: "C:\\Program Files (x86)\\Microsoft Visual Studio 9.0\\VC\\INCLUDE"
 }
 arg: "clang-cl"
+arg: "/c"
 arg: "/TP"
 arg: "-fprofile-instr-generate"
 arg: "-fcoverage-mapping"
@@ -364,6 +401,7 @@ Input {
   filename: "C:\\src\\goma\\client\\test\\vc\\stdafx.cpp"
   hash_key: "152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d559d507401ae81e9"
 }
+expected_output_files: "C:\\src\\goma\\client\\build\\Debug\\vc\\stdafx.obj"
 )###";
 
   // system_include_path[1] becomes a relative path.
@@ -378,6 +416,7 @@ command_spec {
   comment: " include_path:cwd"
 }
 arg: "clang-cl"
+arg: "/c"
 arg: "/TP"
 arg: "-fprofile-instr-generate"
 arg: "-fcoverage-mapping"
@@ -388,7 +427,9 @@ cwd: "C:\\src\\goma\\client\\test\\vc"
 Input {
   filename: "C:\\src\\goma\\client\\test\\vc\\stdafx.cpp"
   hash_key: "152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d559d507401ae81e9"
-})###";
+}
+expected_output_files: "C:\\src\\goma\\client\\build\\Debug\\vc\\stdafx.obj"
+)###";
 
   const std::vector<string> kTestOptions{
       "Xclang", "B", "I", "gcc-toolchain", "-sysroot", "resource-dir"};
@@ -396,8 +437,10 @@ Input {
   devtools_goma::ExecReq req, req_expected;
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReq, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqExpected, &req_expected));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req_expected));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req_expected));
 
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
@@ -406,6 +449,12 @@ Input {
   string difference_reason;
   differencer.ReportDifferencesToString(&difference_reason);
   EXPECT_TRUE(differencer.Compare(req_expected, req)) << difference_reason;
+
+  ValidateOutputFilesAndDirs(req);
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("C:\\src\\goma\\client\\build\\Debug\\vc\\stdafx.obj",
+            req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 TEST(VCExecReqNormalizerTest, FlagAbsPath) {
@@ -422,6 +471,8 @@ TEST(VCExecReqNormalizerTest, FlagAbsPath) {
 
   ASSERT_TRUE(
       TextFormat::ParseFromString(kExecReqToNormalizeWinClangFCPath, &req));
+  ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
 
   ASSERT_EQ(req.input_size(), 2);
 
@@ -578,6 +629,12 @@ TEST(VCExecReqNormalizerTest, FlagAbsPath) {
     EXPECT_EQ(copy_req.input(0).filename(), "a.cc");
     EXPECT_EQ(copy_req.input(1).filename(), "stdafx.cpp");
   }
+
+  ValidateOutputFilesAndDirs(req);
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("..\\..\\build\\Debug\\vc\\stdafx.obj",
+            req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 }  // namespace devtools_goma

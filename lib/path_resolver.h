@@ -9,9 +9,8 @@
 #include <string>
 #include <vector>
 
-
 #include "absl/strings/string_view.h"
-#include "basictypes.h"
+#include "base/basictypes.h"
 using std::string;
 
 namespace devtools_goma {

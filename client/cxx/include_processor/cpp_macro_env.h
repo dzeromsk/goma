@@ -7,28 +7,17 @@
 
 #include <string>
 
+#include "absl/container/flat_hash_map.h"
 #include "cpp_macro.h"
-#include "flat_map.h"
 
 using std::string;
 
 namespace devtools_goma {
 
-// TODO: Consider using a better hasher e.g. murmur hash?
-struct StringViewHasher {
-  size_t operator()(absl::string_view str) const {
-    size_t r = 0;
-    for (char c : str) {
-      r = r * 37 + static_cast<unsigned char>(c);
-    }
-    return r;
-  }
-};
-
 class CppMacroEnv {
  public:
   using UnderlyingMapType =
-      FlatMap<absl::string_view, const Macro*, StringViewHasher>;
+      absl::flat_hash_map<absl::string_view, const Macro*>;
 
   // Add |macro| to map.
   // If the same name macro exists, |macro| overrides the existing one,

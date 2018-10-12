@@ -3,8 +3,7 @@
 // found in the LICENSE file.
 
 
-
-#include "compiler_flags.h"
+#include "lib/compiler_flags.h"
 
 #include <limits.h>
 #include <algorithm>
@@ -12,27 +11,25 @@
 #include <string>
 #include <vector>
 
-
 #include "absl/strings/str_cat.h"
-#include "clang_tidy_flags.h"
-#include "file_dir.h"
-#include "file_helper.h"
-#include "filesystem.h"
-#include "gcc_flags.h"
+#include "base/filesystem.h"
+#include "base/path.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "gtest/gtest.h"
-#include "java_flags.h"
-#include "path.h"
-#include "path_resolver.h"
-#include "vc_flags.h"
+#include "lib/clang_tidy_flags.h"
+#include "lib/file_helper.h"
+#include "lib/gcc_flags.h"
+#include "lib/java_flags.h"
+#include "lib/path_resolver.h"
+#include "lib/vc_flags.h"
+
 #ifdef _WIN32
 # include "config_win.h"
 // we'll ignore the warnings:
 // warning C4996: 'strdup': The POSIX name for this item is deprecated.
 # pragma warning(disable:4996)
 #endif  // _WIN32
-using google::GetExistingTempDirectories;
 using std::string;
 
 namespace devtools_goma {

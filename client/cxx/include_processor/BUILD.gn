@@ -101,7 +101,6 @@ static_library("cpp_parser_lib") {
     "//client:common",
     "//client:compiler_info_lib",
     "//client/cxx:cxx_compiler_info_lib",
-    "//third_party/tensorflow_core:flat_map",
   ]
   public_configs = [ "//client:client_config" ]
 }

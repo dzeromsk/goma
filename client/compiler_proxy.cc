@@ -199,8 +199,7 @@ int main(int argc, char* argv[], const char* envp[]) {
   }
 #endif
 
-  if (FLAGS_ENABLE_GLOBAL_FILE_STAT_CACHE ||
-      FLAGS_ENABLE_GLOBAL_FILE_ID_CACHE) {
+  if (FLAGS_ENABLE_GLOBAL_FILE_STAT_CACHE) {
     devtools_goma::GlobalFileStatCache::Init();
   }
 
@@ -446,8 +445,7 @@ int main(int argc, char* argv[], const char* envp[]) {
   handler.reset();
   wm.Finish();
 
-  if (FLAGS_ENABLE_GLOBAL_FILE_STAT_CACHE ||
-      FLAGS_ENABLE_GLOBAL_FILE_ID_CACHE) {
+  if (FLAGS_ENABLE_GLOBAL_FILE_STAT_CACHE) {
     devtools_goma::GlobalFileStatCache::Quit();
   }
 

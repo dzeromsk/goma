@@ -13,6 +13,7 @@ static_library("abseil") {
   #       grep -v 'test_util' | \
   #       grep -v 'nonprod' | \
   #       grep -v 'benchmark.cc' | \
+  #       grep -v 'print_hash_of.cc' | \
   #       sed -e 's/^/"/' -e 's/$/",/' | sort
   # Note: a few unnecessary files might be left. You might need to
   # remove it manually.
@@ -68,10 +69,25 @@ static_library("abseil") {
     "src/absl/base/port.h",
     "src/absl/base/thread_annotations.h",
     "src/absl/container/fixed_array.h",
+    "src/absl/container/flat_hash_map.h",
+    "src/absl/container/flat_hash_set.h",
     "src/absl/container/inlined_vector.h",
     "src/absl/container/internal/compressed_tuple.h",
+    "src/absl/container/internal/container_memory.h",
+    "src/absl/container/internal/hash_function_defaults.h",
+    "src/absl/container/internal/hash_policy_traits.h",
+    "src/absl/container/internal/hashtable_debug.h",
+    "src/absl/container/internal/hashtable_debug_hooks.h",
+    "src/absl/container/internal/layout.h",
+    "src/absl/container/internal/node_hash_policy.h",
+    "src/absl/container/internal/raw_hash_map.h",
+    "src/absl/container/internal/raw_hash_set.cc",
+    "src/absl/container/internal/raw_hash_set.h",
     "src/absl/container/internal/test_instance_tracker.cc",
     "src/absl/container/internal/test_instance_tracker.h",
+    "src/absl/container/internal/tracked.h",
+    "src/absl/container/node_hash_map.h",
+    "src/absl/container/node_hash_set.h",
     "src/absl/debugging/failure_signal_handler.cc",
     "src/absl/debugging/failure_signal_handler.h",
     "src/absl/debugging/internal/address_is_readable.cc",
@@ -105,6 +121,13 @@ static_library("abseil") {
     "src/absl/debugging/symbolize_elf.inc",
     "src/absl/debugging/symbolize_unimplemented.inc",
     "src/absl/debugging/symbolize_win32.inc",
+    "src/absl/hash/hash.h",
+    "src/absl/hash/internal/city.cc",
+    "src/absl/hash/internal/city.h",
+    "src/absl/hash/internal/city_crc.h",
+    "src/absl/hash/internal/hash.cc",
+    "src/absl/hash/internal/hash.h",
+    "src/absl/hash/internal/spy_hash_state.h",
     "src/absl/memory/memory.h",
     "src/absl/meta/type_traits.h",
     "src/absl/numeric/int128.cc",

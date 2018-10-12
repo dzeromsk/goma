@@ -56,7 +56,23 @@ if (current_os == "") {
   current_os = target_os
 }
 
-is_posix = os == "mac" || os == "linux"
+# OS DEFINITIONS
+is_posix = current_os == "mac" || current_os == "linux"
+is_mac = current_os == "mac"
+is_linux = current_os == "linux"
+is_win = current_os == "win" || current_os == "winuwp"
+
+# for chromium compatibility
+# to minimize diff in build/toolchain/toolchain.gni etc.
+is_aix = false
+is_android = false
+is_chromeos = false  # goma-chromeos will use os == "linux".
+is_fuchsia = false
+is_ios = false
+is_nacl = false
+is_component_build = false
+is_chrome_branded = false
+
 using_sanitizer = is_asan || is_tsan || is_msan
 declare_args() {
   # Since sanitizers kills subprocess on violation with messages shown to
@@ -70,11 +86,12 @@ may_make_pie = !with_cpu_profiling && !with_heap_profiling
 
 default_compiler_configs = [
   "//build/config/compiler:compiler",
-  "//build/config/compiler:no_rtti",
-  "//build/config/compiler:goma_code",
   "//build/config/compiler:default_include_dirs",
+  "//build/config/compiler:goma_code",
+  "//build/config/compiler:no_rtti",
   "//build/config/coverage:default_coverage",
   "//build/config:default_libs",
+  "//build/config:feature_flags",
   "//build/config/sanitizers:default_sanitizer_flags",
 ]
 if (is_debug) {
@@ -105,18 +122,6 @@ if (is_debug) {
 
 if (is_posix) {
   default_compiler_configs += [ "//build/config/compiler:no_exceptions" ]
-}
-if (is_asan) {
-  default_compiler_configs += [ "//build/config/compiler:asan" ]
-  is_clang = true
-}
-if (is_tsan) {
-  default_compiler_configs += [ "//build/config/compiler:tsan" ]
-  is_clang = true
-}
-if (is_msan) {
-  default_compiler_configs += [ "//build/config/compiler:msan" ]
-  is_clang = true
 }
 if (enable_lzma) {
   default_compiler_configs += [ "//build/config/compiler:enable_lzma" ]

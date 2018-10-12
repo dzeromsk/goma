@@ -10,6 +10,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+
 using std::string;
 
 namespace devtools_goma {
@@ -61,14 +63,6 @@ class IncludeFileFinder {
 
   static bool gch_hack_;
 
-  // Defining this since no std::hash<std::pair<S, T>>.
-  template<typename S, typename T>
-  struct PairHasher {
-    size_t operator()(const std::pair<S, T>& p) const {
-      return std::hash<S>()(p.first) * 37 + std::hash<T>()(p.second);
-    }
-  };
-
   const string cwd_;
   const bool ignore_case_;
   const std::vector<string>* const include_dirs_;
@@ -88,14 +82,11 @@ class IncludeFileFinder {
 
   // Cache for (path_in_directive, include_dir_index_start) ->
   //           (filepath, used_include_dir_index).
-  std::unordered_map<std::pair<string, int>,
-                     std::pair<string, int>,
-                     PairHasher<string, int>>
+  absl::flat_hash_map<std::pair<string, int>, std::pair<string, int>>
       include_path_cache_;
 
   // Map for "include_dir idx + (key in .hmap file)" -> filename in .hmap file.
-  std::unordered_map<std::pair<int, string>, string, PairHasher<int, string>>
-      hmap_map_;
+  absl::flat_hash_map<std::pair<int, string>, string> hmap_map_;
 };
 
 }  // namespace devtools_goma

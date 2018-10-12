@@ -9,13 +9,14 @@
 
 """A Script to manage compiler_proxy.
 
-It starts/stops compiler_proxy.exe or compiler_proxy like goma_ctl.sh.
+It starts/stops compiler_proxy.exe or compiler_proxy.
 """
 
 
 
 import collections
 import copy
+import datetime
 import glob
 import gzip
 import hashlib
@@ -54,6 +55,9 @@ _CACHE_DIR = 'goma_cache'
 _PRODUCT_NAME = 'Goma'  # product name used for crash report.
 _DUMP_FILE_SUFFIX = '.dmp'
 _CHECKSUM_FILE = 'sha256.json'
+
+_TIMESTAMP_PATTERN = re.compile('(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})')
+_TIMESTAMP_FORMAT = '%Y/%m/%d %H:%M:%S'
 
 
 def _IsGomaFlagTrue(flag_name, default=False):
@@ -421,6 +425,26 @@ def _CalculateChecksum(filename):
   """
   with open(filename, 'rb') as f:
     return hashlib.sha256(f.read()).hexdigest()
+
+
+def _GetLogFileTimestamp(glog_log):
+  """Returns timestamp when the given glog log was created.
+
+  Args:
+    glog_log: a filename of a google-glog log.
+
+  Returns:
+    datetime instance when the logfile was created.
+    Or, returns None if not a glog file.
+
+  Raises:
+    IOError if this function cannot open glog_log.
+  """
+  with open(glog_log) as f:
+    matched = _TIMESTAMP_PATTERN.search(f.readline())
+    if matched:
+      return datetime.datetime.strptime(matched.group(1), _TIMESTAMP_FORMAT)
+  return None
 
 
 class ConfigError(Exception):
@@ -891,6 +915,28 @@ class GomaDriver(object):
     else:
       print '%s log was not found' % command_name
 
+  def _CopyGomaccInfoFiles(self, dst):
+    """Copies gomacc *.INFO.* file to destination. all gomacc logs after
+    latest compiler_proxy started.
+
+    Args:
+      dst: destination directory name.
+    """
+
+    infolog_path = self._env.FindLatestLogFile('compiler_proxy', 'INFO')
+    if not infolog_path:
+      return
+    compiler_proxy_start_time = _GetLogFileTimestamp(infolog_path)
+    if not compiler_proxy_start_time:
+      print ('compiler_proxy start time could not be inferred. ' +
+             'gomacc logs won\'t be included.')
+      return
+    logs = glob.glob(os.path.join(_GetLogDirectory(), 'gomacc.*.INFO.*'))
+    for log in logs:
+      timestamp = _GetLogFileTimestamp(log)
+      if timestamp and timestamp > compiler_proxy_start_time:
+        self._env.CopyFile(log, os.path.join(dst, os.path.basename(log)))
+
   def _InferBuildDirectory(self):
     """Infer latest build directory from compiler_proxy.INFO.
 
@@ -956,6 +1002,8 @@ class GomaDriver(object):
 
       self._CopyLatestInfoFile('compiler_proxy', tempdir)
       self._CopyLatestInfoFile('compiler_proxy-subproc', tempdir)
+      self._CopyLatestInfoFile('goma_fetch', tempdir)
+      self._CopyGomaccInfoFiles(tempdir)
 
       build_dir = self._InferBuildDirectory()
       if build_dir:

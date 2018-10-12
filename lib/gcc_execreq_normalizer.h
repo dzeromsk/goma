@@ -5,8 +5,7 @@
 #ifndef DEVTOOLS_GOMA_LIB_GCC_EXECREQ_NORMALIZER_H_
 #define DEVTOOLS_GOMA_LIB_GCC_EXECREQ_NORMALIZER_H_
 
-
-#include "execreq_normalizer.h"
+#include "lib/execreq_normalizer.h"
 using std::string;
 
 namespace devtools_goma {

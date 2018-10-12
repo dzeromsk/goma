@@ -2,18 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#include "execreq_normalizer.h"
+#include "lib/execreq_normalizer.h"
 
 #include "absl/strings/match.h"
-#include "compiler_flag_type_specific.h"
-#include "compiler_flags.h"
-#include "execreq_verifier.h"
-#include "gcc_flags.h"
+#include "base/path.h"
 #include "google/protobuf/text_format.h"
 #include "google/protobuf/util/message_differencer.h"
 #include "gtest/gtest.h"
-#include "path.h"
+#include "lib/compiler_flag_type_specific.h"
+#include "lib/compiler_flags.h"
+#include "lib/execreq_verifier.h"
+#include "lib/gcc_flags.h"
+
 using google::protobuf::TextFormat;
 using google::protobuf::util::MessageDifferencer;
 
@@ -46,7 +46,8 @@ const char kExecReqToNormalize[] =
     "  filename: \"/tmp/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 const int kExecReqToNormalizeArgSize = 11;
 
 const char kExecReqToNormalizeGcc[] =
@@ -71,7 +72,8 @@ const char kExecReqToNormalizeGcc[] =
     "  filename: \"/tmp/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 const int kExecReqToNormalizeGccArgSize = 8;
 
 const char kExecReqToNormalizeRelativeArgs[] =
@@ -99,7 +101,8 @@ const char kExecReqToNormalizeRelativeArgs[] =
     "  filename: \"/tmp/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 const char kExecReqToNormalizeLink[] =
     "command_spec {\n"
@@ -126,7 +129,8 @@ const char kExecReqToNormalizeLink[] =
     "  filename: \"/tmp/hello.o\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"a.out\"\n";
 
 const char kExecReqToNormalizeWinPNaCl[] =
     "command_spec <\n"
@@ -168,7 +172,13 @@ const char kExecReqToNormalizeWinPNaCl[] =
     "lib\\\\clang\\\\3.7.0\\\\include\\\\limits.h\"\n"
     "  hash_key: \"48cdf007c86904f26d7dcd38f04f69d21022add3e48aab145a3d22"
     "16c061840d\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: "
+    "\"clang_newlib_x64/obj/chrome/test/data/nacl/"
+    "ppapi_crash_via_exit_call_nexe/ppapi_crash_via_exit_call.o\"\n"
+    "expected_output_files: "
+    "\"clang_newlib_x64/obj/chrome/test/data/nacl/"
+    "ppapi_crash_via_exit_call_nexe/ppapi_crash_via_exit_call.o.d\"\n";
 
 const char kExecReqToNormalizePNaClTranslate[] =
     "command_spec <\n"
@@ -210,7 +220,13 @@ const char kExecReqToNormalizePNaClTranslate[] =
     "lib/clang/3.7.0/include/limits.h\"\n"
     "  hash_key: \"48cdf007c86904f26d7dcd38f04f69d21022add3e48aab145a3d22"
     "16c061840d\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: "
+    "\"clang_newlib_x64/obj/chrome/test/data/nacl/"
+    "ppapi_crash_via_exit_call_nexe/ppapi_crash_via_exit_call.o\"\n"
+    "expected_output_files: "
+    "\"clang_newlib_x64/obj/chrome/test/data/nacl/"
+    "ppapi_crash_via_exit_call_nexe/ppapi_crash_via_exit_call.o.d\"\n";
 
 const char kExecReqToNormalizeInputOrder[] =
     "command_spec {\n"
@@ -240,7 +256,8 @@ const char kExecReqToNormalizeInputOrder[] =
     "Input {\n"
     "  filename: \"/tmp/test/hello2.c\"\n"
     "  hash_key: \"cccccccccc\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 const char kExecReqToNormalizeContent[] =
     "command_spec {\n"
@@ -267,7 +284,8 @@ const char kExecReqToNormalizeContent[] =
     "    content: \"0123456789\"\n"
     "    file_size: 10\n"
     "  }\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 // TODO: Extract this to separated file.
 const char kExecReqToAmbiguaousDebugPrefixMap[] = R"(command_spec {
@@ -387,15 +405,14 @@ arg: "-c"
 arg: "../../third_party/tcmalloc/chromium/src/malloc_hook.cc"
 arg: "-o"
 arg: "obj/base/allocator/tcmalloc/malloc_hook.o"
-arg: "-fuse-init-array"
 env: "PWD=/home/goma/chromium/src/out/rel_ng"
 cwd: "/home/goma/chromium/src/out/rel_ng"
 subprogram {
-  path: "home/goma/chromium/src/out/rel_ng/../../third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs.so"
+  path: "../../third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs.so"
   binary_hash: "119407f17eb4777402734571183eb5518806900d9c7c7ce5ad71d242aad249f0"
 }
 subprogram {
-  path: "/home/goma/chromium/src/out/rel_ng/../../third_party/binutils/Linux_x64/Release/bin/objcopy"
+  path: "../../third_party/binutils/Linux_x64/Release/bin/objcopy"
   binary_hash: "9ccd249906d57ef2ccd24cf19c67c8d645d309c49c284af9d42813caf87fba7e"
 }
 requester_info {
@@ -405,8 +422,14 @@ requester_info {
   pid: 94105
   retry: 0
 }
+Input {
+  filename: "../../build/linux/debian_sid_amd64-sysroot/usr/lib/gcc/x86_64-linux-gnu/6/crtbegin.o"
+  hash_key: "7c893b5861ad2cc08fbf8aa9a23e294447694f01c94fa3be5b643ba9d3d65adc"
+}
 hermetic_mode: true
 experimental_is_external_user: false
+expected_output_files: "obj/base/allocator/tcmalloc/malloc_hook.o"
+expected_output_files: "obj/base/allocator/tcmalloc/malloc_hook.o.d"
 )";
 
 const char kExecReqFDebugCompilationDir[] = R"(command_spec {
@@ -460,7 +483,6 @@ arg: "-c"
 arg: "../../third_party/tcmalloc/chromium/src/malloc_hook.cc"
 arg: "-o"
 arg: "obj/base/allocator/tcmalloc/malloc_hook.o"
-arg: "-fuse-init-array"
 env: "PWD=/home/goma/chromium/src/out/rel_ng"
 cwd: "/home/goma/chromium/src/out/rel_ng"
 subprogram {
@@ -478,8 +500,14 @@ requester_info {
   pid: 94105
   retry: 0
 }
+Input {
+  filename: "../../build/linux/debian_sid_amd64-sysroot/usr/lib/gcc/x86_64-linux-gnu/6/crtbegin.o"
+  hash_key: "7c893b5861ad2cc08fbf8aa9a23e294447694f01c94fa3be5b643ba9d3d65adc"
+}
 hermetic_mode: true
 experimental_is_external_user: false
+expected_output_files: "obj/base/allocator/tcmalloc/malloc_hook.o"
+expected_output_files: "obj/base/allocator/tcmalloc/malloc_hook.o.d"
 )";
 
 const char kExecReqToNormalizeDebugPrefixMapAlice[] =
@@ -509,7 +537,8 @@ const char kExecReqToNormalizeDebugPrefixMapAlice[] =
     "  filename: \"/home/alice/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 const char kExecReqToNormalizeDebugPrefixMapBob[] =
     "command_spec {\n"
@@ -538,7 +567,8 @@ const char kExecReqToNormalizeDebugPrefixMapBob[] =
     "  filename: \"/home/bob/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 // Test case for arg "-fdebug-prefix-map=/proc/self/cwd="
 const char kExecReqToNormalizeDebugPrefixMapAlicePSC[] =
@@ -568,7 +598,8 @@ const char kExecReqToNormalizeDebugPrefixMapAlicePSC[] =
     "  filename: \"/home/alice/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 const char kExecReqToNormalizeDebugPrefixMapBobPSC[] =
     "command_spec {\n"
@@ -597,7 +628,8 @@ const char kExecReqToNormalizeDebugPrefixMapBobPSC[] =
     "  filename: \"/home/bob/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 // Test case for arg both "-fdebug-prefix-map=/proc/self/cwd=" and
 // "-fdebug-prefix-map=/home/$USER/src/=" given.
@@ -631,7 +663,8 @@ const char kExecReqToNormalize2DebugPrefixMapAlicePSC[] =
     "  filename: \"/home/alice/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 const char kExecReqToNormalize2DebugPrefixMapBobPSC[] =
     "command_spec {\n"
@@ -661,7 +694,8 @@ const char kExecReqToNormalize2DebugPrefixMapBobPSC[] =
     "  filename: \"/home/bob/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 // Test case for arg both "-fdebug-prefix-map=/proc/self/cwd=" and
 // "-fdebug-prefix-map=/home/$USER/src/=" given in gcc.
@@ -691,7 +725,8 @@ const char kExecReqToNormalize2DebugPrefixMapAlicePSCGCC[] =
     "  filename: \"/home/alice/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 const char kExecReqToNormalize2DebugPrefixMapBobPSCGCC[] =
     "command_spec {\n"
@@ -719,7 +754,8 @@ const char kExecReqToNormalize2DebugPrefixMapBobPSCGCC[] =
     "  filename: \"/home/bob/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 // Test case for arg "-fdebug-prefix-map=/proc/self/cwd=" in gcc.
 const char kExecReqToNormalizeDebugPrefixMapAlicePSCGCC[] =
@@ -747,7 +783,8 @@ const char kExecReqToNormalizeDebugPrefixMapAlicePSCGCC[] =
     "  filename: \"/home/alice/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 const char kExecReqToNormalizeDebugPrefixMapBobPSCGCC[] =
     "command_spec {\n"
@@ -774,7 +811,8 @@ const char kExecReqToNormalizeDebugPrefixMapBobPSCGCC[] =
     "  filename: \"/home/bob/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 // Test case for preserve arg "-fdebug-prefix-map=/proc/self/cwd=" in gcc.
 const char kExecReqToNoNormalizeDebugPrefixMapAlicePSCGCC[] =
@@ -802,7 +840,8 @@ const char kExecReqToNoNormalizeDebugPrefixMapAlicePSCGCC[] =
     "  filename: \"/home/alice/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 const char kExecReqToNoNormalizeDebugPrefixMapBobPSCGCC[] =
     "command_spec {\n"
@@ -829,7 +868,8 @@ const char kExecReqToNoNormalizeDebugPrefixMapBobPSCGCC[] =
     "  filename: \"/home/bob/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 // Test case for arg "-fdebug-prefix-map=/proc/self/cwd="
 // without PWD=/proc/self/cwd
@@ -860,7 +900,8 @@ const char kExecReqToNormalizeDebugPrefixMapAlicePSCNoPWD[] =
     "  filename: \"/home/alice/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 const char kExecReqToNormalizeDebugPrefixMapBobPSCNoPWD[] =
     "command_spec {\n"
@@ -889,7 +930,8 @@ const char kExecReqToNormalizeDebugPrefixMapBobPSCNoPWD[] =
     "  filename: \"/home/bob/src/hello.c\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_files: \"hello.o\"\n";
 
 void NormalizeExecReqForCacheKey(
     int id,
@@ -905,6 +947,17 @@ void NormalizeExecReqForCacheKey(
                              req);
 }
 
+bool ValidateOutputFilesAndDirs(const ExecReq& req) {
+  std::vector<string> args(req.arg().begin(), req.arg().end());
+  std::vector<string> expected_output_files(req.expected_output_files().begin(),
+                                            req.expected_output_files().end());
+  std::vector<string> expected_output_dirs(req.expected_output_dirs().begin(),
+                                           req.expected_output_dirs().end());
+  GCCFlags flags(args, req.cwd());
+  return expected_output_files == flags.output_files() &&
+         expected_output_dirs == flags.output_dirs();
+}
+
 }  // namespace
 
 TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKey) {
@@ -915,6 +968,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKey) {
   // Check all features can be disabled.
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(
       0, false, false, std::vector<string>(), std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -935,6 +989,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKey) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyRelativeSystemPath) {
@@ -945,6 +1002,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyRelativeSystemPath) {
   // Convert system include path.
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(
       0, true, false, std::vector<string>(), std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -965,6 +1023,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyRelativeSystemPath) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // Convert arguments followed by the certain flags.
@@ -975,6 +1036,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyRelativeSysroot) {
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, false, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -995,6 +1057,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyRelativeSysroot) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -g.
@@ -1006,6 +1071,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithFlagG) {
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   req.add_arg("-g");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1024,6 +1090,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithFlagG) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_EQ("/tmp/src/hello.c", req.input(0).filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -g0.
@@ -1035,6 +1104,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithFlagG0) {
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   req.add_arg("-g0");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1052,6 +1122,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithFlagG0) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -gsplit-dwarf (fission)
@@ -1062,7 +1135,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithFission) {
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   req.add_arg("-gsplit-dwarf");
+  req.add_expected_output_files("hello.dwo");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1081,6 +1156,10 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithFission) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_EQ("/tmp/src/hello.c", req.input(0).filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ("hello.dwo", req.expected_output_files(0));
+  EXPECT_EQ("hello.o", req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -fdebug-prefix-map should be normalized with release build.
@@ -1092,6 +1171,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithDebugPrefixMap) {
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   req.add_arg("-fdebug-prefix-map=/tmp/src=/ts");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1110,6 +1190,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithDebugPrefixMap) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -fdebug-prefix-map should be normalized with -g0
@@ -1123,6 +1206,7 @@ TEST(GCCExecReqNormalizerTest,
   req.add_arg("-g0");
   req.add_arg("-fdebug-prefix-map=/tmp/src=/ts");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1141,6 +1225,9 @@ TEST(GCCExecReqNormalizerTest,
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // Not normalize args but normalize -fdebug-prefix-map.
@@ -1154,6 +1241,7 @@ TEST(GCCExecReqNormalizerTest,
       TextFormat::ParseFromString(kExecReqToNormalizeRelativeArgs, &req));
   req.add_arg("-fdebug-prefix-map=/tmp/src=/ts");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1172,6 +1260,9 @@ TEST(GCCExecReqNormalizerTest,
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -MD
@@ -1182,7 +1273,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMD) {
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   req.add_arg("-MD");
+  req.add_expected_output_files("hello.d");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1200,6 +1293,10 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMD) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ("hello.d", req.expected_output_files(0));
+  EXPECT_EQ("hello.o", req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -M && -MF
@@ -1212,7 +1309,10 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMF) {
   req.add_arg("-M");
   req.add_arg("-MF");
   req.add_arg("hello.d");
+  req.clear_expected_output_files();
+  req.add_expected_output_files("hello.d");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1230,9 +1330,14 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMF) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.d", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -M
+// `gcc -M test.c` does not make any file, but just prints dependency
+// to stdout.
 TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithM) {
   devtools_goma::ExecReq req;
   const std::vector<string> kTestOptions{
@@ -1240,7 +1345,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithM) {
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   req.add_arg("-M");
+  req.clear_expected_output_files();
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1258,6 +1365,8 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithM) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_TRUE(req.expected_output_files().empty());
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // When -MM or -MMD is specified, we can convert system paths to
@@ -1270,7 +1379,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMD) {
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   req.add_arg("-MMD");
+  req.add_expected_output_files("hello.d");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1288,6 +1399,10 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMD) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ("hello.d", req.expected_output_files(0));
+  EXPECT_EQ("hello.o", req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -MM + -MF
@@ -1300,7 +1415,10 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMMF) {
   req.add_arg("-MM");
   req.add_arg("-MF");
   req.add_arg("hello.d");
+  req.clear_expected_output_files();
+  req.add_expected_output_files("hello.d");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1318,6 +1436,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMMF) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.d", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -MM
@@ -1328,7 +1449,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMM) {
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   req.add_arg("-MM");
+  req.clear_expected_output_files();
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1346,6 +1469,8 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMM) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_TRUE(req.expected_output_files().empty());
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -MF only
@@ -1357,7 +1482,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMF) {
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   req.add_arg("-MF");
   req.add_arg("hello.d");
+  req.add_expected_output_files("hello.d");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1375,6 +1502,10 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMF) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ("hello.d", req.expected_output_files(0));
+  EXPECT_EQ("hello.o", req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // If both -MD and -MMD are speicified, -MMD won't be used,
@@ -1388,7 +1519,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMDMMD) {
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   req.add_arg("-MD");
   req.add_arg("-MMD");
+  req.add_expected_output_files("hello.d");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1406,6 +1539,10 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMDMMD) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ("hello.d", req.expected_output_files(0));
+  EXPECT_EQ("hello.o", req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -MMD & -MD (inverted order)
@@ -1417,7 +1554,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMDMD) {
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   req.add_arg("-MMD");
   req.add_arg("-MD");
+  req.add_expected_output_files("hello.d");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1435,6 +1574,10 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMDMD) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ("hello.d", req.expected_output_files(0));
+  EXPECT_EQ("hello.o", req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // -MMD & -MD (with gcc)
@@ -1447,7 +1590,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMDMDGCC) {
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalizeGcc, &req));
   req.add_arg("-MMD");
   req.add_arg("-MD");
+  req.add_expected_output_files("hello.d");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1464,6 +1609,10 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyWithMMDMDGCC) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ("hello.d", req.expected_output_files(0));
+  EXPECT_EQ("hello.o", req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // link.
@@ -1474,6 +1623,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyForLink) {
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalizeLink, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, true, kTestOptions,
                                              std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1494,6 +1644,9 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqForCacheKeyForLink) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("a.out", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // subprogram path cleanup.
@@ -1513,6 +1666,7 @@ TEST(GCCExecReqNormalizerTest,
   s->set_binary_hash(
       "4956e195e962c7329c1fd0aee839d5cdbf7bb42bbc19e197be11751da1f3ea3c");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(
       0, false, false, std::vector<string>(), std::map<string, string>(), &req);
   EXPECT_EQ(2, req.subprogram_size());
@@ -1522,6 +1676,9 @@ TEST(GCCExecReqNormalizerTest,
   EXPECT_EQ("", req.subprogram(1).path());
   EXPECT_EQ("4956e195e962c7329c1fd0aee839d5cdbf7bb42bbc19e197be11751da1f3ea3c",
             req.subprogram(1).binary_hash());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 TEST(ExecReqNormalizeTest, NormalizeExecReqForCacheKeyWithDebugPrefixMap) {
@@ -1543,6 +1700,7 @@ TEST(ExecReqNormalizeTest, NormalizeExecReqForCacheKeyWithDebugPrefixMap) {
   // add "-fdebug-prefix-map" here.
   req.add_arg("-fdebug-prefix-map=/tmp/src=/ts");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              debug_prefix_map, &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -1560,6 +1718,9 @@ TEST(ExecReqNormalizeTest, NormalizeExecReqForCacheKeyWithDebugPrefixMap) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_EQ(file::JoinPath("/ts", "hello.c"), req.input(0).filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 // disable debug_prefix_map.
@@ -1573,6 +1734,7 @@ TEST(GCCExecReqNormalizerTest,
   req.add_arg("-g");
   req.add_arg("-fdebug-prefix-map=/tmp/src=/ts");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   // Note: passing empty debug_prefix_map means disabling the feature.
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              std::map<string, string>(), &req);
@@ -1590,6 +1752,9 @@ TEST(GCCExecReqNormalizerTest,
   EXPECT_EQ(1, req.input_size());
   EXPECT_EQ("/tmp/src/hello.c", req.input(0).filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 TEST(GCCExecReqNormalizerTest,
@@ -1610,6 +1775,8 @@ TEST(GCCExecReqNormalizerTest,
                                           &bob_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(alice_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(bob_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(alice_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(bob_req));
 
   std::vector<string> alice_args(alice_req.arg().begin(),
                                  alice_req.arg().end());
@@ -1647,6 +1814,8 @@ TEST(GCCExecReqNormalizerTest,
       kExecReqToNormalizeDebugPrefixMapBobPSC, &bob_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(alice_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(bob_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(alice_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(bob_req));
 
   std::vector<string> alice_args(alice_req.arg().begin(),
                                  alice_req.arg().end());
@@ -1689,6 +1858,8 @@ TEST(GCCExecReqNormalizerTest,
       kExecReqToNormalize2DebugPrefixMapBobPSC, &bob_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(alice_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(bob_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(alice_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(bob_req));
 
   std::vector<string> alice_args(alice_req.arg().begin(),
                                  alice_req.arg().end());
@@ -1734,6 +1905,8 @@ TEST(GCCExecReqNormalizerTest,
       kExecReqToNormalize2DebugPrefixMapBobPSCGCC, &bob_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(alice_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(bob_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(alice_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(bob_req));
 
   std::vector<string> alice_args(alice_req.arg().begin(),
                                  alice_req.arg().end());
@@ -1774,6 +1947,8 @@ TEST(GCCExecReqNormalizerTest,
       kExecReqToNormalizeDebugPrefixMapBobPSCGCC, &bob_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(alice_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(bob_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(alice_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(bob_req));
 
   std::vector<string> alice_args(alice_req.arg().begin(),
                                  alice_req.arg().end());
@@ -1814,6 +1989,8 @@ TEST(GCCExecReqNormalizerTest,
       kExecReqToNoNormalizeDebugPrefixMapBobPSCGCC, &bob_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(alice_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(bob_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(alice_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(bob_req));
 
   std::vector<string> alice_args(alice_req.arg().begin(),
                                  alice_req.arg().end());
@@ -1854,6 +2031,8 @@ TEST(GCCExecReqNormalizerTest,
       kExecReqToNormalizeDebugPrefixMapBobPSCNoPWD, &bob_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(alice_req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(bob_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(alice_req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(bob_req));
 
   std::vector<string> alice_args(alice_req.arg().begin(),
                                  alice_req.arg().end());
@@ -1883,6 +2062,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqInputOrderForCacheKey) {
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalizeInputOrder, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(
       0, false, false, std::vector<string>(), std::map<string, string>(), &req);
 
@@ -1896,6 +2076,7 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqShouldClearContent) {
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalizeContent, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   ASSERT_EQ(1, req.input_size());
   ASSERT_EQ("dummy_hash_key", req.input(0).hash_key());
   ASSERT_TRUE(req.input(0).has_content());
@@ -1906,6 +2087,10 @@ TEST(GCCExecReqNormalizerTest, NormalizeExecReqShouldClearContent) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_EQ("dummy_hash_key", req.input(0).hash_key());
   EXPECT_FALSE(req.input(0).has_content());
+
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 TEST(GCCExecReqNormalizerTest,
@@ -1914,6 +2099,7 @@ TEST(GCCExecReqNormalizerTest,
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalizeWinPNaCl, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
 
   devtools_goma::NormalizeExecReqForCacheKey(
       0, true, false, std::vector<string>(), std::map<string, string>(), &req);
@@ -1929,6 +2115,21 @@ TEST(GCCExecReqNormalizerTest,
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+
+  // TODO: expected_output_files and expected_output_dirs should be
+  // client form. Here, since command line is using path '/' separated,
+  // expected output paths are also '/' separated.
+  // I'll fix this later.
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ(
+      "clang_newlib_x64/obj/chrome/test/data/nacl/"
+      "ppapi_crash_via_exit_call_nexe/ppapi_crash_via_exit_call.o",
+      req.expected_output_files(0));
+  EXPECT_EQ(
+      "clang_newlib_x64/obj/chrome/test/data/nacl/"
+      "ppapi_crash_via_exit_call_nexe/ppapi_crash_via_exit_call.o.d",
+      req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 TEST(GCCExecReqNormalizerTest,
@@ -1938,6 +2139,7 @@ TEST(GCCExecReqNormalizerTest,
   ASSERT_TRUE(
       TextFormat::ParseFromString(kExecReqToNormalizePNaClTranslate, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
 
   devtools_goma::NormalizeExecReqForCacheKey(
       0, true, false, std::vector<string>(), std::map<string, string>(), &req);
@@ -1953,6 +2155,18 @@ TEST(GCCExecReqNormalizerTest,
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+
+  ValidateOutputFilesAndDirs(req);
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ(
+      "clang_newlib_x64/obj/chrome/test/data/nacl/"
+      "ppapi_crash_via_exit_call_nexe/ppapi_crash_via_exit_call.o",
+      req.expected_output_files(0));
+  EXPECT_EQ(
+      "clang_newlib_x64/obj/chrome/test/data/nacl/"
+      "ppapi_crash_via_exit_call_nexe/ppapi_crash_via_exit_call.o.d",
+      req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 TEST(GCCExecReqNormalizerTest, AlwaysRemoveRequesterInfo) {
@@ -1966,6 +2180,7 @@ TEST(GCCExecReqNormalizerTest, AlwaysRemoveRequesterInfo) {
   ASSERT_TRUE(
       TextFormat::ParseFromString(kExecReqToAmbiguaousDebugPrefixMap, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
 
   const std::map<string, string> kExpectedMap = {
       {"/home/goma/chromium/src", "."},
@@ -1982,12 +2197,20 @@ TEST(GCCExecReqNormalizerTest, AlwaysRemoveRequesterInfo) {
   devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
                                              flags.fdebug_prefix_map(), &req);
   EXPECT_FALSE(req.has_requester_info());
+
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ("obj/base/allocator/tcmalloc/malloc_hook.o",
+            req.expected_output_files(0));
+  EXPECT_EQ("obj/base/allocator/tcmalloc/malloc_hook.o.d",
+            req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 TEST(GCCExecReqNormalizerTest, DropDeveloperDir) {
   devtools_goma::ExecReq req;
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
 
   req.add_env("DEVELOPER_DIR=/some/where/to/developer_dir");
   bool found_developer_env = false;
@@ -2010,6 +2233,11 @@ TEST(GCCExecReqNormalizerTest, DropDeveloperDir) {
     }
   }
   EXPECT_FALSE(found_developer_env);
+
+  ValidateOutputFilesAndDirs(req);
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 TEST(GCCExecReqNormalizerTest, ClangCoverageMapping) {
@@ -2022,6 +2250,7 @@ TEST(GCCExecReqNormalizerTest, ClangCoverageMapping) {
   req.add_arg("-fprofile-instr-generate");
   req.add_arg("-fcoverage-mapping");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(
       0, false, false, std::vector<string>(), std::map<string, string>(), &req);
   EXPECT_EQ(1, req.command_spec().system_include_path_size());
@@ -2042,6 +2271,11 @@ TEST(GCCExecReqNormalizerTest, ClangCoverageMapping) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_EQ("/tmp/src/hello.c", req.input(0).filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+
+  ValidateOutputFilesAndDirs(req);
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("hello.o", req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 TEST(GCCExecReqNormalizerTest, PathShouldNotBeDropped) {
@@ -2104,7 +2338,9 @@ compiler_proxy_id: "id"
 api_version: 2
 pid: 0
 goma_revision: "a771a05d03d46431d0fcf65b2bddd49a9c469b7d@1522119548"
-})";
+}
+expected_output_files: "c.o"
+)";
 
   devtools_goma::ExecReq req_a, req_b;
   const std::vector<string> kTestOptions{
@@ -2119,6 +2355,8 @@ goma_revision: "a771a05d03d46431d0fcf65b2bddd49a9c469b7d@1522119548"
 
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req_a));
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req_b));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req_a));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req_b));
   devtools_goma::NormalizeExecReqForCacheKey(
       0, false, false, std::vector<string>(), std::map<string, string>(),
       &req_a);
@@ -2129,6 +2367,13 @@ goma_revision: "a771a05d03d46431d0fcf65b2bddd49a9c469b7d@1522119548"
   EXPECT_EQ(req_a.input(0).filename(), "./A.h");
   EXPECT_EQ(req_b.input(0).filename(), "./B.h");
   EXPECT_FALSE(MessageDifferencer::Equals(req_a, req_b));
+
+  EXPECT_EQ(1, req_a.expected_output_files_size());
+  EXPECT_EQ("c.o", req_a.expected_output_files(0));
+  EXPECT_TRUE(req_a.expected_output_dirs().empty());
+  EXPECT_EQ(1, req_b.expected_output_files_size());
+  EXPECT_EQ("c.o", req_b.expected_output_files(0));
+  EXPECT_TRUE(req_b.expected_output_dirs().empty());
 }
 
 TEST(GCCExecReqNormalizerTest, FDebugCompilationDir) {
@@ -2138,10 +2383,18 @@ TEST(GCCExecReqNormalizerTest, FDebugCompilationDir) {
   req.set_cwd("/home/chromium/chromium/src");
 
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(
       0, false, false, std::vector<string>(), std::map<string, string>(), &req);
 
   EXPECT_EQ(req.cwd(), "/chromium");
+
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ("obj/base/allocator/tcmalloc/malloc_hook.o",
+            req.expected_output_files(0));
+  EXPECT_EQ("obj/base/allocator/tcmalloc/malloc_hook.o.d",
+            req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 TEST(GCCExecReqNormalizerTest, FDebugCompilationDirFDebugPrefixMap) {
@@ -2154,10 +2407,18 @@ TEST(GCCExecReqNormalizerTest, FDebugCompilationDirFDebugPrefixMap) {
   const std::map<string, string> debug_prefix_map{
       {"/chromium", "/home/chrome"}};
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(
       0, false, false, std::vector<string>(), debug_prefix_map, &req);
 
   EXPECT_EQ(req.cwd(), "/home/chrome");
+
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ("obj/base/allocator/tcmalloc/malloc_hook.o",
+            req.expected_output_files(0));
+  EXPECT_EQ("obj/base/allocator/tcmalloc/malloc_hook.o.d",
+            req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 TEST(GCCExecReqNormalizerTest, FDebugCompilationDirCoverageMapping) {
@@ -2170,10 +2431,18 @@ TEST(GCCExecReqNormalizerTest, FDebugCompilationDirCoverageMapping) {
   req.add_arg("-fcoverage-mapping");
 
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
   devtools_goma::NormalizeExecReqForCacheKey(
       0, false, false, std::vector<string>(), std::map<string, string>(), &req);
 
   EXPECT_EQ(req.cwd(), "/home/chromium/chromium/src");
+
+  EXPECT_EQ(2, req.expected_output_files_size());
+  EXPECT_EQ("obj/base/allocator/tcmalloc/malloc_hook.o",
+            req.expected_output_files(0));
+  EXPECT_EQ("obj/base/allocator/tcmalloc/malloc_hook.o.d",
+            req.expected_output_files(1));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 
 }  // namespace devtools_goma

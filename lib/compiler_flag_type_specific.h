@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "compiler_flag_type.h"
-#include "execreq_normalizer.h"
+#include "lib/compiler_flag_type.h"
+#include "lib/execreq_normalizer.h"
 using std::string;
 
 namespace devtools_goma {

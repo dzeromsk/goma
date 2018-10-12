@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#include "java_flags.h"
+#include "lib/java_flags.h"
 
 #include "absl/strings/str_split.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
-#include "path_util.h"
+#include "lib/path_util.h"
 
 namespace devtools_goma {
 

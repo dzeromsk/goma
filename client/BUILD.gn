@@ -277,7 +277,6 @@ static_library("compiler_proxy_base_lib") {
     "linked_unordered_map.h",
     "list_dir_cache.cc",
     "list_dir_cache.h",
-    "sha256hash_hasher.h",
     "socket_descriptor.cc",
     "socket_descriptor.h",
     "socket_pool.cc",
@@ -308,6 +307,7 @@ static_library("compiler_proxy_base_lib") {
     "//lib",
     "//lib:goma_hash",
     "//lib:goma_stats_proto",
+    "//third_party/abseil",
   ]
 
   # Do not depend on compiler-type specific libraries.
@@ -417,6 +417,8 @@ static_library("compiler_proxy_lib") {
     "$target_gen_dir/resources/compilerz_script.h",
     "$target_gen_dir/resources/compilerz_style.c",
     "$target_gen_dir/resources/compilerz_style.h",
+    "$target_gen_dir/resources/legend_help.c",
+    "$target_gen_dir/resources/legend_help.h",
 
   ]
   include_dirs = [ "." ]
@@ -485,6 +487,7 @@ static_library("compiler_proxy_lib") {
     "//client/resources:gen_compilerz_html",
     "//client/resources:gen_compilerz_script",
     "//client/resources:gen_compilerz_style",
+    "//client/resources:gen_legend_help",
     "//lib",
     "//lib:goma_file",
     "//lib:goma_hash",
@@ -552,7 +555,6 @@ static_library("file_path_util_lib") {
     "//lib:compiler_flag_type_specific",
     "//lib:vc_specific",
     "//third_party:glog",
-    "//third_party/tensorflow_core:flat_map",
   ]
 }
 
@@ -625,7 +627,6 @@ static_library("compiler_info_lib") {
     "//lib:compiler_flag_type_specific",
     "//lib:goma_hash",
     "//third_party/jsoncpp",
-    "//third_party/tensorflow_core:flat_map",
   ]
 
   public_deps = [
@@ -925,9 +926,7 @@ copy("copy_diagnose_goma_log_py") {
 if (os != "win") {
   copy("goma_tool") {
     sources = [
-      "goma_ctl.sh",
       "report_env.sh",
-
     ]
     if (os == "linux") {
       sources += [

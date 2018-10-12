@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "clang_tidy_flags.h"
+#include "lib/clang_tidy_flags.h"
 
-#include "compiler_flags_parser.h"
+#include "base/path.h"
 #include "gtest/gtest.h"
-#include "path.h"
+#include "lib/compiler_flags_parser.h"
 using std::string;
 
 namespace devtools_goma {

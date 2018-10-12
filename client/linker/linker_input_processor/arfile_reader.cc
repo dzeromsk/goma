@@ -59,6 +59,12 @@ std::unique_ptr<FileReader> ArFileReader::Create(const string& filename) {
 
 /* static */
 bool ArFileReader::CanHandle(const string& filename) {
+  // TODO: ignore system archives.
+  // Since system archives won't change by build to build,
+  // there is no merit to use ArFileReader.
+  // define what is system archives? by path name?
+  // we can consider *.a in /usr/lib is system archive, etc?
+  // how about archives in hermetic sdk?
   return absl::EndsWith(filename, ".a");
 }
 

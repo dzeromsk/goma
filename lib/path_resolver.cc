@@ -3,8 +3,7 @@
 // found in the LICENSE file.
 
 
-
-#include "path_resolver.h"
+#include "lib/path_resolver.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -14,13 +13,12 @@
 #include <functional>
 #include <locale>
 
-
 #include "absl/container/inlined_vector.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "glog/logging.h"
-#include "path_util.h"
+#include "lib/path_util.h"
 using std::string;
 
 namespace {

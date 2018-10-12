@@ -2,12 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#include "clang_flags_helper.h"
+#include "lib/clang_flags_helper.h"
 
 #include <string>
 #include <vector>
-
 
 #include "gtest/gtest.h"
 using std::string;

@@ -73,6 +73,55 @@ TEST(ClangCompilerInfoBuilderHelperTest, ParseResourceOutputPosix) {
   EXPECT_EQ(expected, resource);
 }
 
+TEST(ClangCompilerInfoBuilderHelperTest, ParseResourceOutputPosixMultilib) {
+  // $ /path/to/goma/clang -m32 -v -E -o /dev/null -x c /dev/null
+  // and modified GCC installation path (remove /usr/lib), and search
+  // directories
+  static const char kDummyClangOutput[] =
+      R"(clang version 8.0.0 (trunk 340925)
+Target: i386-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /home/goma/work/goma-client/client/third_party/llvm-build/Release+Asserts/bin
+Found candidate GCC installation: gcc/i686-linux-gnu/6.4.0
+Found candidate GCC installation: gcc/i686-linux-gnu/7
+Found candidate GCC installation: gcc/i686-linux-gnu/7.3.0
+Found candidate GCC installation: gcc/i686-linux-gnu/8
+Found candidate GCC installation: gcc/i686-linux-gnu/8.0.1
+Found candidate GCC installation: gcc/x86_64-linux-gnu/6
+Found candidate GCC installation: gcc/x86_64-linux-gnu/6.4.0
+Found candidate GCC installation: gcc/x86_64-linux-gnu/7
+Found candidate GCC installation: gcc/x86_64-linux-gnu/7.3.0
+Found candidate GCC installation: gcc/x86_64-linux-gnu/8
+Found candidate GCC installation: gcc/x86_64-linux-gnu/8.0.1
+Selected GCC installation: gcc/x86_64-linux-gnu/7.3.0
+Candidate multilib: .;@m64
+Candidate multilib: 32;@m32
+Candidate multilib: x32;@mx32
+Selected multilib: 32;@m32
+ "/home/goma/work/goma-client/client/third_party/llvm-build/Release+Asserts/bin/clang" -cc1 -triple i386-unknown-linux-gnu -E -disable-free -main-file-name null -mrelocation-model static -mthread-model posix -mdisable-fp-elim -fmath-errno -masm-verbose -mconstructor-aliases -fuse-init-array -target-cpu pentium4 -dwarf-column-info -debugger-tuning=gdb -v -resource-dir /third_party/llvm-build/Release+Asserts/lib/clang/8.0.0 -internal-isystem /usr/local/include -internal-isystem /third_party/llvm-build/Release+Asserts/lib/clang/8.0.0/include -internal-externc-isystem /usr/include/i386-linux-gnu -internal-externc-isystem /include -internal-externc-isystem /usr/include -fdebug-compilation-dir /tmp -ferror-limit 19 -fmessage-length 115 -fobjc-runtime=gcc -fdiagnostics-show-option -fcolor-diagnostics -o /dev/null -x c /dev/null -faddrsig
+clang -cc1 version 8.0.0 based upon LLVM 8.0.0svn default target x86_64-unknown-linux-gnu
+)";
+
+  TmpdirUtil tmpdir("parse_resource_output");
+  tmpdir.CreateEmptyFile("gcc/x86_64-linux-gnu/7.3.0/crtbegin.o");
+  tmpdir.CreateEmptyFile("gcc/x86_64-linux-gnu/7.3.0/32/crtbegin.o");
+  tmpdir.CreateEmptyFile("gcc/x86_64-linux-gnu/7.3.0/x32/crtbegin.o");
+  std::vector<ClangCompilerInfoBuilderHelper::ResourceList> resource;
+  EXPECT_EQ(ClangCompilerInfoBuilderHelper::ParseStatus::kSuccess,
+            ClangCompilerInfoBuilderHelper::ParseResourceOutput(
+                "/third_party/llvm-build/Release+Asserts/bin/clang",
+                tmpdir.realcwd(), kDummyClangOutput, &resource));
+  std::vector<ClangCompilerInfoBuilderHelper::ResourceList> expected = {
+      {"gcc/x86_64-linux-gnu/7.3.0/crtbegin.o",
+       CompilerInfoData::CLANG_GCC_INSTALLATION_MARKER},
+      {"gcc/x86_64-linux-gnu/7.3.0/32/crtbegin.o",
+       CompilerInfoData::CLANG_GCC_INSTALLATION_MARKER},
+      {"gcc/x86_64-linux-gnu/7.3.0/x32/crtbegin.o",
+       CompilerInfoData::CLANG_GCC_INSTALLATION_MARKER},
+  };
+  EXPECT_EQ(expected, resource);
+}
+
 TEST(ClangCompilerInfoBuilderHelperTest, GetResourceDirPosix) {
   static const char kDummyClangOutput[] =
       "Fuchsia clang version 7.0.0\n"

@@ -757,6 +757,9 @@ if (os == "win") {
       cflags = [ "-Wno-microsoft-goto" ]
       configs += [ ":goma_breakpad_config" ]
     }
+
+    configs -= [ "//build/config/compiler:goma_code" ]
+    configs += [ "//build/config/compiler:no_goma_code" ]
   }
 }
 

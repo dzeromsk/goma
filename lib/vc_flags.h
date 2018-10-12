@@ -8,10 +8,9 @@
 #include <string>
 #include <vector>
 
-
 #include "absl/strings/string_view.h"
-#include "cxx_flags.h"
-#include "flag_parser.h"
+#include "lib/cxx_flags.h"
+#include "lib/flag_parser.h"
 using std::string;
 
 namespace devtools_goma {

@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "lib/execreq_normalizer.h"
 
-#include "execreq_normalizer.h"
-
-#include "compiler_flag_type_specific.h"
-#include "compiler_flags.h"
-#include "execreq_verifier.h"
+#include "base/path.h"
 #include "google/protobuf/text_format.h"
 #include "google/protobuf/util/message_differencer.h"
 #include "gtest/gtest.h"
-#include "path.h"
+#include "lib/compiler_flag_type_specific.h"
+#include "lib/compiler_flags.h"
+#include "lib/execreq_verifier.h"
+
 using google::protobuf::TextFormat;
 using google::protobuf::util::MessageDifferencer;
 

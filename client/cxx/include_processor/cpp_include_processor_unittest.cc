@@ -1546,6 +1546,31 @@ TEST_F(CppIncludeProcessorTest, has_include) {
   }
 }
 
+TEST_F(CppIncludeProcessorTest, has_include_relative) {
+  // Use clang here, because gcc in trusty does not support __has_include.
+  const std::string& clang_path = GetClangPath();
+  std::unique_ptr<CompilerFlags> flags(CompilerFlagsParser::MustNew(
+      std::vector<string>{clang_path, "-c", "foo.cc", "-I."},
+      tmpdir_util_->tmpdir()));
+  ScopedCompilerInfoState cis(
+      GetCompilerInfoFromCacheOrCreate(*flags, clang_path, env_));
+
+  CreateTmpFile(
+      "#if __has_include(<a.h>)\n"
+      "#define A\n"
+      "#endif\n",
+      "foo.cc");
+  CreateTmpFile("", "a.h");
+
+  CppIncludeProcessor processor;
+  std::set<string> files;
+  FileStatCache file_stat_cache;
+  ASSERT_TRUE(processor.GetIncludeFiles(
+      "foo.cc", tmpdir_util_->tmpdir(), *flags,
+      ToCxxCompilerInfo(cis.get()->info()), &files, &file_stat_cache));
+  EXPECT_TRUE(files.count("./a.h"));
+}
+
 TEST_F(CppIncludeProcessorTest, has_include_next) {
   const string define_has_include_next =
       "#ifndef __has_include_next\n"

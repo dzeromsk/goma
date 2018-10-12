@@ -3,12 +3,11 @@
 // found in the LICENSE file.
 
 
-
-#include "cmdline_parser.h"
+#include "lib/cmdline_parser.h"
 
 #include <ctype.h>
 
-#include "basictypes.h"
+#include "absl/base/macros.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 using std::string;
@@ -135,7 +134,7 @@ bool ParseWinCommandLineToArgv(absl::string_view cmdline,
       case ' ': case '\t': case '\r': case '\n':
         if (!in_quote)
           arg_delimiter = true;
-        FALLTHROUGH_INTENDED;
+        ABSL_FALLTHROUGH_INTENDED;
       default:
         // Backslashes are interpreted literally, unless they immediately
         // precede a double quotation mark.

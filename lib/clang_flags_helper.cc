@@ -2,10 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "lib/clang_flags_helper.h"
 
-#include "clang_flags_helper.h"
-
-#include "flag_parser.h"
+#include "lib/flag_parser.h"
 
 namespace devtools_goma {
 

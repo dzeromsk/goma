@@ -2,7 +2,6 @@ abseil/src
 benchmark/src
 boringssl/src
 breakpad/breakpad
-cctz/src
 depot_tools
 gflags/src
 glog
@@ -10,7 +9,6 @@ gtest
 jinja2
 jsoncpp/source
 libc++abi/trunk
-libc++-static
 libc++/trunk
 libFuzzer/src
 llvm-build

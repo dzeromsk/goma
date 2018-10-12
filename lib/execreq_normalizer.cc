@@ -3,8 +3,7 @@
 // found in the LICENSE file.
 
 
-
-#include "execreq_normalizer.h"
+#include "lib/execreq_normalizer.h"
 
 #include <utility>
 #include <vector>
@@ -13,13 +12,13 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
-#include "compiler_flags.h"
+#include "base/path.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
-#include "path.h"
-#include "path_resolver.h"
-#include "path_util.h"
-using ::google::protobuf::RepeatedPtrField;
+#include "lib/compiler_flags.h"
+#include "lib/path_resolver.h"
+#include "lib/path_util.h"
+using google::protobuf::RepeatedPtrField;
 using ::absl::StrCat;
 
 namespace devtools_goma {
@@ -327,6 +326,15 @@ void ConfigurableExecReqNormalizer::NormalizeExecReqEnvs(ExecReq* req) const {
   }
 }
 
+void ConfigurableExecReqNormalizer::NormalizeExecReqOutputFilesAndDirs(
+    ExecReq* req) const {
+  // Just sort.
+  std::sort(req->mutable_expected_output_files()->begin(),
+            req->mutable_expected_output_files()->end());
+  std::sort(req->mutable_expected_output_dirs()->begin(),
+            req->mutable_expected_output_dirs()->end());
+}
+
 // ExecReq_Inputs are sorted by filename now. However, cwd can be different
 // among computers, and filename might contain cwd. So the essentially same
 // ExecReq might have different hash values, even if cwd in ExecReq and
@@ -450,6 +458,7 @@ void ConfigurableExecReqNormalizer::NormalizeForCacheKey(
 
   NormalizeExecReqSubprograms(req);
   NormalizeExecReqEnvs(req);
+  NormalizeExecReqOutputFilesAndDirs(req);
 }
 
 ConfigurableExecReqNormalizer::Config AsIsExecReqNormalizer::Configure(

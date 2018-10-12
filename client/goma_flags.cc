@@ -321,6 +321,8 @@ GOMA_DEFINE_bool(STORE_LOCAL_RUN_OUTPUT, false,
 GOMA_DEFINE_bool(ENABLE_REMOTE_LINK, false, "Enable remote link.");
 GOMA_DEFINE_bool(USE_RELATIVE_PATHS_IN_ARGV, false,
                  "Use relative paths in argv, except system directories.");
+GOMA_DEFINE_bool(SEND_EXPECTED_OUTPUTS, false,
+                 "Send expected output files and dirs to the goma server.");
 GOMA_DEFINE_string(TMP_DIR, "",
                    "Temporary Directory.  Ignored on Windows.");
 GOMA_DEFINE_string(CACHE_DIR, "",
@@ -350,7 +352,6 @@ GOMA_DEFINE_string(COMPILER_PROXY_TRUSTED_IPS,
                    "considered as trusted.");
 GOMA_DEFINE_bool(ENABLE_GCH_HACK, false,
                  "Enable *.gch hack");
-GOMA_DEFINE_int32(MAX_INCLUDE_CACHE_SIZE, 0, "(DEPRECATED)");
 // As of 2018-08-21, we need keep more than 35000 header files to build
 // chrome. Some people builds chrome in several different directories.
 // So, 35000x4 is chosen.
@@ -440,12 +441,6 @@ GOMA_DEFINE_string(COMPILER_INFO_CACHE_FILE, "compiler_info_cache",
                    "Filename of compiler_info's cache. "
                    "If empty, compiler_info cache file is not used. "
                    "If not absolute path, it will be in GOMA_CACHE_DIR.");
-GOMA_DEFINE_bool(ENABLE_GLOBAL_FILE_ID_CACHE,
-                 false,
-                 "(Deprecated) Use ENABLE_GLOBAL_FILE_STAT_CACHE instead. "
-                 "Enable global file stat cache. "
-                 "Do not enable this flag when any source file would be "
-                 "changed between compilations.");
 GOMA_DEFINE_bool(ENABLE_GLOBAL_FILE_STAT_CACHE,
                  false,
                  "Enable global file stat cache. "
@@ -467,8 +462,6 @@ GOMA_DEFINE_string(DUMP_COUNTERZ_FILE, "",
 GOMA_DEFINE_bool(ENABLE_COUNTERZ, false,
                  "Flag for profiling using counterz.");
 #endif
-GOMA_DEFINE_string(HASH_REWRITE_RULE_FILE, "",
-                   "(DEPRECATED)");
 GOMA_DEFINE_string(LOCAL_OUTPUT_CACHE_DIR, "",
                    "Directory that LocalOutputCache uses");
 GOMA_DEFINE_int32(LOCAL_OUTPUT_CACHE_MAX_CACHE_AMOUNT_IN_MB, 1024*30,
@@ -647,7 +640,7 @@ GOMA_DEFINE_bool(HTTP_RPC_CAPTURE_RESPONSE_HEADER, false,
                  "Capture every response header."
                  "By default, it only captures response header of "
                  "http error.");
-GOMA_DEFINE_string(HTTP_SOCKET_READ_TIMEOUT_SECS, "1.0",
+GOMA_DEFINE_string(HTTP_SOCKET_READ_TIMEOUT_SECS, "10.0",
                    "Time(sec) for once the socket receives response header.");
 
 GOMA_DEFINE_int32(HTTP_RPC_MIN_RETRY_BACKOFF, 500,

@@ -1127,22 +1127,6 @@ bool HttpClient::GetOAuth2Config(OAuth2Config* config) const {
   return oauth_refresh_task_->GetOAuth2Config(config);
 }
 
-bool HttpClient::SetOAuth2Config(const OAuth2Config& config) {
-  if (oauth_refresh_task_.get() == nullptr) {
-    return false;
-  }
-  if (oauth_refresh_task_->SetOAuth2Config(config)) {
-    AUTOLOCK(lock, &mu_);
-    // if disabled by 401 error, could try now with new oauth2 config.
-    LOG(INFO) << "new oauth2 config: reset enabled_from_="
-              << OptionalToString(enabled_from_)
-              << " to 0";
-    enabled_from_.reset();
-    return true;
-  }
-  return false;
-}
-
 string HttpClient::DebugString() const {
   AUTOLOCK(lock, &mu_);
 

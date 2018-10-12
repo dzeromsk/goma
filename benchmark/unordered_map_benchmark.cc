@@ -5,8 +5,8 @@
 #include <random>
 #include <unordered_map>
 
+#include "absl/container/flat_hash_map.h"
 #include "benchmark/benchmark.h"
-#include "flat_map.h"
 
 namespace devtools_goma {
 
@@ -27,7 +27,7 @@ void BM_HashMap(benchmark::State& state) {
 BENCHMARK_TEMPLATE(BM_HashMap, std::unordered_map<int, int>)
     ->RangeMultiplier(4)
     ->Range(1, 65536);
-BENCHMARK_TEMPLATE(BM_HashMap, FlatMap<int, int>)
+BENCHMARK_TEMPLATE(BM_HashMap, absl::flat_hash_map<int, int>)
     ->RangeMultiplier(4)
     ->Range(1, 65536);
 
@@ -49,7 +49,7 @@ void BM_HashMapReserve(benchmark::State& state) {
 BENCHMARK_TEMPLATE(BM_HashMapReserve, std::unordered_map<int, int>)
     ->RangeMultiplier(4)
     ->Range(1, 65536);
-BENCHMARK_TEMPLATE(BM_HashMapReserve, FlatMap<int, int>)
+BENCHMARK_TEMPLATE(BM_HashMapReserve, absl::flat_hash_map<int, int>)
     ->RangeMultiplier(4)
     ->Range(1, 65536);
 
@@ -71,7 +71,7 @@ void BM_HashMapRandom(benchmark::State& state) {
 BENCHMARK_TEMPLATE(BM_HashMapRandom, std::unordered_map<int, int>)
     ->RangeMultiplier(4)
     ->Range(1, 65536);
-BENCHMARK_TEMPLATE(BM_HashMapRandom, FlatMap<int, int>)
+BENCHMARK_TEMPLATE(BM_HashMapRandom, absl::flat_hash_map<int, int>)
     ->RangeMultiplier(4)
     ->Range(1, 65536);
 

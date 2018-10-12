@@ -65,6 +65,8 @@ class SocketDescriptor : public Descriptor {
   OneshotClosure* GetWritableClosure();
   OneshotClosure* GetTimeoutClosure();
 
+  string PeerName() const;
+
  private:
   // Gets a one-shot closure to run permanent "closure" and
   // mark a closure in run queue,  so that it won't add new closure in run

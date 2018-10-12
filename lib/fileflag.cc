@@ -5,8 +5,7 @@
 
 #ifndef _WIN32
 
-
-#include "fileflag.h"
+#include "lib/fileflag.h"
 
 #include <fcntl.h>
 #include <unistd.h>

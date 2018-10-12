@@ -566,13 +566,9 @@ GomaClient::Result GomaClient::WaitIPC() {
     OutputResp();
   }
 
+  // TODO: check output files are written?
   if (FLAGS_DUMP_TIME) {
     resp_write_time = timer.GetDuration();
-  }
-  // TODO: check output files are written?
-
-
-  if (FLAGS_DUMP_TIME) {
     std::cerr << "GOMA:" << name_
               << " send/recv/write="
               << req_send_time << "/"

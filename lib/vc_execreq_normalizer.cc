@@ -2,12 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "lib/vc_execreq_normalizer.h"
 
-#include "vc_execreq_normalizer.h"
-
-#include "clang_flags_helper.h"
 #include "glog/logging.h"
-#include "vc_flags.h"
+#include "lib/clang_flags_helper.h"
+#include "lib/vc_flags.h"
 using std::string;
 
 namespace devtools_goma {

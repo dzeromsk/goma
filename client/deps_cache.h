@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "absl/container/node_hash_map.h"
 #include "absl/time/time.h"
 #include "absl/types/optional.h"
 #include "autolock_timer.h"
@@ -20,7 +21,6 @@
 #include "file_stat_cache.h"
 #include "filename_id_table.h"
 #include "goma_hash.h"
-#include "sha256hash_hasher.h"
 
 namespace devtools_goma {
 
@@ -124,8 +124,7 @@ class DepsCache {
   };
 
   typedef SHA256HashValue Key;
-  typedef std::unordered_map<Key, DepsTableData, SHA256HashValueHasher>
-      DepsTable;
+  typedef absl::node_hash_map<Key, DepsTableData> DepsTable;
 
   DepsCache(const string& cache_filename,
             absl::optional<absl::Duration> identifier_alive_duration,

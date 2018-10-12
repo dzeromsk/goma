@@ -19,10 +19,9 @@
 #include <ostream>
 #include <string>
 
-
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
-#include "basictypes.h"
+#include "base/basictypes.h"
 using std::string;
 
 namespace devtools_goma {

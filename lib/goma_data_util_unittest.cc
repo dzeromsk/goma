@@ -3,11 +3,10 @@
 // found in the LICENSE file.
 
 
+#include "lib/goma_data_util.h"
 
-#include "goma_data_util.h"
-
+#include "gtest/gtest.h"
 #include "prototmp/goma_data.pb.h"
-#include <gtest/gtest.h>
 
 namespace devtools_goma {
 

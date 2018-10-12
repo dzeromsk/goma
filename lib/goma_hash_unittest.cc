@@ -3,10 +3,9 @@
 // found in the LICENSE file.
 
 
+#include "lib/goma_hash.h"
 
-#include "goma_hash.h"
-
-#include <gtest/gtest.h>
+#include "gtest/gtest.h"
 using std::string;
 
 TEST(GomaHashTest, ComputeDataHashKey) {

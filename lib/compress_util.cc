@@ -3,8 +3,7 @@
 // found in the LICENSE file.
 
 
-
-#include "compress_util.h"
+#include "lib/compress_util.h"
 
 #include <string.h>
 
@@ -14,7 +13,7 @@
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "glog/logging.h"
-
+#include "google/protobuf/io/gzip_stream.h"
 
 using google::protobuf::io::GzipInputStream;
 

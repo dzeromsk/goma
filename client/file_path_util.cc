@@ -6,10 +6,10 @@
 
 #include <deque>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_split.h"
 #include "compiler_flag_type_specific.h"
 #include "compiler_specific.h"
-#include "flat_map.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "ioutil.h"
@@ -275,7 +275,7 @@ bool IsLocalCompilerPathValid(const string& trace_id,
 
 void RemoveDuplicateFiles(const std::string& cwd,
                           std::set<std::string>* filenames) {
-  FlatMap<std::string, std::string> path_map;
+  absl::flat_hash_map<std::string, std::string> path_map;
   path_map.reserve(filenames->size());
 
   std::set<std::string> unique_files;

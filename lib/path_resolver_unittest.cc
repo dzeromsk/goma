@@ -3,8 +3,7 @@
 // found in the LICENSE file.
 
 
-
-#include "path_resolver.h"
+#include "lib/path_resolver.h"
 
 #include "gtest/gtest.h"
 

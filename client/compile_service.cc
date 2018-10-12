@@ -329,6 +329,7 @@ CompileService::CompileService(WorkerThreadManager* wm, int compiler_info_pool)
       new_file_threshold_duration_(absl::Minutes(1)),
       enable_gch_hack_(true),
       use_relative_paths_in_argv_(false),
+      send_expected_outputs_(false),
       hermetic_(false),
       hermetic_fallback_(false),
       dont_kill_subprocess_(false),

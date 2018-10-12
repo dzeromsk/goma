@@ -3381,6 +3381,9 @@ void CompileTask::FillCompilerInfoDone(
 #endif
   MayUpdateSubprogramSpec();
   UpdateExpandedArgs();
+  if (service_->send_expected_outputs()) {
+    SetExpectedOutputs();
+  }
   ModifyRequestArgs();
   ModifyRequestEnvs();
   UpdateCommandSpec();
@@ -3587,6 +3590,15 @@ void CompileTask::UpdateExpandedArgs() {
   for (const auto& expanded_arg : flags_->expanded_args()) {
     req_->add_expanded_arg(expanded_arg);
     stats_->add_expanded_arg(expanded_arg);
+  }
+}
+
+void CompileTask::SetExpectedOutputs() {
+  for (const auto& file : flags_->output_files()) {
+    req_->add_expected_output_files(file);
+  }
+  for (const auto& dir : flags_->output_dirs()) {
+    req_->add_expected_output_dirs(dir);
   }
 }
 

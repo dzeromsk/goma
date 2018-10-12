@@ -28,7 +28,6 @@
 #include "cpp_macro_set.h"
 #include "cpp_token.h"
 #include "cxx/cxx_compiler_info.h"
-#include "flat_map.h"
 #include "glog/logging.h"
 #include "gtest/gtest_prod.h"
 #include "platform_thread.h"

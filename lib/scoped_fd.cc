@@ -3,16 +3,16 @@
 // found in the LICENSE file.
 
 
-
-#include "scoped_fd.h"
+#include "lib/scoped_fd.h"
 
 #include "absl/strings/string_view.h"
-#include "compiler_specific.h"
+#include "base/compiler_specific.h"
 #include "glog/logging.h"
+#include "lib/fileflag.h"
 
 #ifdef _WIN32
-#include "path_resolver.h"
-#include "socket_helper_win.h"
+#include "base/socket_helper_win.h"
+#include "lib/path_resolver.h"
 #endif
 
 #ifndef _WIN32
@@ -23,7 +23,6 @@
 # include <sys/stat.h>
 # include <sys/types.h>
 # include <unistd.h>
-# include "fileflag.h"
 #endif
 
 namespace devtools_goma {

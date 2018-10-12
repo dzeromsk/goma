@@ -9,7 +9,6 @@
 #include <ostream>
 #include <string>
 
-
 #include "absl/strings/string_view.h"
 using std::string;
 
@@ -26,9 +25,6 @@ class SHA256HashValue {
 
   unsigned char* mutable_data() { return data_; }
   const unsigned char* data() const { return data_; }
-
-  // Make hash for unordered_map.
-  size_t Hash() const;
 
   friend bool operator==(const SHA256HashValue& lhs,
                          const SHA256HashValue& rhs) {
@@ -47,6 +43,12 @@ class SHA256HashValue {
 
   friend std::ostream& operator<<(std::ostream& os, const SHA256HashValue& v) {
     return os << v.ToHexString();
+  }
+
+  template <typename H>
+  friend H AbslHashValue(H h, const SHA256HashValue& c) {
+    return H::combine_contiguous(std::move(h), c.data_,
+                                 ABSL_ARRAYSIZE(c.data_));
   }
 
  private:

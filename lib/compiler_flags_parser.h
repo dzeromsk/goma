@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "compiler_flags.h"
+#include "lib/compiler_flags.h"
 using std::string;
 
 namespace devtools_goma {

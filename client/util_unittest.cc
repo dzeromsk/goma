@@ -74,18 +74,6 @@ TEST(Util, GetEnvShouldReturnValueContainingNul) {
   EXPECT_EQ(string(env.c_str()), env);
 }
 
-TEST(Util, ToShortNodename) {
-  std::vector<std::pair<string, string>> testcases = {
-    {"slave123-m1", "slave123-m1"},
-    {"build123-m1.golo.chromium.org", "build123-m1"},
-    {"BUILD123-M1", "build123-m1"},
-  };
-
-  for (const auto& tc : testcases) {
-    EXPECT_EQ(tc.second, devtools_goma::ToShortNodename(tc.first));
-  }
-}
-
 TEST(Util, SumRepeatedInt32) {
   using devtools_goma::SumRepeatedInt32;
   using RepeatedInt32 =

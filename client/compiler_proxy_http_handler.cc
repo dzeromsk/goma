@@ -37,6 +37,7 @@
 #include "java/jarfile_reader.h"
 #include "jquery.min.h"
 #include "linker/linker_input_processor/arfile_reader.h"
+#include "legend_help.h"
 #include "log_cleaner.h"
 #include "log_service_client.h"
 #include "multi_http_rpc.h"
@@ -162,9 +163,9 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
       }
     }
   }
-  http_options_.proxy_host_name = FLAGS_PROXY_HOST;
-  http_options_.proxy_port = FLAGS_PROXY_PORT;
-  HttpClient::Options http_options = http_options_;
+  HttpClient::Options http_options;
+  http_options.proxy_host_name = FLAGS_PROXY_HOST;
+  http_options.proxy_port = FLAGS_PROXY_PORT;
   InitHttpClientOptions(&http_options);
   http_options.network_error_margin = network_error_margin;
   if (FLAGS_NETWORK_ERROR_THRESHOLD_PERCENT >= 0 &&
@@ -236,6 +237,7 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
       absl::Seconds(FLAGS_COMPILER_PROXY_NEW_FILE_THRESHOLD));
   service_.SetEnableGchHack(FLAGS_ENABLE_GCH_HACK);
   service_.SetUseRelativePathsInArgv(FLAGS_USE_RELATIVE_PATHS_IN_ARGV);
+  service_.SetSendExpectedOutputs(FLAGS_SEND_EXPECTED_OUTPUTS);
   service_.SetCommandCheckLevel(FLAGS_COMMAND_CHECK_LEVEL);
   if (FLAGS_HERMETIC == "off") {
     service_.SetHermetic(false);
@@ -328,6 +330,9 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
   internal_http_handlers_.insert(
       std::make_pair("/static/compilerz.css",
                      &CompilerProxyHttpHandler::HandleCompilerzStyle));
+  internal_http_handlers_.insert(
+      std::make_pair("/static/legend_help.html",
+                     &CompilerProxyHttpHandler::HandleLegendHelp));
   internal_http_handlers_.insert(std::make_pair(
       "/api/taskz", &CompilerProxyHttpHandler::HandleTaskRequest));
   internal_http_handlers_.insert(std::make_pair(
@@ -681,6 +686,18 @@ int CompilerProxyHttpHandler::HandleJQuery(const HttpServerRequest& request,
   return 200;
 }
 
+int CompilerProxyHttpHandler::HandleLegendHelp(
+    const HttpServerRequest& request,
+    string* response) {
+  std::ostringstream ss;
+  OutputOkHeaderAndBody(
+      "text/html; charset=utf-8",
+      absl::string_view(legend_help_html_start, legend_help_html_size),
+      &ss);
+  *response = ss.str();
+  return 200;
+}
+
 
 int CompilerProxyHttpHandler::HandleStatusJavaScript(
     const HttpServerRequest& request,
@@ -912,14 +929,26 @@ int CompilerProxyHttpHandler::HandleAccountRequest(
   if (!account.empty()) {
     ss << ", \"account\": " << EscapeString(account);
   }
-  if (account.empty()) {
-    ss << ", \"text\": \"not logged in\"";
+  OAuth2Config config;
+  service_.http_client()->GetOAuth2Config(&config);
+  if (config.enabled()) {
+    static constexpr absl::string_view kLoginDoc = "https://chromium.googlesource.com/infra/goma/client/+/master/doc/early-access-guide.md#Login-to-Goma-service";
+    if (config.refresh_token.empty()) {
+      ss << ", \"text\": \"need login\""
+         << ", \"href\": \"" << kLoginDoc << "\"";
+    } else if (account.empty()) {
+      // even if refresh_token exists, account is empty.
+      // maybe, bad oauth2 setup.
+      ss << ", \"text\": \"bad oauth2 config - login\""
+         << ", \"href\": \"" << kLoginDoc << "\"";
+    }
+  } else {
+    LOG(WARNING) << "oauth2 config disabled";
   }
   ss << "}";
   *response = ss.str();
   return 200;
 }
-
 
 int CompilerProxyHttpHandler::HandleStatsRequest(
     const HttpServerRequest& request,
@@ -1410,28 +1439,6 @@ int CompilerProxyHttpHandler::HandleProfileRequest(
   return 200;
 }
 #endif
-
-void CompilerProxyHttpHandler::NewLoginState(int port,
-                                             string* login_state,
-                                             string* redirect_uri) {
-  *login_state = GetRandomAlphanumeric(32);
-  std::ostringstream ss;
-  ss << "http://localhost:" << port << "/api/authz";
-  *redirect_uri = ss.str();
-  AUTOLOCK(lock, &login_state_mu_);
-  oauth2_login_state_ = *login_state;
-  oauth2_redirect_uri_ = *redirect_uri;
-}
-
-bool CompilerProxyHttpHandler::CheckLoginState(const string& state) const {
-  AUTOLOCK(lock, &login_state_mu_);
-  return oauth2_login_state_ == state;
-}
-
-string CompilerProxyHttpHandler::GetRedirectURI() const {
-  AUTOLOCK(lock, &login_state_mu_);
-  return oauth2_redirect_uri_;
-}
 
 bool CompilerProxyHttpHandler::ShouldTrace() {
   if (FLAGS_RPC_TRACE_PERIOD < 1) {

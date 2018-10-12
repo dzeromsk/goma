@@ -148,7 +148,7 @@ class GzipRequestInputStream
   ~GzipRequestInputStream() override = default;
 
   GzipRequestInputStream(GzipRequestInputStream&&) = delete;
-  GzipRequestInputStream(const GzipRequestInputStream&) = default;
+  GzipRequestInputStream(const GzipRequestInputStream&) = delete;
   GzipRequestInputStream& operator=(const GzipRequestInputStream&) = delete;
   GzipRequestInputStream& operator=(GzipRequestInputStream&&) = delete;
 

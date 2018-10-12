@@ -252,6 +252,12 @@ void VerifyIntermediateStageOutput(bool args0_is_argv0,
 }  // anonymous namespace
 
 int main(int argc, char* argv[], const char* envp[]) {
+#ifdef _WIN32
+  DLOG_IF(FATAL, GetModuleHandleW(L"gdi32.dll"))
+      << "Error: gdi32.dll found in the process. This will harm performance "
+         "and cause hangs. See b/115990434.";
+#endif
+
   CheckFlagNames(envp);
 
   GOOGLE_PROTOBUF_VERIFY_VERSION;
@@ -402,5 +408,12 @@ int main(int argc, char* argv[], const char* envp[]) {
   if (retval < 0 || retval > 0xff) {
     return EXIT_FAILURE;
   }
+
+#ifdef _WIN32
+  DLOG_IF(FATAL, GetModuleHandleW(L"gdi32.dll"))
+      << "Error: gdi32.dll found in the process. This will harm performance "
+         "and cause hangs. See b/115990434.";
+#endif
+
   return retval;
 }

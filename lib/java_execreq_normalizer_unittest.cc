@@ -2,15 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#include "execreq_normalizer.h"
+#include "lib/execreq_normalizer.h"
 
 #include "absl/strings/match.h"
-#include "compiler_flag_type_specific.h"
-#include "execreq_verifier.h"
 #include "google/protobuf/text_format.h"
 #include "google/protobuf/util/message_differencer.h"
 #include "gtest/gtest.h"
+#include "lib/compiler_flag_type_specific.h"
+#include "lib/execreq_verifier.h"
 using google::protobuf::TextFormat;
 using google::protobuf::util::MessageDifferencer;
 
@@ -52,7 +51,8 @@ const char kExecReqToNormalizeJavac[] =
     "  filename: \"/home/bob/src/hello.java\"\n"
     "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
     "559d507401ae81e9\"\n"
-    "}\n";
+    "}\n"
+    "expected_output_dirs: \"/home/bob/src\"\n";
 
 void NormalizeExecReqForCacheKey(
     int id,
@@ -92,6 +92,9 @@ TEST(JavacExecReqNormalizerTest, Normalize) {
   EXPECT_EQ(1, req.input_size());
   EXPECT_TRUE(req.input(0).has_filename());
   EXPECT_TRUE(req.input(0).has_hash_key());
+  EXPECT_TRUE(req.expected_output_files().empty());
+  EXPECT_EQ(1, req.expected_output_dirs_size());
+  EXPECT_EQ("/home/bob/src", req.expected_output_dirs(0));
 }
 
 // java
@@ -113,6 +116,7 @@ Input {
   filename: "/home/bob/java/classpath/app.jar"
   hash_key: "152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d559d507401ae81e9"
 }
+expected_output_dirs: "/home/bob/java"
 )";
 
   // Nothing will be normalized.
@@ -134,6 +138,8 @@ Input {
   string difference_reason;
   differencer.ReportDifferencesToString(&difference_reason);
   EXPECT_TRUE(differencer.Compare(req_expected, req)) << difference_reason;
+  EXPECT_EQ(1, req.expected_output_dirs_size());
+  EXPECT_EQ("/home/bob/java", req.expected_output_dirs(0));
 }
 
 }  // namespace devtools_goma

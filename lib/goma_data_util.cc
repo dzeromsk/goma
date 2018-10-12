@@ -3,8 +3,7 @@
 // found in the LICENSE file.
 
 
-
-#include "goma_data_util.h"
+#include "lib/goma_data_util.h"
 
 #include <algorithm>
 #include <string>

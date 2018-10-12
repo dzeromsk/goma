@@ -6,10 +6,13 @@
 #include "socket_descriptor.h"
 
 #ifndef _WIN32
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #else
 #include <Winsock2.h>
+#include "socket_helper_win.h"
 #endif
 
 #include <memory>
@@ -317,6 +320,41 @@ void SocketDescriptor::UnregisterWritable() {
   if (!active_write_ && write_poll_registered_) {
     worker_->UnregisterPollEvent(this, DescriptorEventType::kWriteEvent);
     write_poll_registered_ = false;
+  }
+}
+
+string SocketDescriptor::PeerName() const {
+  struct sockaddr_storage storage;
+  socklen_t len = sizeof(storage);
+  int r = getpeername(fd_.get(),
+                      reinterpret_cast<struct sockaddr*>(&storage), &len);
+  if (r < 0) {
+    PLOG(ERROR) << "getpeername";
+    return "<unknown>";
+  }
+  char buf[128];
+  static_assert(sizeof buf >= INET_ADDRSTRLEN, "buf is too small for inet");
+  static_assert(sizeof buf >= INET_ADDRSTRLEN, "buf is too small for inet6");
+  switch (storage.ss_family) {
+    case AF_INET:
+      {
+        struct sockaddr_in* in =
+            reinterpret_cast<struct sockaddr_in*>(&storage);
+        string name = inet_ntop(AF_INET, &in->sin_addr, buf, sizeof buf);
+        return name;
+      }
+      break;
+    case AF_INET6:
+      {
+        struct sockaddr_in6* in6 =
+            reinterpret_cast<struct sockaddr_in6*>(&storage);
+        string name = inet_ntop(AF_INET6, &in6->sin6_addr, buf, sizeof buf);
+        return name;
+      }
+      break;
+    default:
+      LOG(ERROR) << "unknown address faimly:" << storage.ss_family;
+      return "<uknown-addr>";
   }
 }
 

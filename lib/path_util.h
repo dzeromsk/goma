@@ -5,7 +5,6 @@
 #ifndef DEVTOOLS_GOMA_LIB_PATH_UTIL_H_
 #define DEVTOOLS_GOMA_LIB_PATH_UTIL_H_
 
-
 #include "absl/strings/string_view.h"
 
 namespace devtools_goma {

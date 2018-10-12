@@ -266,9 +266,8 @@ config("common_sanitizer_flags") {
 }
 
 config("asan_flags") {
-  cflags = []
   if (is_asan) {
-    cflags += [ "-fsanitize=address" ]
+    cflags = [ "-fsanitize=address" ]
   }
 }
 
@@ -313,7 +312,6 @@ config("coverage_flags") {
       "-mllvm",
       "-sanitizer-coverage-prune-blocks=1",
     ]
-    defines = [ "SANITIZER_COVERAGE" ]
   }
 }
 
@@ -326,7 +324,15 @@ config("coverage_flags") {
 config("msan_flags") {
   if (is_msan) {
     assert(os == "linux", "msan only supported on linux x86_64")
-    cflags = [ "-fsanitize=memory" ]
+    if (!defined(msan_blacklist_path)) {
+      msan_blacklist_path =
+          rebase_path("//build/sanitizers/msan_blacklist.txt", root_build_dir)
+    }
+    cflags = [
+      "-fsanitize=memory",
+      "-fsanitize-blacklist=$msan_blacklist_path",
+      "-fsanitize-memory-track-origins=$msan_track_origins",
+    ]
   }
 }
 

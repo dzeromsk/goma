@@ -164,7 +164,11 @@ bool TLSDescriptor::NeedRetry() const {
 string TLSDescriptor::GetLastErrorMessage() const {
   return absl::StrCat(
       "fd:", socket_descriptor_->fd(), " ",
-      "socket:", socket_descriptor_->GetLastErrorMessage(), " ",
+      socket_descriptor_->PeerName(), " ",
+      "socket:", socket_descriptor_->GetLastErrorMessage(),
+      (io_failed_ ? " io_failed" : ""),
+      (is_closed_ ? " is_closed" : ""),
+      " ",
       "tls_engine:", engine_->GetLastErrorMessage());
 }
 

@@ -25,6 +25,23 @@ action("gen_compiler_proxy_status_html5") {
   public_configs = [ ":include_target_gen_dir" ]
 }
 
+action("gen_legend_help") {
+  script = genc
+  sources = [
+    "legend_help.html",
+  ]
+  outputs = [
+    "$target_gen_dir/legend_help.c",
+    "$target_gen_dir/legend_help.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+    rebase_path("legend_help.html"),
+  ]
+  public_configs = [ ":include_target_gen_dir" ]
+}
+
 action("gen_compiler_proxy_status_script") {
   script = genc
   sources = [

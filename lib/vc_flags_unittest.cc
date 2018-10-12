@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#include "vc_flags.h"
+#include "lib/vc_flags.h"
 
 #include <limits.h>
 #include <algorithm>
@@ -11,24 +10,25 @@
 #include <string>
 #include <vector>
 
-
 #include "absl/strings/str_cat.h"
-#include "compiler_flags_parser.h"
-#include "file_dir.h"
-#include "file_helper.h"
-#include "filesystem.h"
+#include "base/filesystem.h"
+#include "base/options.h"
+#include "base/path.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "gtest/gtest.h"
-#include "known_warning_options.h"
-#include "path.h"
-#include "path_resolver.h"
+#include "lib/compiler_flags_parser.h"
+#include "lib/file_helper.h"
+#include "lib/known_warning_options.h"
+#include "lib/path_resolver.h"
+
 #ifdef _WIN32
 #include "config_win.h"
 // we'll ignore the warnings:
 // warning C4996: 'strdup': The POSIX name for this item is deprecated.
 #pragma warning(disable : 4996)
 #endif  // _WIN32
+
 using google::GetExistingTempDirectories;
 using std::string;
 using absl::StrCat;

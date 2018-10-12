@@ -31,7 +31,6 @@ class OAuth2AccessTokenRefreshTask {
   virtual std::string GetAccount() = 0;
 
   virtual bool GetOAuth2Config(OAuth2Config* config) const = 0;
-  virtual bool SetOAuth2Config(const OAuth2Config& config) = 0;
 
   virtual std::string GetAuthorization() const = 0;
   virtual bool ShouldRefresh() const = 0;
@@ -42,12 +41,6 @@ class OAuth2AccessTokenRefreshTask {
  private:
   DISALLOW_COPY_AND_ASSIGN(OAuth2AccessTokenRefreshTask);
 };
-
-std::string ExchangeOAuth2RefreshToken(WorkerThreadManager* wm,
-                                       const HttpClient::Options& options,
-                                       const OAuth2Config& config,
-                                       const std::string& code,
-                                       const std::string& redirect_uri);
 
 }  // namespace devtools_goma
 

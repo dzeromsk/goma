@@ -1,212 +1,171 @@
 #!/usr/bin/env python
-#
-# Copied from chromium's build directory.
-#
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
-# found in the LICENSE file.
+# found in the chromium's LICENSE file.
+#
+# Copy of chromium's src/build/mac_toolchain.py
 
-"""Download necessary mac toolchain files under certain conditions.  If
-xcode-select is already set and points to an external folder
-(e.g. /Application/Xcode.app), this script only runs if the GYP_DEFINE
-|force_mac_toolchain| is set.  To override the values in
-|TOOLCHAIN_REVISION|-|TOOLCHAIN_SUB_REVISION| below, GYP_DEFINE
-mac_toolchain_revision can be used instead.
+"""
+If should_use_hermetic_xcode.py emits "1", and the current toolchain is out of
+date:
+  * Downloads the hermetic mac toolchain
+    * Requires CIPD authentication. Run `cipd auth-login`, use Google account.
+  * Accepts the license.
+    * If xcode-select and xcodebuild are not passwordless in sudoers, requires
+      user interaction.
 
-This script will only run on machines if /usr/bin/xcodebuild and
-/usr/bin/xcode-select has been added to the sudoers list so the license can be
-accepted.
-
-Otherwise, user input would be required to complete the script.  Perhaps future
-versions can be modified to allow for user input on developer machines.
+The toolchain version can be overridden by setting MAC_TOOLCHAIN_REVISION with
+the full revision, e.g. 9A235.
 """
 
 import os
-import plistlib
+import platform
 import shutil
 import subprocess
 import sys
-import tarfile
-import time
-import tempfile
-import urllib2
 
-# This can be changed after running /build/package_mac_toolchain.py.
-TOOLCHAIN_REVISION = '5B1008'
-TOOLCHAIN_SUB_REVISION = 2
-TOOLCHAIN_VERSION = '%s-%s' % (TOOLCHAIN_REVISION, TOOLCHAIN_SUB_REVISION)
+
+# This can be changed after running:
+#    mac_toolchain upload -xcode-path path/to/Xcode.app
+MAC_TOOLCHAIN_VERSION = '8E2002'
+
+# The toolchain will not be downloaded if the minimum OS version is not met.
+# 16 is the major version number for macOS 10.12.
+MAC_MINIMUM_OS_VERSION = 16
+
+MAC_TOOLCHAIN_INSTALLER = 'mac_toolchain'
+
+# Absolute path to src/ directory.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Absolute path to a file with gclient solutions.
+GCLIENT_CONFIG = os.path.join(os.path.dirname(REPO_ROOT), '.gclient')
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-TOOLCHAIN_BUILD_DIR = os.path.join(BASE_DIR, 'mac_files', 'Xcode.app')
-STAMP_FILE = os.path.join(BASE_DIR, 'mac_files', 'toolchain_build_revision')
-TOOLCHAIN_URL = 'gs://chrome-mac-sdk/'
+TOOLCHAIN_ROOT = os.path.join(BASE_DIR, 'mac_files')
+TOOLCHAIN_BUILD_DIR = os.path.join(TOOLCHAIN_ROOT, 'Xcode.app')
+STAMP_FILE = os.path.join(TOOLCHAIN_ROOT, 'toolchain_build_revision')
 
 
-def GetToolchainDirectory():
-  if sys.platform == 'darwin' and not UseLocalMacSDK():
-    return TOOLCHAIN_BUILD_DIR
-  else:
-    return None
+def PlatformMeetsHermeticXcodeRequirements():
+  return int(platform.release().split('.')[0]) >= MAC_MINIMUM_OS_VERSION
 
 
-def SetToolchainEnvironment():
-  mac_toolchain_dir = GetToolchainDirectory()
-  if mac_toolchain_dir:
-    os.environ['DEVELOPER_DIR'] = mac_toolchain_dir
+def _UseHermeticToolchain():
+  current_dir = os.path.dirname(os.path.realpath(__file__))
+  script_path = os.path.join(current_dir, 'mac/should_use_hermetic_xcode.py')
+  proc = subprocess.Popen([script_path, 'mac'], stdout=subprocess.PIPE)
+  return '1' in proc.stdout.readline()
 
 
-def ReadStampFile():
-  """Return the contents of the stamp file, or '' if it doesn't exist."""
+def RequestCipdAuthentication():
+  """Requests that the user authenticate to access Xcode CIPD packages."""
+
+  print 'Access to Xcode CIPD package requires authentication.'
+  print '-----------------------------------------------------------------'
+  print
+  print 'You appear to be a Googler.'
+  print
+  print 'I\'m sorry for the hassle, but you may need to do a one-time manual'
+  print 'authentication. Please run:'
+  print
+  print '    cipd auth-login'
+  print
+  print 'and follow the instructions.'
+  print
+  print 'NOTE: Use your google.com credentials, not chromium.org.'
+  print
+  print '-----------------------------------------------------------------'
+  print
+  sys.stdout.flush()
+
+
+def PrintError(message):
+  # Flush buffers to ensure correct output ordering.
+  sys.stdout.flush()
+  sys.stderr.write(message + '\n')
+  sys.stderr.flush()
+
+
+def InstallXcode(xcode_build_version, installer_cmd, xcode_app_path):
+  """Installs the requested Xcode build version.
+
+  Args:
+    xcode_build_version: (string) Xcode build version to install.
+    installer_cmd: (string) Path to mac_toolchain command to install Xcode.
+      See https://chromium.googlesource.com/infra/infra/+/master/go/src/infra/cmd/mac_toolchain/
+    xcode_app_path: (string) Path to install the contents of Xcode.app.
+
+  Returns:
+    True if installation was successful. False otherwise.
+  """
+  args = [
+      installer_cmd, 'install',
+      '-kind', 'mac',
+      '-xcode-version', xcode_build_version.lower(),
+      '-output-dir', xcode_app_path,
+  ]
+
+  # Buildbot slaves need to use explicit credentials. LUCI bots should NOT set
+  # this variable.
+  creds = os.environ.get('MAC_TOOLCHAIN_CREDS')
+  if creds:
+    args.extend(['--service-account-json', creds])
+
   try:
-    with open(STAMP_FILE, 'r') as f:
-      return f.read().rstrip()
-  except IOError:
-    return ''
+    subprocess.check_call(args)
+  except subprocess.CalledProcessError as e:
+    PrintError('Xcode build version %s failed to install: %s\n' % (
+        xcode_build_version, e))
+    RequestCipdAuthentication()
+    return False
+  except OSError as e:
+    PrintError(('Xcode installer "%s" failed to execute'
+                ' (not on PATH or not installed).') % installer_cmd)
+    return False
 
-
-def WriteStampFile(s):
-  """Write s to the stamp file."""
-  EnsureDirExists(os.path.dirname(STAMP_FILE))
-  with open(STAMP_FILE, 'w') as f:
-    f.write(s)
-    f.write('\n')
-
-
-def EnsureDirExists(path):
-  if not os.path.exists(path):
-    os.makedirs(path)
-
-
-def DownloadAndUnpack(url, output_dir):
-  """Decompresses |url| into a cleared |output_dir|."""
-  temp_name = tempfile.mktemp(prefix='mac_toolchain')
-  try:
-    print 'Downloading new toolchain.'
-    subprocess.check_call(['gsutil.py', 'cp', url, temp_name])
-    if os.path.exists(output_dir):
-      print 'Deleting old toolchain.'
-      shutil.rmtree(output_dir)
-    EnsureDirExists(output_dir)
-    print 'Unpacking new toolchain.'
-    tarfile.open(mode='r:gz', name=temp_name).extractall(path=output_dir)
-  finally:
-    if os.path.exists(temp_name):
-      os.unlink(temp_name)
-
-
-def CanAccessToolchainBucket():
-  """Checks whether the user has access to |TOOLCHAIN_URL|."""
-  proc = subprocess.Popen(['gsutil.py', 'ls', TOOLCHAIN_URL],
-                           stdout=subprocess.PIPE)
-  proc.communicate()
-  return proc.returncode == 0
-
-def LoadPlist(path):
-  """Loads Plist at |path| and returns it as a dictionary."""
-  fd, name = tempfile.mkstemp()
-  try:
-    subprocess.check_call(['plutil', '-convert', 'xml1', '-o', name, path])
-    with os.fdopen(fd, 'r') as f:
-      return plistlib.readPlist(f)
-  finally:
-    os.unlink(name)
-
-
-def AcceptLicense():
-  """Use xcodebuild to accept new toolchain license if necessary.  Don't accept
-  the license if a newer license has already been accepted. This only works if
-  xcodebuild and xcode-select are passwordless in sudoers."""
-
-  # Check old license
-  try:
-    target_license_plist_path = \
-        os.path.join(TOOLCHAIN_BUILD_DIR,
-                     *['Contents','Resources','LicenseInfo.plist'])
-    target_license_plist = LoadPlist(target_license_plist_path)
-    build_type = target_license_plist['licenseType']
-    build_version = target_license_plist['licenseID']
-
-    accepted_license_plist = LoadPlist(
-        '/Library/Preferences/com.apple.dt.Xcode.plist')
-    agreed_to_key = 'IDELast%sLicenseAgreedTo' % build_type
-    last_license_agreed_to = accepted_license_plist[agreed_to_key]
-
-    # Historically all Xcode build numbers have been in the format of AANNNN, so
-    # a simple string compare works.  If Xcode's build numbers change this may
-    # need a more complex compare.
-    if build_version <= last_license_agreed_to:
-      # Don't accept the license of older toolchain builds, this will break the
-      # license of newer builds.
-      return
-  except (subprocess.CalledProcessError, KeyError):
-    # If there's never been a license of type |build_type| accepted,
-    # |target_license_plist_path| or |agreed_to_key| may not exist.
-    pass
-
-  print "Accepting license."
-  old_path = subprocess.Popen(['/usr/bin/xcode-select', '-p'],
-                               stdout=subprocess.PIPE).communicate()[0].strip()
-  try:
-    build_dir = os.path.join(TOOLCHAIN_BUILD_DIR, 'Contents/Developer')
-    subprocess.check_call(['sudo', '/usr/bin/xcode-select', '-s', build_dir])
-    subprocess.check_call(['sudo', '/usr/bin/xcodebuild', '-license', 'accept'])
-  finally:
-    subprocess.check_call(['sudo', '/usr/bin/xcode-select', '-s', old_path])
-
-
-def UseLocalMacSDK():
-  force_pull = os.environ.has_key('FORCE_MAC_TOOLCHAIN')
-
-  # Don't update the toolchain if there's already one installed outside of the
-  # expected location for a Chromium mac toolchain, unless |force_pull| is set.
-  proc = subprocess.Popen(['xcode-select', '-p'], stdout=subprocess.PIPE)
-  xcode_select_dir = proc.communicate()[0]
-  rc = proc.returncode
-  return (not force_pull and rc == 0 and
-          TOOLCHAIN_BUILD_DIR not in xcode_select_dir)
+  return True
 
 
 def main():
   if sys.platform != 'darwin':
     return 0
 
-  # TODO: Add support for GN per crbug.com/570091
-  if UseLocalMacSDK():
-    print 'Using local toolchain.'
+  if not _UseHermeticToolchain():
+    print 'Skipping Mac toolchain installation for mac'
     return 0
 
-  toolchain_revision = os.environ.get('MAC_TOOLCHAIN_REVISION',
-                                      TOOLCHAIN_VERSION)
-  if ReadStampFile() == toolchain_revision:
-    print 'Toolchain (%s) is already up to date.' % toolchain_revision
-    AcceptLicense()
+  if not PlatformMeetsHermeticXcodeRequirements():
+    print 'OS version does not support toolchain.'
     return 0
 
-  if not CanAccessToolchainBucket():
-    print 'Cannot access toolchain bucket.'
-    return 0
+  toolchain_version = os.environ.get('MAC_TOOLCHAIN_REVISION',
+                                      MAC_TOOLCHAIN_VERSION)
 
-  # Reset the stamp file in case the build is unsuccessful.
-  WriteStampFile('')
+  # On developer machines, mac_toolchain tool is provided by
+  # depot_tools. On the bots, the recipe is responsible for installing
+  # it and providing the path to the executable.
+  installer_cmd = os.environ.get('MAC_TOOLCHAIN_INSTALLER',
+                                 MAC_TOOLCHAIN_INSTALLER)
 
-  toolchain_file = '%s.tgz' % toolchain_revision
-  toolchain_full_url = TOOLCHAIN_URL + toolchain_file
+  toolchain_root = TOOLCHAIN_ROOT
+  xcode_app_path = TOOLCHAIN_BUILD_DIR
+  stamp_file = STAMP_FILE
 
-  print 'Updating toolchain to %s...' % toolchain_revision
-  try:
-    toolchain_file = 'toolchain-%s.tgz' % toolchain_revision
-    toolchain_full_url = TOOLCHAIN_URL + toolchain_file
-    DownloadAndUnpack(toolchain_full_url, TOOLCHAIN_BUILD_DIR)
-    AcceptLicense()
+  # Delete the old "hermetic" installation if detected.
+  # TODO: remove this once the old "hermetic" solution is no
+  # longer in use.
+  if os.path.exists(stamp_file):
+    print 'Detected old hermetic installation at %s. Deleting.' % (
+      toolchain_root)
+    shutil.rmtree(toolchain_root)
 
-    print 'Toolchain %s unpacked.' % toolchain_revision
-    WriteStampFile(toolchain_revision)
-    return 0
-  except Exception as e:
-    print 'Failed to download toolchain %s.' % toolchain_file
-    print 'Exception %s' % e
-    print 'Exiting.'
+  success = InstallXcode(toolchain_version, installer_cmd, xcode_app_path)
+  if not success:
     return 1
+
+  return 0
+
 
 if __name__ == '__main__':
   sys.exit(main())

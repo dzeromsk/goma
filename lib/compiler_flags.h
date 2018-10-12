@@ -13,10 +13,9 @@
 #include <utility>
 #include <vector>
 
-
 #include "absl/strings/string_view.h"
-#include "compiler_flag_type.h"
-#include "flag_parser.h"
+#include "lib/compiler_flag_type.h"
+#include "lib/flag_parser.h"
 using std::string;
 
 namespace devtools_goma {

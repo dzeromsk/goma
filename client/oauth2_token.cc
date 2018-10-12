@@ -52,7 +52,6 @@ class AuthRefreshConfig {
   virtual bool enabled() const = 0;
   virtual bool valid() const = 0;
   virtual bool GetOAuth2Config(OAuth2Config* config) const = 0;
-  virtual bool SetOAuth2Config(const OAuth2Config& config) = 0;
   virtual bool CanRefresh() const = 0;
   virtual bool InitRequest(HttpRequest* req) const = 0;
   // TODO: use absl::string_view for resp_body instead?
@@ -148,20 +147,6 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
 
   bool GetOAuth2Config(OAuth2Config* config) const override {
     return config_->GetOAuth2Config(config);
-  }
-
-  bool SetOAuth2Config(const OAuth2Config& config) override
-      LOCKS_EXCLUDED(mu_) {
-    if (!config_->SetOAuth2Config(config)) {
-      LOG(WARNING) << "failed to set oauth2 config.";
-      return false;
-    }
-    AUTOLOCK(lock, &mu_);
-    token_expiration_time_ = absl::Now();
-    token_type_.clear();
-    access_token_.clear();
-    account_email_.clear();
-    return true;
   }
 
   string GetAuthorization() const override LOCKS_EXCLUDED(mu_) {
@@ -567,22 +552,6 @@ class OAuth2RefreshConfig : public AuthRefreshConfig {
     return true;
   }
 
-  bool SetOAuth2Config(const OAuth2Config& config) override {
-    if (config_.token_uri != config.token_uri) {
-      LOG(ERROR) << "unacceptable token_uri change:" << config.token_uri;
-      return false;
-    }
-    if (config_.refresh_token.empty() && !config.refresh_token.empty()) {
-      LOG(INFO) << "set refresh token";
-    } else if (config.refresh_token.empty()) {
-      LOG(WARNING) << "clear refresh token";
-    } else if (config_.refresh_token != config.refresh_token) {
-      LOG(INFO) << "update refresh token";
-    }
-    config_ = config;
-    return true;
-  }
-
   bool CanRefresh() const override {
     // if refresh token is not given, couldn't get access token and
     // no need to refresh.
@@ -879,11 +848,6 @@ class LuciAuthRefreshConfig : public AuthRefreshConfig {
     return false;
   }
 
-  bool SetOAuth2Config(const OAuth2Config& config) override {
-    LOG(WARNING) << "SetOAuth2Config won't work for LUCI_CONTEXT.";
-    return false;
-  }
-
   bool CanRefresh() const override {
     return valid();
   }
@@ -948,66 +912,6 @@ OAuth2AccessTokenRefreshTask::New(
   }
 
   return nullptr;
-}
-
-string ExchangeOAuth2RefreshToken(
-    WorkerThreadManager* wm,
-    const HttpClient::Options& http_options,
-    const OAuth2Config& config,
-    const string& code,
-    const string& redirect_uri) {
-  if (config.token_uri != kGoogleTokenURI) {
-    LOG(ERROR) << "unsupported token_uri=" << config.token_uri;
-    return "";
-  }
-  HttpClient::Options options = http_options;
-  options.InitFromURL(kGoogleTokenURI);
-  HttpClient client(
-      HttpClient::NewSocketFactoryFromOptions(options),
-      HttpClient::NewTLSEngineFactoryFromOptions(options),
-      options, wm);
-
-  HttpRequest req;
-  client.InitHttpRequest(&req, "POST", "");
-  req.SetContentType("application/x-www-form-urlencoded");
-  req.AddHeader("Connection", "close");
-
-  std::ostringstream req_body;
-  req_body << "code=" << code
-           << "&client_id=" << config.client_id
-           << "&client_secret=" << config.client_secret
-           << "&redirect_uri=" << redirect_uri
-           << "&grant_type=authorization_code";
-  VLOG(1) << req_body.str();
-  req.SetBody(req_body.str());
-
-  HttpResponse resp;
-  HttpClient::Status status;
-  LOG(INFO) << "exchange code to refresh_token";
-  client.Do(&req, &resp, &status);
-  if (status.err) {
-    LOG(WARNING) << "exchange refresh token err=" << status.err
-                 << " " << status.err_message;
-    return "";
-  }
-  if (status.http_return_code != 200) {
-    LOG(WARNING) << "exchange refresh status=" << status.http_return_code;
-    return "";
-  }
-  string token;
-  {
-    string err;
-    Json::Reader reader;
-    Json::Value root;
-    if (reader.parse(string(resp.parsed_body()), root, false)) {
-      if (!GetNonEmptyStringFromJson(root, "refresh_token", &token, &err)) {
-        LOG(WARNING) << "parse exchange result: " << err;
-      }
-    } else {
-      LOG(WARNING) << "invalid json";
-    }
-  }
-  return token;
 }
 
 }  // namespace devtools_goma

@@ -3,28 +3,17 @@
 // found in the LICENSE file.
 
 
-
-#include "goma_hash.h"
+#include "lib/goma_hash.h"
 
 #include <stdio.h>
 
+#include "lib/file_helper.h"
+#include "openssl/sha.h"  // BoringSSL
 
-#if defined __MACH__
-# include <CommonCrypto/CommonDigest.h>
-#elif defined _WIN32
-# include "config_win.h"
-# include <wincrypt.h>
-# pragma comment(lib, "advapi32.lib")
-# include "absl/strings/string_view.h"
-# define SHA256_DIGEST_LENGTH 32
-#else
-# include <openssl/sha.h>  // BoringSSL
-# ifndef OPENSSL_IS_BORINGSSL
-#  error "We expect BoringSSL in the third_party directory is used."
-# endif
+#ifndef OPENSSL_IS_BORINGSSL
+#error "We expect BoringSSL in the third_party directory is used."
 #endif
-#include "file_helper.h"
-#include "glog/logging.h"
+
 using std::string;
 
 namespace {
@@ -83,50 +72,12 @@ string SHA256HashValue::ToHexString() const {
   return md_str;
 }
 
-size_t SHA256HashValue::Hash() const {
-  size_t v = 0;
-  for (int i = 0; i < sizeof(data_); ++i) {
-    v = v * 37 + data_[i];
-  }
-  return v;
-}
-
 void ComputeDataHashKeyForSHA256HashValue(absl::string_view data,
                                           SHA256HashValue* hash_value) {
-#ifdef __MACH__
-  CC_SHA256_CTX sha256;
-  CC_SHA256_Init(&sha256);
-  CC_SHA256_Update(&sha256, data.data(), data.size());
-  CC_SHA256_Final(hash_value->mutable_data(), &sha256);
-#elif defined _WIN32
-  HCRYPTPROV provider;
-  HCRYPTHASH hash;
-
-  if (!CryptAcquireContext(&provider, nullptr, nullptr, PROV_RSA_AES,
-                           CRYPT_VERIFYCONTEXT)) {
-    LOG(FATAL) << "Unable to acquire RSA_AES provider";
-    return;
-  }
-  if (CryptCreateHash(provider, CALG_SHA_256, 0, 0, &hash)) {
-    if (CryptHashData(hash, reinterpret_cast<const BYTE*>(data.data()),
-                      data.size(), 0)) {
-      DWORD hash_size = SHA256_DIGEST_LENGTH;
-      CryptGetHashParam(hash, HP_HASHVAL, hash_value->mutable_data(),
-                        &hash_size, 0);
-    }
-  }
-  if (hash) {
-    CryptDestroyHash(hash);
-  }
-  if (provider) {
-    CryptReleaseContext(provider, 0);
-  }
-#else
   SHA256_CTX sha256;
   SHA256_Init(&sha256);
   SHA256_Update(&sha256, data.data(), data.size());
   SHA256_Final(hash_value->mutable_data(), &sha256);
-#endif
 }
 
 void ComputeDataHashKey(absl::string_view data, string* md_str) {

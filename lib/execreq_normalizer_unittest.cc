@@ -3,15 +3,14 @@
 // found in the LICENSE file.
 
 
-
-#include "execreq_normalizer.h"
+#include "lib/execreq_normalizer.h"
 
 #include <map>
 #include <string>
 #include <vector>
 
+#include "base/path.h"
 #include "gtest/gtest.h"
-#include "path.h"
 
 namespace devtools_goma {
 

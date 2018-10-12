@@ -3,8 +3,7 @@
 // found in the LICENSE file.
 
 
-
-#include "compress_util.h"
+#include "lib/compress_util.h"
 
 #include <memory>
 #include <vector>
@@ -13,13 +12,15 @@
 #include "absl/strings/string_view.h"
 #include "glog/logging.h"
 #include "gtest/gtest.h"
+
 #ifdef ENABLE_LZMA
-# include "google/protobuf/io/zero_copy_stream_impl.h"
-# include "prototmp/goma_log.pb.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
+#include "prototmp/goma_log.pb.h"
 using google::protobuf::io::ArrayInputStream;
 using google::protobuf::io::ConcatenatingInputStream;
 using google::protobuf::io::StringOutputStream;
 #endif  // ENABLE_LZMA
+
 using std::string;
 
 namespace devtools_goma {

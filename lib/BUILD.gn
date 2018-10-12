@@ -184,13 +184,8 @@ static_library("goma_hash") {
   ]
   deps = [
     "//base",
+    "//third_party/boringssl:boringssl",
   ]
-  if (os == "linux") {
-    deps += [ "//third_party/boringssl:boringssl" ]
-  }
-  if (os == "win") {
-    deps += [ "//third_party:glog" ]
-  }
 }
 
 static_library("goma_file") {

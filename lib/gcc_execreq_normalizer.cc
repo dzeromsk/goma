@@ -2,15 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#include "gcc_execreq_normalizer.h"
+#include "lib/gcc_execreq_normalizer.h"
 
 #include "absl/memory/memory.h"
 #include "absl/strings/str_join.h"
-#include "clang_flags_helper.h"
-#include "gcc_flags.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
+#include "lib/clang_flags_helper.h"
+#include "lib/gcc_flags.h"
 using std::string;
 
 namespace devtools_goma {

@@ -35,8 +35,8 @@ executable("unordered_map_benchmark") {
   ]
   deps = [
     "//build/config:exe_and_shlib_deps",
+    "//third_party/abseil",
     "//third_party/benchmark",
-    "//third_party/tensorflow_core:flat_map",
   ]
 }
 

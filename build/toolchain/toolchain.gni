@@ -1,28 +1,37 @@
-# Copied from chromium's build/toolchain and modified for goma.
-#
 # Copyright 2015 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
-# found in the LICENSE file.
+# found in the chromium's LICENSE file.
+#
+# Copy of chromium's src/toolchain/toolchain.gni
+# at commit dc1033318057d35ca84afee71a2f7b1cf39743d2
+# with modification for goma client.
+# - remove import build_overrides/build.gni
+# - remove import build/config/chrome_build.gni
+# - add some args from other gni
 
 # Toolchain-related configuration that may be needed outside the context of the
 # toolchain() rules themselves.
 
 declare_args() {
-  # Enable Link Time Optimization in optimized builds (output programs run
-  # faster, but linking is up to 5-20x slower).
-  # Note: use target_os == "linux" rather than is_linux so that it does not
-  # apply to host_toolchain when target_os="android".
-  allow_posix_link_time_opt = target_os == "linux" && target_cpu == "x64"
-
-  # Set to true to use lld, the LLVM linker. This flag may be used on Windows
-  # or Linux with the shipped LLVM toolchain.
+  # Set to true to use lld, the LLVM linker. This flag may be used on
+  # Windows or Linux with the shipped LLVM toolchain.
+  # in chromium's build/config/compiler/compiler.gni
   use_lld = is_clang && (os == "win" || os == "linux")
 
-  # If used with allow_posix_link_time_opt, it enables the experimental support
-  # of ThinLTO that links 3x-10x faster but (as of now) does not have all the
-  # important optimizations such us devirtualization implemented. See also
+  # It enables the experimental support of ThinLTO that links 3x-10x faster
+  # but (as of now) does not have all the important optimizations such as
+  # devirtualization implemented. See also
   # http://blog.llvm.org/2016/06/thinlto-scalable-and-incremental-lto.html
+  # in chromium's build/config/compiler/compiler.gni
   use_thin_lto = false
+
+  # Use the system install of Xcode for tools like ibtool, libtool, etc.
+  # This does not affect the compiler.  When this variable is false,
+  # targets will instead use a hermetic install of Xcode.
+  # [The hermetic install can be ontained with gclient sync after setting
+  # the environment variable FORCE_MAC_TOOLHCAIN].
+  # in chromium's build_overrides/build.gni
+  use_system_xcode = ""
 
   # If this is set to true, or if LLVM_FORCE_HEAD_REVISION is set to 1
   # in the environment, we use the revision in the llvm repo to determine
@@ -31,7 +40,45 @@ declare_args() {
   # conjunction with setting LLVM_FORCE_HEAD_REVISION in the
   # environment when `gclient runhooks` is run as well.
   llvm_force_head_revision = false
+
+  # Compile with Xcode version of clang instead of hermetic version shipped
+  # with the build. Used on iOS to ship official builds (as they are built
+  # with the version of clang shipped with Xcode).
+  use_xcode_clang = is_ios && is_official_build
+
+  # Used for binary size analysis.
+  # Currently disabled on LLD because of a bug (fixed upstream).
+  # See https://crbug.com/716209.
+  generate_linker_map = is_android && is_official_build
+
+  # Use absolute file paths in the compiler diagnostics and __FILE__ macro
+  # if needed.
+  msvc_use_absolute_paths = false
 }
+
+# in chromium's build_overrides/build.gni
+if (host_os == "mac" && use_system_xcode == "") {
+  _result = exec_script("//build/mac/should_use_hermetic_xcode.py",
+                        [ target_os ],
+                        "value")
+  assert(_result != 2,
+         "Do not allow building targets with the default" +
+             "hermetic toolchain if the minimum OS version is not met.")
+  use_system_xcode = _result == 0
+}
+
+if (generate_linker_map) {
+  assert(
+      is_official_build,
+      "Linker map files should only be generated when is_official_build = true")
+  assert(current_os == "android" || target_os == "linux",
+         "Linker map files should only be generated for Android and Linux")
+}
+
+# The path to the hermetic install of Xcode. Only relevant when
+# use_system_xcode = false.
+hermetic_xcode_path =
+    rebase_path("//build/${target_os}_files/Xcode.app", "", root_build_dir)
 
 declare_args() {
   if (is_clang) {
@@ -40,31 +87,29 @@ declare_args() {
   }
 }
 
-# Subdirectory within root_out_dir for shared library files.
-# TODO: GYP sets this to "lib" for Linux & Android, but this won't work
-#     in GN until support for loadable_module() is added.
-#     See: https://codereview.chromium.org/1236503002/
-shlib_subdir = "."
-
-# Root out dir for shared library files.
-root_shlib_dir = root_out_dir
-if (shlib_subdir != ".") {
-  root_shlib_dir += "/$shlib_subdir"
-}
+# Check target_os here instead of is_ios as this file is loaded for secondary
+# toolchain (host toolchain in particular) but the argument is the same for
+# all toolchains.
+assert(!use_xcode_clang || target_os == "ios",
+       "Using Xcode's clang is only supported in iOS builds")
 
 # Extension for shared library files (including leading dot).
-if (os == "mac") {
+if (is_mac || is_ios) {
   shlib_extension = ".dylib"
-} else if (is_posix) {
+} else if (is_android && is_component_build) {
+  # By appending .cr, we prevent name collisions with libraries already
+  # loaded by the Android zygote.
+  shlib_extension = ".cr.so"
+} else if (is_posix || is_fuchsia) {
   shlib_extension = ".so"
-} else if (os == "win") {
+} else if (is_win) {
   shlib_extension = ".dll"
 } else {
   assert(false, "Platform not supported")
 }
 
 # Prefix for shared library files.
-if (is_posix) {
+if (is_posix || is_fuchsia) {
   shlib_prefix = "lib"
 } else {
   shlib_prefix = ""
@@ -82,7 +127,7 @@ if (host_os == "win") {
   _tool_wrapper_path =
       rebase_path("//build/toolchain/win/tool_wrapper.py", root_build_dir)
 
-  stamp_command = "$python_path $_tool_wrapper_path stamp {{output}}"
+  stamp_command = "cmd /c type nul > \"{{output}}\""
   copy_command =
       "$python_path $_tool_wrapper_path recursive-mirror {{source}} {{output}}"
 } else {

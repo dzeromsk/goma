@@ -478,7 +478,6 @@ class HttpClient {
   // Get email address to login with oauth2.
   string GetAccount();
   bool GetOAuth2Config(OAuth2Config* config) const;
-  bool SetOAuth2Config(const OAuth2Config& config);
 
   string DebugString() const;
 

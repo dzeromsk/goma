@@ -421,6 +421,11 @@ expect_success "${CC}_stdc99_hello" \
     "${GOMA_CC} -std=c99 test/hello.c -c -o out.o"
 expect_success "${HERMETIC_GCC}${CC}_stdc99_hello.o" "objcmp out_plain.o out.o"
 
+rm -f out.o out_plain.o
+assert_success "${LOCAL_CC} -m32 test/hello.c -c -o out_plain.o"
+expect_success "${CC}_m32" "${GOMA_CC} -m32 test/hello.c -c -o out.o"
+expect_success "${HERMETIC_GCC}${CC}_m32_out.o" "objcmp out_plain.o out.o"
+
 # test $CXX
 rm -f out_plain.o out.o out2.o
 # build a control binary to test against.

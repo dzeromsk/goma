@@ -6,7 +6,8 @@
 #define DEVTOOLS_GOMA_CLIENT_LINKED_UNORDERED_MAP_H_
 
 #include <list>
-#include <unordered_map>
+
+#include "absl/container/node_hash_map.h"
 
 #include "glog/logging.h"
 
@@ -18,11 +19,11 @@ namespace devtools_goma {
 // in key, since key will be copied to list and map.
 //
 // This is not thread-safe.
-template<typename K, typename V, typename H = std::hash<K>>
+template <typename K, typename V>
 class LinkedUnorderedMap {
  public:
   using ListType = std::list<std::pair<K, V>>;
-  using MapType = std::unordered_map<K, typename ListType::iterator, H>;
+  using MapType = absl::node_hash_map<K, typename ListType::iterator>;
   using const_iterator = typename ListType::const_iterator;
   using iterator = typename ListType::iterator;
 
@@ -62,16 +63,16 @@ class LinkedUnorderedMap {
   MapType map_;
 };
 
-template<typename K, typename V, typename H>
-void LinkedUnorderedMap<K, V, H>::pop_front() {
+template <typename K, typename V>
+void LinkedUnorderedMap<K, V>::pop_front() {
   DCHECK(!empty());
   map_.erase(list_.front().first);
   list_.pop_front();
 }
 
-template<typename K, typename V, typename H>
-template<typename KK, typename VV>
-void LinkedUnorderedMap<K, V, H>::emplace_back(KK&& key, VV&& value) {
+template <typename K, typename V>
+template <typename KK, typename VV>
+void LinkedUnorderedMap<K, V>::emplace_back(KK&& key, VV&& value) {
   auto map_it = map_.find(key);
   if (map_it == map_.end()) {
     // key cannot be moved here. used later.
@@ -88,15 +89,15 @@ void LinkedUnorderedMap<K, V, H>::emplace_back(KK&& key, VV&& value) {
   }
 }
 
-template<typename K, typename V, typename H>
-void LinkedUnorderedMap<K, V, H>::MoveToBack(
-    typename LinkedUnorderedMap<K, V, H>::iterator it) {
+template <typename K, typename V>
+void LinkedUnorderedMap<K, V>::MoveToBack(
+    typename LinkedUnorderedMap<K, V>::iterator it) {
   list_.splice(list_.end(), list_, it);
 }
 
-template<typename K, typename V, typename H>
-typename LinkedUnorderedMap<K, V, H>::iterator
-LinkedUnorderedMap<K, V, H>::find(const K& key) {
+template <typename K, typename V>
+typename LinkedUnorderedMap<K, V>::iterator LinkedUnorderedMap<K, V>::find(
+    const K& key) {
   auto it = map_.find(key);
   if (it == map_.end()) {
     return list_.end();
@@ -105,9 +106,9 @@ LinkedUnorderedMap<K, V, H>::find(const K& key) {
   return it->second;
 }
 
-template<typename K, typename V, typename H>
-typename LinkedUnorderedMap<K, V, H>::const_iterator
-LinkedUnorderedMap<K, V, H>::find(const K& key) const {
+template <typename K, typename V>
+typename LinkedUnorderedMap<K, V>::const_iterator
+LinkedUnorderedMap<K, V>::find(const K& key) const {
   auto it = map_.find(key);
   if (it == map_.end()) {
     return list_.end();

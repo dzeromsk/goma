@@ -3,8 +3,7 @@
 // found in the LICENSE file.
 
 
-
-#include "goma_file.h"
+#include "lib/goma_file.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -20,14 +19,15 @@
 #include <stack>
 #include <utility>
 
-
-#include "compiler_specific.h"
+#include "base/compiler_specific.h"
 #include "glog/logging.h"
-#include "goma_hash.h"
+#include "lib/goma_hash.h"
+#include "lib/scoped_fd.h"
+
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_data.pb.h"
 MSVC_POP_WARNING()
-#include "scoped_fd.h"
+
 using std::string;
 
 namespace {

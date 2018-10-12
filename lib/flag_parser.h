@@ -11,9 +11,8 @@
 #include <string>
 #include <vector>
 
-
-#include <unordered_map>
-#include "basictypes.h"
+#include "base/basictypes.h"
+#include "absl/container/flat_hash_map.h"
 using std::string;
 
 class FlagParser {
@@ -102,8 +101,6 @@ class FlagParser {
     friend class FlagParser;
     friend std::unique_ptr<Flag>::deleter_type;
 
-    using ParsedArgsMap = std::unordered_map<int, string>;
-
     Flag(const char* name, bool require_value, bool allow_space_arg,
          const Options& options);
     ~Flag();
@@ -134,7 +131,7 @@ class FlagParser {
     std::vector<string> values_;
     std::vector<string>* values_output_;
     Callback* parse_callback_;
-    ParsedArgsMap parsed_args_;
+    absl::flat_hash_map<int, string> parsed_args_;
     DISALLOW_COPY_AND_ASSIGN(Flag);
   };
 

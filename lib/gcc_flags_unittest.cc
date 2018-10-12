@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#include "gcc_flags.h"
+#include "lib/gcc_flags.h"
 
 #include <limits.h>
 #include <algorithm>
@@ -11,24 +10,25 @@
 #include <string>
 #include <vector>
 
-
 #include "absl/strings/str_cat.h"
-#include "compiler_flags_parser.h"
-#include "file_dir.h"
-#include "file_helper.h"
-#include "filesystem.h"
+#include "base/filesystem.h"
+#include "base/options.h"
+#include "base/path.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "gtest/gtest.h"
-#include "known_warning_options.h"
-#include "path.h"
-#include "path_resolver.h"
+#include "lib/compiler_flags_parser.h"
+#include "lib/file_helper.h"
+#include "lib/known_warning_options.h"
+#include "lib/path_resolver.h"
+
 #ifdef _WIN32
 #include "config_win.h"
 // we'll ignore the warnings:
 // warning C4996: 'strdup': The POSIX name for this item is deprecated.
 #pragma warning(disable : 4996)
 #endif  // _WIN32
+
 using google::GetExistingTempDirectories;
 using std::string;
 using absl::StrCat;
@@ -38,24 +38,6 @@ namespace devtools_goma {
 static void ExpectHasElement(const std::vector<string>& v,
                              const string& elem) {
   EXPECT_TRUE(std::find(v.begin(), v.end(), elem) != v.end()) << elem;
-}
-
-static void GetOutputFileForHello(const std::vector<string>& opts,
-                                  string* output,
-                                  GCCFlags::Mode mode) {
-  std::vector<string> args;
-  args.push_back("gcc");
-  std::copy(opts.begin(), opts.end(), back_inserter(args));
-  args.push_back("hello.c");
-
-  GCCFlags flags(args, "/");
-  if (!flags.output_files().empty()) {
-    CHECK_EQ(static_cast<int>(flags.output_files().size()), 1);
-    *output = flags.output_files().front();
-  } else {
-    *output = "";
-  }
-  EXPECT_EQ(mode, flags.mode()) << args;
 }
 
 class GCCFlagsTest : public testing::Test {
@@ -712,65 +694,52 @@ TEST_F(GCCFlagsTest, PnaclClangPnaclBiasShouldNotBeDetectedByClang) {
   EXPECT_EQ(expected_compiler_info_flags, flags.compiler_info_flags());
 }
 
-TEST_F(GCCFlagsTest, Mode) {
-  std::vector<string> opts;
-  string output;
+TEST_F(GCCFlagsTest, ModeAndOutputFiles) {
+  const struct {
+    std::vector<string> opts;
+    GCCFlags::Mode expected_mode;
+    std::vector<string> expected_outputs;
+  } kTestCases[] = {
+      {{"-c"}, GCCFlags::COMPILE, {"hello.o"}},
+      {{"-S"}, GCCFlags::COMPILE, {"hello.s"}},
+      {{"-E"}, GCCFlags::PREPROCESS, {}},
+      {{"-M"}, GCCFlags::PREPROCESS, {}},
+      {{"-M", "-c"}, GCCFlags::PREPROCESS, {}},
+      {{"-M", "-MF", "hello.d"}, GCCFlags::PREPROCESS, {"hello.d"}},
+      {{"-MM", "-MF", "hello.d"}, GCCFlags::PREPROCESS, {"hello.d"}},
+      {{"-E", "-M", "-MF", "hello.d", "-c"}, GCCFlags::PREPROCESS, {"hello.d"}},
+      {{"-E", "-MM", "-MF", "hello.d", "-c"},
+       GCCFlags::PREPROCESS,
+       {"hello.d"}},
+      {{"-MD", "-MF", "hello.d", "-c"},
+       GCCFlags::COMPILE,
+       {"hello.d", "hello.o"}},
+      {{"-MMD", "-MF", "hello.d", "-c"},
+       GCCFlags::COMPILE,
+       {"hello.d", "hello.o"}},
+      {{"-E", "-c"}, GCCFlags::PREPROCESS, {}},
+      {{"-c", "-M"}, GCCFlags::PREPROCESS, {}},
+      {{"-c", "-E"}, GCCFlags::PREPROCESS, {}},
+      {{"-S", "-M"}, GCCFlags::PREPROCESS, {}},
+      {{"-M", "-S"}, GCCFlags::PREPROCESS, {}},
+      {{"-c", "-S"}, GCCFlags::COMPILE, {"hello.s"}},
+      {{"-S", "-c"}, GCCFlags::COMPILE, {"hello.s"}},
+  };
 
-  opts.push_back("-c");
-  GetOutputFileForHello(opts, &output, GCCFlags::COMPILE);
-  EXPECT_EQ("hello.o", output);
+  for (const auto& tc : kTestCases) {
+    std::vector<string> args;
+    args.push_back("gcc");
+    std::copy(tc.opts.begin(), tc.opts.end(), back_inserter(args));
+    args.push_back("hello.c");
 
-  opts[0] = "-S";
-  GetOutputFileForHello(opts, &output, GCCFlags::COMPILE);
-  EXPECT_EQ("hello.s", output);
+    GCCFlags flags(args, "/");
 
-  opts[0] = "-E";
-  GetOutputFileForHello(opts, &output, GCCFlags::PREPROCESS);
-  EXPECT_EQ("", output);
+    std::vector<string> outputs = flags.output_files();
+    std::sort(outputs.begin(), outputs.end());
 
-  opts[0] = "-M";
-  GetOutputFileForHello(opts, &output, GCCFlags::PREPROCESS);
-  EXPECT_EQ("", output);
-
-  // opts[0] = "-M";
-  opts.push_back("-c");
-  GetOutputFileForHello(opts, &output, GCCFlags::PREPROCESS);
-  EXPECT_EQ("", output);
-
-  opts[0] = "-E";
-  opts[1] = "-c";
-  GetOutputFileForHello(opts, &output, GCCFlags::PREPROCESS);
-  EXPECT_EQ("", output);
-
-  opts[0] = "-c";
-  opts[1] = "-M";
-  GetOutputFileForHello(opts, &output, GCCFlags::PREPROCESS);
-  EXPECT_EQ("", output);
-
-  opts[0] = "-c";
-  opts[1] = "-E";
-  GetOutputFileForHello(opts, &output, GCCFlags::PREPROCESS);
-  EXPECT_EQ("", output);
-
-  opts[0] = "-S";
-  opts[1] = "-M";
-  GetOutputFileForHello(opts, &output, GCCFlags::PREPROCESS);
-  EXPECT_EQ("", output);
-
-  opts[0] = "-M";
-  opts[1] = "-S";
-  GetOutputFileForHello(opts, &output, GCCFlags::PREPROCESS);
-  EXPECT_EQ("", output);
-
-  opts[0] = "-c";
-  opts[1] = "-S";
-  GetOutputFileForHello(opts, &output, GCCFlags::COMPILE);
-  EXPECT_EQ("hello.s", output);
-
-  opts[0] = "-S";
-  opts[1] = "-c";
-  GetOutputFileForHello(opts, &output, GCCFlags::COMPILE);
-  EXPECT_EQ("hello.s", output);
+    EXPECT_EQ(tc.expected_mode, flags.mode()) << args;
+    EXPECT_EQ(tc.expected_outputs, outputs) << args;
+  }
 }
 
 TEST_F(GCCFlagsTest, PrintFileName) {

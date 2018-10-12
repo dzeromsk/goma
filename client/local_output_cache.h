@@ -16,7 +16,6 @@
 #include "compiler_specific.h"
 #include "goma_hash.h"
 #include "linked_unordered_map.h"
-#include "sha256hash_hasher.h"
 #include "worker_thread_manager.h"
 
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
@@ -154,8 +153,7 @@ class LocalOutputCache {
   bool ready_ GUARDED_BY(ready_mu_);
 
   // cache entries. Older cache is first.
-  using CacheEntryMap =
-      LinkedUnorderedMap<SHA256HashValue, CacheEntry, SHA256HashValueHasher>;
+  using CacheEntryMap = LinkedUnorderedMap<SHA256HashValue, CacheEntry>;
   mutable ReadWriteLock entries_mu_ ACQUIRED_AFTER(gc_mu_);
   CacheEntryMap entries_ GUARDED_BY(entries_mu_);
   // total cache amount in bytes.

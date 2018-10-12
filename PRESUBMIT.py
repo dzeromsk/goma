@@ -80,6 +80,14 @@ def CheckGNGenChecked(input_api, output_api):
 
 
 def CheckChangeOnUpload(input_api, output_api):
+  def source_file_filter(x):
+    chromium_files = (
+        # todo missed owner
+        'build/config/mac/sdk_info.py',
+        # longer line
+        'build/config/mac/mac_sdk.gni',
+    )
+    return x.LocalPath() not in chromium_files
   results = []
   results += input_api.canned_checks.CheckChangeHasDescription(
       input_api, output_api)
@@ -89,10 +97,11 @@ def CheckChangeOnUpload(input_api, output_api):
   results += input_api.canned_checks.CheckChangeHasNoTabs(
       input_api, output_api)
   results += input_api.canned_checks.CheckChangeTodoHasOwner(
-      input_api, output_api)
+      input_api, output_api, source_file_filter=source_file_filter)
   results += input_api.canned_checks.CheckChangeHasNoStrayWhitespace(
       input_api, output_api)
-  results += input_api.canned_checks.CheckLongLines(input_api, output_api, 80)
+  results += input_api.canned_checks.CheckLongLines(
+      input_api, output_api, 80, source_file_filter=source_file_filter)
   results += input_api.canned_checks.CheckLicense(
       input_api, output_api,
       r'(Copyright 201\d Google Inc. All Rights Reserved.|' +
@@ -105,6 +114,9 @@ def CheckChangeOnUpload(input_api, output_api):
       black_list=(r'third_party[\\/].*',
                   r'build[\\/]tools[\\/].*',
                   r'build[\\/]vs_toolchain.py',
+                  r'build[\\/]mac_toolchain.py',
+                  r'build[\\/]config[\\/]mac[\\/].*',
+                  r'build[\\/]mac[\\/].*',
                   r'buildtools[\\/]clang_format[\\/]script[\\/].*',
                   r'tools[\\/].*',
                   r'out[\\/].*',

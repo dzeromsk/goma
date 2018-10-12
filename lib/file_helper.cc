@@ -3,9 +3,7 @@
 // found in the LICENSE file.
 
 
-
-
-#include "file_helper.h"
+#include "lib/file_helper.h"
 
 #include <errno.h>
 
@@ -14,9 +12,10 @@
 #endif  // _WIN32
 
 #include "absl/strings/string_view.h"
+#include "base/path.h"
 #include "glog/logging.h"
-#include "path.h"
-#include "scoped_fd.h"
+#include "lib/scoped_fd.h"
+
 
 namespace devtools_goma {
 

@@ -8,8 +8,6 @@
 #include <algorithm>
 #include <deque>
 
-#include "absl/strings/str_split.h"
-#include "absl/strings/string_view.h"
 #include "env_flags.h"
 #include "file_stat.h"
 #include "glog/logging.h"
@@ -85,11 +83,6 @@ pid_t Getpid() {
 #else
   return getpid();
 #endif
-}
-
-string ToShortNodename(const string& nodename) {
-  std::vector<string> entries = ToVector(absl::StrSplit(nodename, '.'));
-  return absl::AsciiStrToLower(entries[0]);
 }
 
 int64_t SumRepeatedInt32(

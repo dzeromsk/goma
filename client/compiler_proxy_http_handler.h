@@ -87,6 +87,8 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
 
   int HandleJQuery(const HttpServerRequest& request, string* response);
 
+  int HandleLegendHelp(const HttpServerRequest& request, string* response);
+
 
   int HandleStatusJavaScript(const HttpServerRequest& request,
                              string* response);
@@ -109,7 +111,6 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
 
   int HandleAccountRequest(const HttpServerRequest& /* req */,
                            string* response);
-
 
   int HandleStatsRequest(const HttpServerRequest& request, string* response);
 
@@ -196,12 +197,6 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   int HandleProfileRequest(const HttpServerRequest& request, string* response);
 #endif
 
-  void NewLoginState(int port, string* login_state, string* redirect_uri);
-
-  bool CheckLoginState(const string& state) const;
-
-  string GetRedirectURI() const;
-
   bool ShouldTrace();
 
   const string myname_;
@@ -228,14 +223,6 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   const string compiler_proxy_cpu_profile_file_;
   bool cpu_profiling_;
 #endif
-
-  // Default http_options_ for any http clients in compiler_proxy
-  // such as oauth2 etc.
-  HttpClient::Options http_options_;
-
-  mutable Lock login_state_mu_;
-  string oauth2_login_state_;
-  string oauth2_redirect_uri_;
 
   DISALLOW_COPY_AND_ASSIGN(CompilerProxyHttpHandler);
 };

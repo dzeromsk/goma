@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 
-#include "file_reader.h"
+#include "lib/file_reader.h"
 
 #include <stdlib.h>
 #include <memory>

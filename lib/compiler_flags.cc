@@ -3,8 +3,7 @@
 // found in the LICENSE file.
 
 
-
-#include "compiler_flags.h"
+#include "lib/compiler_flags.h"
 
 #include <ctype.h>
 #include <algorithm>
@@ -19,15 +18,15 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
-#include "cmdline_parser.h"
-#include "file_helper.h"
-#include "flag_parser.h"
+#include "base/path.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
-#include "known_warning_options.h"
-#include "path.h"
-#include "path_resolver.h"
-#include "path_util.h"
+#include "lib/cmdline_parser.h"
+#include "lib/file_helper.h"
+#include "lib/flag_parser.h"
+#include "lib/known_warning_options.h"
+#include "lib/path_resolver.h"
+#include "lib/path_util.h"
 using std::string;
 
 namespace devtools_goma {

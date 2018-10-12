@@ -2,24 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
-#include "gcc_flags.h"
+#include "lib/gcc_flags.h"
 
 #include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
-#include "cmdline_parser.h"
-#include "compiler_flags.h"
-#include "file_helper.h"
-#include "filesystem.h"
-#include "flag_parser.h"
+#include "base/filesystem.h"
+#include "base/options.h"
+#include "base/path.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
-#include "known_warning_options.h"
-#include "path.h"
-#include "path_resolver.h"
-#include "path_util.h"
+#include "lib/cmdline_parser.h"
+#include "lib/compiler_flags.h"
+#include "lib/file_helper.h"
+#include "lib/flag_parser.h"
+#include "lib/known_warning_options.h"
+#include "lib/path_resolver.h"
+#include "lib/path_util.h"
 using std::string;
 
 namespace devtools_goma {
@@ -79,6 +79,7 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
   FlagParser::Flag* flag_S = parser.AddBoolFlag("S");
   FlagParser::Flag* flag_E = parser.AddBoolFlag("E");
   FlagParser::Flag* flag_M = parser.AddBoolFlag("M");
+  FlagParser::Flag* flag_MM = parser.AddBoolFlag("MM");
   FlagParser::Flag* flag_MD = parser.AddBoolFlag("MD");
   FlagParser::Flag* flag_MMD = parser.AddBoolFlag("MMD");
   FlagParser::Flag* flag_g = parser.AddPrefixFlag("g");
@@ -329,7 +330,7 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
   is_successful_ = true;
 
   mode_ = COMPILE;
-  if (flag_E->seen() || flag_M->seen()) {
+  if (flag_E->seen() || flag_M->seen() || flag_MM->seen()) {
     mode_ = PREPROCESS;
   } else if (!flag_c->seen() && !flag_S->seen()) {
     mode_ = LINK;
@@ -451,8 +452,17 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
       absl::string_view stem = GetStem(input_filenames_[0]);
       if (mode_ == LINK) {
         output = "a.out";
-      } else if (flag_E->seen() || flag_M->seen()) {
-        // output will be stdout.
+      } else if (flag_M->seen() || flag_MM->seen()) {
+        // If -M or -MM is specified, output will be done to stdout.
+        // However, if -MF is specified, output must be to -MF value.
+        if (flag_MF->seen()) {
+          output_files_.push_back(flag_MF->GetLastValue());
+        }
+        return;
+      } else if (flag_E->seen()) {
+        // preprocess. No output.
+        // If -E, -M and -MF are all specified in the command line,
+        // gcc outputs deps to -MF value.
         return;
       } else if (flag_S->seen()) {
         output = absl::StrCat(stem, ".s");

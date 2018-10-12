@@ -10,9 +10,8 @@
 #include <string>
 #include <vector>
 
-
-#include "basictypes.h"
-#include "file_reader.h"
+#include "base/basictypes.h"
+#include "lib/file_reader.h"
 #include "prototmp/goma_data.pb.h"
 using std::string;
 
@@ -156,9 +155,9 @@ class FileServiceClient {
 
   // Note: off_t is 32-bit in Windows.  If need to handle files bigger than
   //       4GB, it needs to be changed to QWORD.
-  bool CreateFileChunks(FileReader* fd,
+  bool CreateFileChunks(FileReader* fr,
                         off_t size, bool store, FileBlob* blob);
-  bool ReadFileContent(FileReader* fd,
+  bool ReadFileContent(FileReader* fr,
                        off_t offset, off_t size, FileBlob* blob);
 
   bool OutputLookupFileResp(const LookupFileReq& req,
