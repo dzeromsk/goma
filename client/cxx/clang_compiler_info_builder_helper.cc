@@ -186,6 +186,7 @@ string GccDisplayPredefinedMacros(
 
   argv.push_back(lang_flag);
   argv.push_back("-E");
+  argv.push_back("-ffreestanding");  // skip stdc-predef.h
   argv.push_back(empty_file);
   if (VCFlags::IsClangClCommand(normal_compiler_path)) {
     argv.push_back("-Xclang");
@@ -199,7 +200,7 @@ string GccDisplayPredefinedMacros(
 
   string macros;
   {
-    GOMA_COUNTERZ("ReadCommandOutput(-E -dM)");
+    GOMA_COUNTERZ("ReadCommandOutput(-E -ffreestanding -dM)");
     macros = ReadCommandOutput(normal_compiler_path, argv, env, cwd,
                                MERGE_STDOUT_STDERR, status);
   }

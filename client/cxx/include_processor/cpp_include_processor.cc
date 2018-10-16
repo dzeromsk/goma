@@ -586,6 +586,20 @@ bool CppIncludeProcessor::GetIncludeFiles(const string& filename,
     cpp_parser_.set_is_vc();
   }
 
+  // True if the compiler is gcc-like and we are building in hosted mode.
+  bool gcc_like_hosted = false;
+  if (compiler_flags.type() == CompilerFlagType::Gcc) {
+    const GCCFlags& flags = static_cast<const GCCFlags&>(compiler_flags);
+    gcc_like_hosted = !(flags.has_ffreestanding() || flags.has_fno_hosted());
+  }
+
+  if (gcc_like_hosted) {
+    // CompilerInfo was generated with -ffreestanding, and set
+    // __STDC_HOSTED__=0 - we must override this.
+    cpp_parser_.DeleteMacro("__STDC_HOSTED__");
+    cpp_parser_.AddMacroByString("__STDC_HOSTED__", "1");
+  }
+
   for (const auto& commandline_macro : commandline_macros) {
     const string& macro = commandline_macro.first;
     if (commandline_macro.second) {
@@ -605,13 +619,15 @@ bool CppIncludeProcessor::GetIncludeFiles(const string& filename,
     }
   }
 
-  // From GCC 4.8, stdc-predef.h is automatically included without
-  // -ffreestanding. Also, -fno-hosted is equivalent to -ffreestanding.
-  // See also: https://gcc.gnu.org/gcc-4.8/porting_to.html
-  if (compiler_flags.type() == CompilerFlagType::Gcc &&
-      compiler_info.name().find("clang") == string::npos) {
-    const GCCFlags& flags = static_cast<const GCCFlags&>(compiler_flags);
-    if (!(flags.has_ffreestanding() || flags.has_fno_hosted())) {
+  if (gcc_like_hosted) {
+    // From GCC 4.8, stdc-predef.h is automatically included without
+    // -ffreestanding. Also, -fno-hosted is equivalent to -ffreestanding.
+    // See also: https://gcc.gnu.org/gcc-4.8/porting_to.html
+    if (compiler_info.name().find("clang") == string::npos) {
+      // Note: this requires that the compiler macros were extracted with
+      // -ffreestanding, otherwise stdc-predef.h's header guard will be
+      // defined and this will be a no-op.
+
       // TODO: Some environment might not have stdc-predef.h
       // (e.g. android). In that case, IncludeProcess currently emit WARNING,
       // but it's ignoreable. It would be better to suppress such warning.

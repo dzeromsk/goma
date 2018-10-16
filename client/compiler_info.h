@@ -237,7 +237,7 @@ class CompilerInfo {
 
   // Additional resources that a compiler will use during a compile.
   // e.g. clang with address sanizier will use
-  // "<reosurce_dir>/share/asan_blacklist.txt" during a compile.
+  // "<resource_dir>/share/asan_blacklist.txt" during a compile.
   std::vector<ResourceInfo> resource_;
 
   // Protects data_->last_used_at.
