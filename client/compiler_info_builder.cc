@@ -22,6 +22,7 @@ std::unique_ptr<CompilerInfoData> CompilerInfoBuilder::FillFromCompilerOutputs(
     const std::vector<string>& compiler_info_envs) {
   GOMA_COUNTERZ("");
   std::unique_ptr<CompilerInfoData> data(new CompilerInfoData);
+  SetLanguageExtension(data.get());
 
   data->set_last_used_at(time(nullptr));
 

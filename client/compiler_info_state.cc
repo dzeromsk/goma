@@ -31,13 +31,13 @@ std::unique_ptr<CompilerInfo> CompilerInfoState::MakeCompilerInfo(
     case CompilerInfoData::kFake:
       return absl::make_unique<FakeCompilerInfo>(std::move(data));
     case CompilerInfoData::LANGUAGE_EXTENSION_NOT_SET:
-      CHECK(false) << "CompilerInfoData does not have any language extension";
-      return nullptr;
+      LOG(FATAL) << "CompilerInfoData does not have any language extension";
+      // UNREACHABLE.
   }
 
-  CHECK(false) << "unexpected language extension case: "
-               << static_cast<int>(data->language_extension_case());
-  return nullptr;
+  LOG(FATAL) << "unexpected language extension case: "
+             << static_cast<int>(data->language_extension_case());
+  // UNREACHABLE.
 }
 
 CompilerInfoState::CompilerInfoState(std::unique_ptr<CompilerInfoData> data)

@@ -9,7 +9,7 @@ syntax = "proto2";
 
 package devtools_goma;
 
-// NEXT ID TO USE: 91
+// NEXT ID TO USE: 92
 message ExecLog {
   enum AuthenticationType {
     NONE = 0;
@@ -44,6 +44,7 @@ message ExecLog {
   optional int32 compiler_proxy_start_time = 49;
   optional int32 task_id = 50;
   reserved 81;  // deprecated: use_case
+  optional string build_id = 91;
 
   optional string compiler_proxy_user_agent = 51;
 

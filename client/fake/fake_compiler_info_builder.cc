@@ -65,6 +65,13 @@ bool GetFakeCompilerVersion(const string& compiler_path,
 
 }  // anonymous namespace
 
+void FakeCompilerInfoBuilder::SetLanguageExtension(
+    CompilerInfoData* data) const {
+  // Sets `fake` data extension.
+  // This is required to declare |data| is for `fake` compiler.
+  (void)data->mutable_fake();
+}
+
 void FakeCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     const CompilerFlags& flags,
     const string& local_compiler_path,
@@ -75,10 +82,6 @@ void FakeCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
   // are compiler type specific. Especially, we have to set these.
   //   1. data extension
   //   2. compiler version and target
-
-  // Sets `fake` data extension.
-  // This is required to declare |data| is for `fake` compiler.
-  (void)data->mutable_fake();
 
   // Set target.
 #ifdef _WIN32
@@ -95,6 +98,17 @@ void FakeCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
         "Failed to get fake compiler version for " + local_compiler_path, data);
     return;
   }
+
+  // Add compiler as an resource input.
+  CompilerInfoData::ResourceInfo r;
+  if (!CompilerInfoBuilder::ResourceInfoFromPath(
+          flags.cwd(), local_compiler_path, CompilerInfoData::EXECUTABLE_BINARY,
+          &r)) {
+    AddErrorMessage("failed to get resource info for " + local_compiler_path,
+                    data);
+    return;
+  }
+  *data->add_resource() = std::move(r);
 }
 
 }  // namespace devtools_goma

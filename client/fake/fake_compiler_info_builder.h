@@ -18,6 +18,8 @@ class FakeCompilerInfoBuilder : public CompilerInfoBuilder {
  public:
   ~FakeCompilerInfoBuilder() override = default;
 
+  void SetLanguageExtension(CompilerInfoData* data) const override;
+
   void SetTypeSpecificCompilerInfo(
       const CompilerFlags& flags,
       const string& local_compiler_path,

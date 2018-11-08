@@ -2417,4 +2417,212 @@ TEST_F(GCCFlagsTest, FThinltoIndex) {
   EXPECT_EQ("./dir/file.o.chrome.thinlto.bc", gcc_flags->thinlto_index());
 }
 
+TEST_F(GCCFlagsTest, FModules) {
+  const std::vector<string> args{
+      "clang++", "-fmodules", "-c", "foo.cc",
+  };
+
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
+  EXPECT_EQ(args, flags->args());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
+
+  EXPECT_TRUE(flags->is_successful());
+  EXPECT_EQ("", flags->fail_message());
+  EXPECT_EQ("clang++", flags->compiler_base_name());
+  EXPECT_EQ("clang++", flags->compiler_name());
+
+  ASSERT_EQ(1U, flags->input_filenames().size());
+  EXPECT_EQ("foo.cc", flags->input_filenames()[0]);
+
+  devtools_goma::GCCFlags* gcc_flags =
+      static_cast<devtools_goma::GCCFlags*>(flags.get());
+  EXPECT_TRUE(gcc_flags->has_fmodules());
+  EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_EQ("", gcc_flags->clang_module_map_file());
+  EXPECT_EQ("", gcc_flags->clang_module_file().first);
+  EXPECT_EQ("", gcc_flags->clang_module_file().second);
+}
+
+TEST_F(GCCFlagsTest, FNoImplicitModuleMaps) {
+  const std::vector<string> args{
+      "clang++", "-fmodules", "-fno-implicit-module-maps", "-c", "foo.cc",
+  };
+
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
+  EXPECT_EQ(args, flags->args());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
+
+  EXPECT_TRUE(flags->is_successful());
+  EXPECT_EQ("", flags->fail_message());
+  EXPECT_EQ("clang++", flags->compiler_base_name());
+  EXPECT_EQ("clang++", flags->compiler_name());
+
+  ASSERT_EQ(1U, flags->input_filenames().size());
+  EXPECT_EQ("foo.cc", flags->input_filenames()[0]);
+
+  EXPECT_EQ(0U, flags->optional_input_filenames().size());
+
+  devtools_goma::GCCFlags* gcc_flags =
+      static_cast<devtools_goma::GCCFlags*>(flags.get());
+  EXPECT_TRUE(gcc_flags->has_fmodules());
+  EXPECT_FALSE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_EQ("", gcc_flags->clang_module_map_file());
+  EXPECT_EQ("", gcc_flags->clang_module_file().first);
+  EXPECT_EQ("", gcc_flags->clang_module_file().second);
+}
+
+TEST_F(GCCFlagsTest, FModulesCachePath) {
+  const std::vector<string> args{
+      "clang++", "-fmodules", "-fmodule-map-file=foo.modulemap", "-c", "foo.cc",
+  };
+
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
+  EXPECT_EQ(args, flags->args());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
+
+  EXPECT_TRUE(flags->is_successful());
+  EXPECT_EQ("", flags->fail_message());
+  EXPECT_EQ("clang++", flags->compiler_base_name());
+  EXPECT_EQ("clang++", flags->compiler_name());
+
+  ASSERT_EQ(1U, flags->input_filenames().size());
+  EXPECT_EQ("foo.cc", flags->input_filenames()[0]);
+
+  EXPECT_EQ(0U, flags->optional_input_filenames().size());
+
+  devtools_goma::GCCFlags* gcc_flags =
+      static_cast<devtools_goma::GCCFlags*>(flags.get());
+  EXPECT_TRUE(gcc_flags->has_fmodules());
+  EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_EQ("foo.modulemap", gcc_flags->clang_module_map_file());
+  EXPECT_EQ("", gcc_flags->clang_module_file().first);
+  EXPECT_EQ("", gcc_flags->clang_module_file().second);
+}
+
+TEST_F(GCCFlagsTest, FModuleFileWithName) {
+  const std::vector<string> args {
+    "clang++", "-fmodules", "-fmodule-file=foo=foo.pcm",
+    "-c", "foo.cc",
+  };
+
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
+  EXPECT_EQ(args, flags->args());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
+
+  EXPECT_TRUE(flags->is_successful());
+  EXPECT_EQ("", flags->fail_message());
+  EXPECT_EQ("clang++", flags->compiler_base_name());
+  EXPECT_EQ("clang++", flags->compiler_name());
+
+  ASSERT_EQ(1U, flags->input_filenames().size());
+  EXPECT_EQ("foo.cc", flags->input_filenames()[0]);
+
+  EXPECT_EQ(0U, flags->optional_input_filenames().size());
+
+  devtools_goma::GCCFlags* gcc_flags =
+      static_cast<devtools_goma::GCCFlags*>(flags.get());
+  EXPECT_TRUE(gcc_flags->has_fmodules());
+  EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_EQ("", gcc_flags->clang_module_map_file());
+  EXPECT_EQ("foo", gcc_flags->clang_module_file().first);
+  EXPECT_EQ("foo.pcm", gcc_flags->clang_module_file().second);
+}
+
+TEST_F(GCCFlagsTest, FModuleFileWithoutName) {
+  const std::vector<string> args {
+    "clang++", "-fmodules", "-fmodule-file=foo.pcm",
+    "-c", "foo.cc",
+  };
+
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
+  EXPECT_EQ(args, flags->args());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
+
+  EXPECT_TRUE(flags->is_successful());
+  EXPECT_EQ("", flags->fail_message());
+  EXPECT_EQ("clang++", flags->compiler_base_name());
+  EXPECT_EQ("clang++", flags->compiler_name());
+
+  ASSERT_EQ(1U, flags->input_filenames().size());
+  EXPECT_EQ("foo.cc", flags->input_filenames()[0]);
+
+  EXPECT_EQ(0U, flags->optional_input_filenames().size());
+
+  devtools_goma::GCCFlags* gcc_flags =
+      static_cast<devtools_goma::GCCFlags*>(flags.get());
+  EXPECT_TRUE(gcc_flags->has_fmodules());
+  EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_EQ("", gcc_flags->clang_module_map_file());
+  EXPECT_EQ("", gcc_flags->clang_module_file().first);
+  EXPECT_EQ("foo.pcm", gcc_flags->clang_module_file().second);
+}
+
+TEST_F(GCCFlagsTest, FModuleFileFModuleMapFile) {
+  const std::vector<string> args{
+      "clang++",
+      "-fmodules",
+      "-fmodule-file=foo=foo.pcm",
+      "-fmodule-map-file=foo.modulemap",
+      "-c",
+      "foo.cc",
+  };
+
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
+  EXPECT_EQ(args, flags->args());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
+
+  EXPECT_TRUE(flags->is_successful());
+  EXPECT_EQ("", flags->fail_message());
+  EXPECT_EQ("clang++", flags->compiler_base_name());
+  EXPECT_EQ("clang++", flags->compiler_name());
+
+  ASSERT_EQ(1U, flags->input_filenames().size());
+  EXPECT_EQ("foo.cc", flags->input_filenames()[0]);
+
+  EXPECT_EQ(0U, flags->optional_input_filenames().size());
+
+  devtools_goma::GCCFlags* gcc_flags =
+      static_cast<devtools_goma::GCCFlags*>(flags.get());
+  EXPECT_TRUE(gcc_flags->has_fmodules());
+  EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_EQ("foo.modulemap", gcc_flags->clang_module_map_file());
+  EXPECT_EQ("foo", gcc_flags->clang_module_file().first);
+  EXPECT_EQ("foo.pcm", gcc_flags->clang_module_file().second);
+}
+
+TEST_F(GCCFlagsTest, FModuleFileCornerCase) {
+  const std::vector<string> args{
+      "clang++", "-fmodules", "-fmodule-file=foo=", "-c", "foo.cc",
+  };
+
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
+  EXPECT_EQ(args, flags->args());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
+
+  EXPECT_TRUE(flags->is_successful());
+  EXPECT_EQ("", flags->fail_message());
+  EXPECT_EQ("clang++", flags->compiler_base_name());
+  EXPECT_EQ("clang++", flags->compiler_name());
+
+  ASSERT_EQ(1U, flags->input_filenames().size());
+  EXPECT_EQ("foo.cc", flags->input_filenames()[0]);
+
+  EXPECT_EQ(0U, flags->optional_input_filenames().size());
+
+  devtools_goma::GCCFlags* gcc_flags =
+      static_cast<devtools_goma::GCCFlags*>(flags.get());
+  EXPECT_TRUE(gcc_flags->has_fmodules());
+  EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_EQ("", gcc_flags->clang_module_map_file());
+  EXPECT_EQ("foo", gcc_flags->clang_module_file().first);
+  EXPECT_EQ("", gcc_flags->clang_module_file().second);
+}
+
 }  // namespace devtools_goma

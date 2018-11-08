@@ -711,8 +711,6 @@ bool GomaClient::PrepareExecRequest(const CompilerFlags& flags, ExecReq* req) {
     }
   }
 
-  req->set_experimental_is_external_user(FLAGS_EXTERNAL_USER);
-
   // If local_compiler_path_ is empty, compiler proxy will find out
   // local compiler from requester_env's PATH and gomacc_path.
   if (gomacc_path_.empty()) {
@@ -738,6 +736,11 @@ bool GomaClient::PrepareExecRequest(const CompilerFlags& flags, ExecReq* req) {
       RequesterInfo::CURRENT_VERSION);
   req->mutable_requester_info()->set_pid(Getpid());
   req->mutable_requester_info()->set_goma_revision(kBuiltRevisionString);
+  string autoninja_build_id = GetEnv("AUTONINJA_BUILD_ID");
+  if (!autoninja_build_id.empty()) {
+      req->mutable_requester_info()->set_build_id(
+          std::move(autoninja_build_id));
+  }
 
   if (FLAGS_STORE_ONLY) {
     if (FLAGS_USE_SUCCESS) {

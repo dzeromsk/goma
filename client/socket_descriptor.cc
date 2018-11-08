@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/ioctl.h>
+#include <sys/un.h>
 #include <sys/socket.h>
 #else
 #include <Winsock2.h>
@@ -17,6 +18,7 @@
 
 #include <memory>
 
+#include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
 #include "callback.h"
 #include "compiler_specific.h"
@@ -171,13 +173,23 @@ int SocketDescriptor::ShutdownForSend() {
 bool SocketDescriptor::IsReadable() const {
   int n;
 #ifndef _WIN32
-  bool ioctl_ret = ioctl(fd_.get(), FIONREAD, &n) == -1;
+  bool ioctl_success = ioctl(fd_.get(), FIONREAD, &n) != -1;
+  if (!ioctl_success) {
+    PLOG(WARNING) << "Failed to call ioctl: fd=" << fd_.get();
+    return false;
+  }
 #else
   DWORD byte_returned;
-  bool ioctl_ret = WSAIoctl(fd_.get(), FIONREAD, nullptr, 0, &n, sizeof(n),
-                            &byte_returned, nullptr, nullptr) != SOCKET_ERROR;
+  bool ioctl_success = WSAIoctl(fd_.get(), FIONREAD, nullptr, 0, &n, sizeof(n),
+                                &byte_returned, nullptr, nullptr) == 0;
+  if (!ioctl_success) {
+    LOG_SYSRESULT(WSAGetLastError());
+    LOG(WARNING) << "Failed to call WSAIoctl: fd=" << fd_.get();
+    return false;
+  }
 #endif
-  return !(ioctl_ret || n == 0);
+
+  return n > 0;
 }
 
 void SocketDescriptor::StopRead() {
@@ -325,6 +337,7 @@ void SocketDescriptor::UnregisterWritable() {
 
 string SocketDescriptor::PeerName() const {
   struct sockaddr_storage storage;
+  memset(&storage, 0, sizeof storage);
   socklen_t len = sizeof(storage);
   int r = getpeername(fd_.get(),
                       reinterpret_cast<struct sockaddr*>(&storage), &len);
@@ -334,7 +347,7 @@ string SocketDescriptor::PeerName() const {
   }
   char buf[128];
   static_assert(sizeof buf >= INET_ADDRSTRLEN, "buf is too small for inet");
-  static_assert(sizeof buf >= INET_ADDRSTRLEN, "buf is too small for inet6");
+  static_assert(sizeof buf >= INET6_ADDRSTRLEN, "buf is too small for inet6");
   switch (storage.ss_family) {
     case AF_INET:
       {
@@ -352,8 +365,22 @@ string SocketDescriptor::PeerName() const {
         return name;
       }
       break;
+#ifndef _WIN32
+    case AF_UNIX:
+      {
+        struct sockaddr_un* un =
+            reinterpret_cast<struct sockaddr_un*>(&storage);
+        if (un->sun_path[0] == '\0') {
+          if (un->sun_path[1] == '\0') {
+            return "unix:<unnamed>";
+          }
+          return absl::StrCat("unix:<abstract>", &un->sun_path[1]);
+        }
+        return absl::StrCat("unix:", un->sun_path);
+      }
+#endif
     default:
-      LOG(ERROR) << "unknown address faimly:" << storage.ss_family;
+      LOG(ERROR) << "unknown address family:" << storage.ss_family;
       return "<uknown-addr>";
   }
 }

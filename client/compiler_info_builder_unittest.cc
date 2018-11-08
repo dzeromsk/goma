@@ -180,6 +180,7 @@ TEST_F(CompilerInfoBuilderTest, ClangSmoke) {
 #endif
 
   string clang_path = GetClangPath();
+  ASSERT_TRUE(!clang_path.empty());
 
   const std::vector<std::vector<string>> testcases = {
       {clang_path}, {clang_path, "-xc"}, {clang_path, "-xc++"},

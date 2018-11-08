@@ -112,6 +112,8 @@ class CompilerInfoCache {
     return validator_.get();
   }
 
+  bool Save() LOCKS_EXCLUDED(mu_);
+
  private:
   CompilerInfoCache(const string& cache_filename,
                     absl::Duration cache_holding_time);
@@ -121,7 +123,6 @@ class CompilerInfoCache {
   bool Unmarshal(const CompilerInfoDataTable& table) LOCKS_EXCLUDED(mu_);
   bool UnmarshalUnlocked(const CompilerInfoDataTable& table)
       EXCLUSIVE_LOCKS_REQUIRED(mu_);
-  bool Save() LOCKS_EXCLUDED(mu_);
   bool Marshal(CompilerInfoDataTable* table) LOCKS_EXCLUDED(mu_);
   bool MarshalUnlocked(CompilerInfoDataTable* table) SHARED_LOCKS_REQUIRED(mu_);
   void Clear() LOCKS_EXCLUDED(mu_);

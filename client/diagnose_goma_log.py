@@ -273,32 +273,6 @@ def LongValueFromJsonStats(json_stats, keys):
   return long(curr)
 
 
-def ParseGomaFlags(logline):
-  """Parse goma flags
-
-  We assume each line has this kind of form
-    GOMA_AAA=BBB
-    GOMA_CCC=DDD (auto configured)
-
-  Returns:
-    dict like { GOMA_AAA: BBB, GOMA_CCC: DDD }.
-    last (auto configured) will be dropped from the value.
-  """
-
-  result = {}
-  for line in logline.splitlines():
-    line = line.strip()
-    if line.endswith("(auto configured)"):
-      line = line[:-len("(auto configured)")].strip()
-    pos = line.find('=')
-    if pos < 0:
-      continue
-    key, value = line[0:pos], line[pos + 1:]
-    result[key] = value
-
-  return result
-
-
 class SimpleStats(object):
   """Simple Statistics."""
 
@@ -349,8 +323,6 @@ def DiagnoseGomaLog(options, args):
   goma_version = None
   goma_flags = None
   goma_limits = None
-
-  goma_flags_parsed = None
 
   # TaskLog for each compile type.
   # Each dict will have task id as key, TaskLog as value.
@@ -436,7 +408,6 @@ def DiagnoseGomaLog(options, args):
       m = re.match('.*goma flags:(.*)', logline.logtext, flags=re.DOTALL)
       if m:
         goma_flags = m.group(1)
-        goma_flags_parsed = ParseGomaFlags(goma_flags)
         continue
     if not goma_limits:
       m = re.match('.*(max incoming:.*)', logline.logtext)
@@ -533,12 +504,7 @@ def DiagnoseGomaLog(options, args):
       if memory_threshold < 0:
         # Automatically configure memory threshold.
         gibibyte = 1024 * 1024 * 1024L
-        if ('GOMA_MAX_POOLED_INCLUDE_DIR_CACHE' in goma_flags_parsed and
-            goma_flags_parsed['GOMA_MAX_POOLED_INCLUDE_DIR_CACHE'].isdigit()):
-          x = int(goma_flags_parsed['GOMA_MAX_POOLED_INCLUDE_DIR_CACHE'])
-          memory_threshold = 2 * gibibyte + x * (gibibyte / 256)
-        else:
-          memory_threshold = 3 * gibibyte
+        memory_threshold = 3 * gibibyte
 
       if consuming_memory and consuming_memory > memory_threshold:
         messages.append('Consumed too much memory: %d > %d' % (

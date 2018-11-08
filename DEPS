@@ -31,25 +31,18 @@ deps = {
      "client/third_party/jsoncpp/source":
      Var("chromium_git") + '/external/github.com/open-source-parsers/jsoncpp.git@f572e8e42e22cfcf5ab0aea26574f408943edfa4', # from svn 248
 
-     # gyp
-     # Note: this is used by build/vs_toolchain.py, and nobody else may
-     # use this.
-     "client/tools/gyp":
-     Var("chromium_git") + "/external/gyp.git@" +
-         "c6f471687407bf28ddfc63f1a8f47aeb7bf54edc",
-
      # chrome's tools/clang
      "client/tools/clang":
      "https://chromium.googlesource.com/chromium/src/tools/clang.git",
 
      # chrome's deps/third_party/boringssl
      "client/third_party/boringssl/src":
-     "https://boringssl.googlesource.com/boringssl@e3418028023f6399bee43d78db1ee7f374f52dc2",
+     "https://boringssl.googlesource.com/boringssl@d2ed382e647bfe6148bdc192d77b48406af85a94",
 
      # google-breakpad
      "client/third_party/breakpad/breakpad":
      Var("chromium_git") + "/breakpad/breakpad.git@" +
-         "e93f852a3c316ad767381d5e5bc839eba5c6225b",
+         "54fa71efbe50fb2b58096d871575b59e12edba6d",
 
      # lss
      "client/third_party/lss":
@@ -78,7 +71,7 @@ deps = {
 
      # abseil
      "client/third_party/abseil/src":
-     "https://github.com/abseil/abseil-cpp.git@445998d7ac4e5d3c50411d377e3b50e960d2d6c2",
+     "https://github.com/abseil/abseil-cpp.git@070f6e47b33a2909d039e620c873204f78809492",
 
      # google benchmark v1.4.1
      "client/third_party/benchmark/src":

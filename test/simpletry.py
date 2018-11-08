@@ -40,7 +40,7 @@ class SimpleTryTest(unittest.TestCase):
     Args:
       method_name: a string of method name to test.
       goma_dir: a string of GOMA directory.
-      local_cl: a string of cl.exe path.
+      local_cl: a string of clang-cl.exe path.
       gomacc: a string of gomacc.exe path.
     """
     super(SimpleTryTest, self).__init__(method_name)
@@ -214,12 +214,12 @@ class SimpleTryTest(unittest.TestCase):
   def testClHello(self):
     # Since object file contains a file name, an output file name should be
     # the same.
-    self.AssertSuccess([self.local_cl, '/c', '/Fotest.obj',
+    self.AssertSuccess([self.local_cl, '/c', '/Brepro', '/Fotest.obj',
                         os.path.join('test', 'hello.c')],
                        msg='local compile')
     shutil.move('test.obj', 'local.obj')
-    self.AssertSuccess([self.gomacc, self.local_cl, '/c', '/Fotest.obj',
-                        os.path.join('test', 'hello.c')],
+    self.AssertSuccess([self.gomacc, self.local_cl, '/c', '/Brepro',
+                        '/Fotest.obj', os.path.join('test', 'hello.c')],
                        msg='remote compile')
     shutil.move('test.obj', 'remote.obj')
 
@@ -244,13 +244,13 @@ class SimpleTryTest(unittest.TestCase):
     # the same.
     self.AssertSuccess([self.gomacc, self.local_cl,
                         '/c', '/Fotest.obj', '/FIstdio.h', '/Ycstdio.h',
-                        os.path.join('test', 'hello.c')],
+                        '/Brepro', os.path.join('test', 'hello.c')],
                        msg='cl_create_pch')
     shutil.move('test.obj', 'create_pch.obj')
     self.AssertNotEmptyFile('stdio.pch', msg='cl_create_pch_exist')
     self.AssertSuccess([self.gomacc, self.local_cl,
                         '/c', '/Fotest.obj', '/FIstdio.h', '/Yustdio.h',
-                        os.path.join('test', 'hello.c')],
+                        '/Brepro', os.path.join('test', 'hello.c')],
                        msg='cl_use_pch')
     shutil.move('test.obj', 'use_pch.obj')
     # TODO: investigate pch mismatch.
@@ -302,9 +302,9 @@ class SimpleTryTest(unittest.TestCase):
     self.AssertNoGomaccInfo()
 
   def testClInPathShouldCompile(self):
-    self.AssertSuccess([self.gomacc, 'cl', '/c', '/Fotest.obj',
+    self.AssertSuccess([self.gomacc, 'clang-cl', '/c', '/Fotest.obj',
                         os.path.join('test', 'hello.c')],
-                       msg='cl.exe in path env. compile')
+                       msg='clang-cl.exe in path env. compile')
     self.AssertNotEmptyFile('test.obj', msg='cl_test_obj')
     self.AssertNoGomaccInfo()
 
@@ -438,24 +438,23 @@ class CompilerProxyManager(object):
       shutil.rmtree(self._tmpdir)
 
 
-def _FindClExe():
-  """Returns cl.exe absolute path if it is found from PATH and others.
+def _SetupVSEnv():
+  """Setup Environment for Visual Studio SDK.
 
-  Side effect:
-  If cl.exe in depot_tools is used, necessary environment variables (
-  INCLUDE, LIB, PATH) are automatically set.
+  If cl.exe found in PATH, we assume Visual Studio is installed and
+  available, and won't do anything.
 
-  Returns:
-    an absolute path name of cl.exe.
+  Otherwise, Visual Studio in depot_tools is used. In this case, necessary
+  environment variables (INCLUDE, LIB, PATH) are automatically set.
 
   Raises:
-    Error: if it cannot find cl.exe or cannot set proper env for cl.exe.
+    Error: if it cannot find cl.exe and cannot set proper env for cl.exe.
   """
   try:
     where_cl = subprocess.check_output(['where', 'cl'])
     local_cl = where_cl.split('\n')[0].strip()
     if os.path.exists(local_cl):
-      return local_cl
+      return
   except subprocess.CalledProcessError:
     print 'Cannot find cl.exe in PATH.'
 
@@ -481,29 +480,24 @@ def _FindClExe():
       print 'sdk_path=%s' % sdk_path
   if not vs_path or not sdk_path:
     raise Error('Do not know proper vs_path or sdk_path.')
+  # Since clang-cl.exe generates x64 binary by default, we should use
+  # x64 configs.
   out = subprocess.check_output([os.path.join(sdk_path, 'bin/setenv.cmd'),
-                                 '&&', 'set'])
+                                 '/x64', '&&', 'set'])
   for line in out.splitlines():
     key, value = line.split('=')
     if key.upper() in ('INCLUDE', 'LIB', 'PATH'):
-      if key.upper() == 'PATH':
-        # PATH for api-ms-win-*.dll
-        value += ';' + os.path.join(vs_path, 'win_sdk', 'bin', 'x64')
       os.environ[key] = value
       print 'os.environ[%s] = "%s"' % (key, os.environ[key])
 
-  # For VS2015 or before
-  clpath = os.path.join(vs_path, 'VC', 'bin', 'cl.exe')
-  if os.path.exists(clpath):
-    return clpath
 
-  # For VS2017 or later
-  vc_bin_dir = glob.glob(os.path.join(
-    vs_path, 'VC', 'Tools', 'MSVC', '*', 'bin', 'HostX64'))[0]
-
-  # PATH for mspdb140.dll, etc.
-  os.environ['PATH'] += ';' + os.path.join(vc_bin_dir, 'x64')
-  return os.path.join(vc_bin_dir, 'x86', 'cl.exe')
+def _FindClangCl():
+  """Returns path to clang-cl.exe or None."""
+  clangcl_path = os.path.join(_SCRIPT_DIR, '..', 'third_party', 'llvm-build',
+                              'Release+Asserts', 'bin', 'clang-cl.exe')
+  if subprocess.call([clangcl_path, "-v"]) == 0:
+    return clangcl_path
+  return None
 
 
 def ExecuteTests(goma_dir):
@@ -518,8 +512,11 @@ def ExecuteTests(goma_dir):
     0x02: there is failures.
     0x04: command not found.
   """
-  # set cl.exe and gomacc.exe locations.
-  local_cl = _FindClExe()
+  _SetupVSEnv()
+  local_cl = _FindClangCl()
+  assert local_cl
+  os.environ['PATH'] = '%s;%s' % (os.environ['PATH'], os.path.dirname(local_cl))
+
   gomacc = os.path.join(goma_dir, 'gomacc.exe')
   print 'LOCAL_CL=%s' % local_cl
   print 'GOMACC=%s' % gomacc

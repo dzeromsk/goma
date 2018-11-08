@@ -18,6 +18,8 @@ class JavacCompilerInfoBuilder : public CompilerInfoBuilder {
  public:
   ~JavacCompilerInfoBuilder() override = default;
 
+  void SetLanguageExtension(CompilerInfoData* data) const override;
+
   void SetTypeSpecificCompilerInfo(
       const CompilerFlags& flags,
       const string& local_compiler_path,
@@ -38,6 +40,8 @@ class JavacCompilerInfoBuilder : public CompilerInfoBuilder {
 class JavaCompilerInfoBuilder : public CompilerInfoBuilder {
  public:
   ~JavaCompilerInfoBuilder() override = default;
+
+  void SetLanguageExtension(CompilerInfoData* data) const override;
 
   void SetTypeSpecificCompilerInfo(
       const CompilerFlags& flags,

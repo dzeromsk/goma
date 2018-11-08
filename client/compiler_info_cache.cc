@@ -545,6 +545,10 @@ bool CompilerInfoCache::UnmarshalUnlocked(const CompilerInfoDataTable& table) {
 }
 
 bool CompilerInfoCache::Save() {
+  if (!cache_file_.Enabled()) {
+    return true;
+  }
+
   LOG(INFO) << "saving to " << cache_file_.filename();
 
   CompilerInfoDataTable table;

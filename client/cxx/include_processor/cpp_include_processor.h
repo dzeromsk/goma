@@ -22,6 +22,7 @@ using std::string;
 namespace devtools_goma {
 
 class Content;
+class GCCFlags;
 
 class CppIncludeProcessor {
  public:
@@ -51,6 +52,11 @@ class CppIncludeProcessor {
       const CompilerFlags& compiler_flags,
       IncludeFileFinder* include_file_finder,
       std::set<string>* include_files);
+
+  bool AddClangModulesFiles(const GCCFlags& flags,
+                            const string& current_directory,
+                            std::set<string>* include_files,
+                            FileStatCache* file_stat_cache) const;
 
   CppParser cpp_parser_;
 

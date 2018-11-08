@@ -6,7 +6,6 @@ syntax = "proto2";
 
 package devtools_goma;
 
-
 // Statistics of all compile requests (including compiled locally).
 // NEXT ID TO USE: 9
 message RequestStats {

@@ -166,7 +166,13 @@ class CompilerFlags {
   // e.g. ["gcc", "-c", "foo.cc"] --> ["foo.cc"].
   // If they don't exist, the compile will fail locally (a compile request won't
   // be sent to the goma server.)
+  //
+  // Implementation Note: In C/C++ case, the current implementation assumes
+  // input_filenames_ are all C/C++ sources. If there is a mondatory file
+  // but non C/C++ source (e.g. -fmodule-file=<file>), it is not included here
+  // but passed with another variable.
   std::vector<string> input_filenames_;
+
   // The list of optional input files.
   // If it's known a file which is not in command line can also be used,
   // add it to optional input files.

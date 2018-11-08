@@ -81,13 +81,15 @@ def CheckGNGenChecked(input_api, output_api):
 
 def CheckChangeOnUpload(input_api, output_api):
   def source_file_filter(x):
-    chromium_files = (
+    third_party_files = (
         # todo missed owner
         'build/config/mac/sdk_info.py',
         # longer line
         'build/config/mac/mac_sdk.gni',
+        # longer line from https://pki.goog/roots.pem
+        'client/certs/roots.pem',
     )
-    return x.LocalPath() not in chromium_files
+    return x.LocalPath() not in third_party_files
   results = []
   results += input_api.canned_checks.CheckChangeHasDescription(
       input_api, output_api)

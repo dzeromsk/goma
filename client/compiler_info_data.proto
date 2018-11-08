@@ -17,6 +17,9 @@ message CompilerInfoData {
     CLANG_RESOURCE = 1;
     // Files to represents GCC installation in clang.
     CLANG_GCC_INSTALLATION_MARKER = 2;
+    // Compiler binaries, shared objects, linker, interpreter, etc.
+    // to be used in compile.
+    EXECUTABLE_BINARY = 3;
   }
 
   // FileId of the compiler or subprogram.

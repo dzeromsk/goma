@@ -7,7 +7,7 @@ roots = "roots"
 if (os == "linux") {
   genc = "//client/genc.py"
 
-  action("gen_certs") {
+  action("gen_roots_certs") {
     script = genc
     sources = [
       "$roots.pem",
@@ -24,6 +24,23 @@ if (os == "linux") {
     ]
   }
 
+  action("gen_dst_certs") {
+    script = genc
+    sources = [
+      "DST_Root_CA_X3.pem",
+    ]
+    outputs = [
+      "$target_gen_dir/DST_Root_CA_X3.c",
+      "$target_gen_dir/DST_Root_CA_X3.h",
+    ]
+    args = [
+      "--prefix=certs_",
+      "--out-dir",
+      rebase_path("$target_gen_dir"),
+      rebase_path("DST_Root_CA_X3.pem"),
+    ]
+  }
+
   config("certs_config") {
     include_dirs = [ "$target_gen_dir" ]
   }
@@ -31,9 +48,12 @@ if (os == "linux") {
     sources = [
       "$target_gen_dir/$roots.c",
       "$target_gen_dir/$roots.h",
+      "$target_gen_dir/DST_Root_CA_X3.c",
+      "$target_gen_dir/DST_Root_CA_X3.h",
     ]
     deps = [
-      ":gen_certs",
+      ":gen_dst_certs",
+      ":gen_roots_certs",
     ]
     public_configs = [ ":certs_config" ]
   }
@@ -49,6 +69,7 @@ if (os == "win") {
   source_set("certs_resource") {
     sources = [
       "$roots.pem",
+      "DST_Root_CA_X3.pem",
       "certs.rc",
       "certs_resource.h",
     ]

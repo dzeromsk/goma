@@ -1,0 +1,106 @@
+static_library("modulemap_processor_lib") {
+  sources = [
+    "processor.cc",
+    "processor.h",
+  ]
+
+  public_deps = [
+    ":modulemap_parser_lib",
+    "//third_party/abseil",
+  ]
+
+  deps = [
+    "//client:content_lib",
+    "//lib",
+  ]
+}
+
+static_library("modulemap_parser_lib") {
+  sources = [
+    "parser.cc",
+    "parser.h",
+    "type.cc",
+    "type.h",
+  ]
+
+  public_deps = [
+    ":modulemap_lexer_lib",
+  ]
+}
+
+static_library("modulemap_lexer_lib") {
+  sources = [
+    "lexer.cc",
+    "lexer.h",
+    "token.cc",
+    "token.h",
+  ]
+
+  public_deps = [
+    "//client:content_lib",
+    "//third_party:glog",
+    "//third_party/abseil",
+  ]
+}
+
+executable("modulemap_lexer") {
+  sources = [
+    "lexer_main.cc",
+  ]
+
+  deps = [
+    ":modulemap_lexer_lib",
+    "//build/config:exe_and_shlib_deps",
+  ]
+}
+
+executable("modulemap_parser") {
+  sources = [
+    "parser_main.cc",
+  ]
+
+  deps = [
+    ":modulemap_lexer_lib",
+    ":modulemap_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+  ]
+}
+
+executable("modulemap_token_unittest") {
+  testonly = true
+  sources = [
+    "token_unittest.cc",
+  ]
+
+  deps = [
+    ":modulemap_lexer_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("modulemap_lexer_unittest") {
+  testonly = true
+  sources = [
+    "lexer_unittest.cc",
+  ]
+
+  deps = [
+    ":modulemap_lexer_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("modulemap_parser_unittest") {
+  testonly = true
+  sources = [
+    "parser_unittest.cc",
+  ]
+
+  deps = [
+    ":modulemap_parser_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:goma_test_lib",
+  ]
+}

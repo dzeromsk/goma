@@ -47,6 +47,8 @@ class CompilerInfoBuilder {
                                const std::vector<string>& compiler_info_envs,
                                CompilerInfoData* data) const;
 
+  virtual void SetLanguageExtension(CompilerInfoData* data) const = 0;
+
   virtual void SetTypeSpecificCompilerInfo(
       const CompilerFlags& flags,
       const string& local_compiler_path,

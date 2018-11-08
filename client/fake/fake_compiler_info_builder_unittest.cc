@@ -81,12 +81,15 @@ TEST_F(FakeCompilerInfoBuilderTest, Failure) {
 
   FakeFlags flags(args, cwd);
 
-  // compiler won't exist, so CompilerInfoBuilder should fail.
   std::unique_ptr<CompilerInfoData> data =
       FakeCompilerInfoBuilder().FillFromCompilerOutputs(
           flags, local_compiler_path, compiler_info_envs);
   ASSERT_NE(nullptr, data.get());
-  EXPECT_FALSE(data->has_fake());
+  // Even if compiler doesn't exist, CompilerInfo should have fake.
+  // Otherwise, CompilerInfoState::MakeCompilerInfo would fail.
+  EXPECT_TRUE(data->has_fake());
+  // CompilerInfo should recognize lack of the compiler.
+  EXPECT_FALSE(data->found());
 }
 
 }  // namespace devtools_goma

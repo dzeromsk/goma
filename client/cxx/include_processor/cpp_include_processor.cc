@@ -31,6 +31,7 @@
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "autolock_timer.h"
+#include "clang_modules/modulemap/processor.h"
 #include "clang_tidy_flags.h"
 #include "compiler_flags.h"
 #include "compiler_info.h"
@@ -623,7 +624,7 @@ bool CppIncludeProcessor::GetIncludeFiles(const string& filename,
     // From GCC 4.8, stdc-predef.h is automatically included without
     // -ffreestanding. Also, -fno-hosted is equivalent to -ffreestanding.
     // See also: https://gcc.gnu.org/gcc-4.8/porting_to.html
-    if (compiler_info.name().find("clang") == string::npos) {
+    if (!absl::StrContains(compiler_info.name(), "clang")) {
       // Note: this requires that the compiler macros were extracted with
       // -ffreestanding, otherwise stdc-predef.h's header guard will be
       // defined and this will be a no-op.
@@ -676,6 +677,17 @@ bool CppIncludeProcessor::GetIncludeFiles(const string& filename,
       return false;
     }
   }
+
+  if (compiler_flags.type() == CompilerFlagType::Gcc) {
+    const GCCFlags& flags = static_cast<const GCCFlags&>(compiler_flags);
+    if (flags.has_fmodules()) {
+      if (!AddClangModulesFiles(flags, current_directory, include_files,
+                                file_stat_cache)) {
+        return false;
+      }
+    }
+  }
+
   return true;
 }
 
@@ -745,6 +757,79 @@ CppIncludeProcessor::CalculateRootIncludesWithIncludeDirIndex(
   }
 
   return result;
+}
+
+bool CppIncludeProcessor::AddClangModulesFiles(
+    const GCCFlags& flags,
+    const string& current_directory,
+    std::set<string>* include_files,
+    FileStatCache* file_stat_cache) const {
+  // TODO: experiment support of clang modules.
+  // In this implementation, we don't read the content of module file.
+  // We just add it as an input.
+  // We assume -fmodules does not affect a list of include files.
+  // This will be 99% fine, but we might see problems if a user
+  // totally depend on clang modules behavior.
+
+  DCHECK(flags.has_fmodules());
+
+  // module-file (not module-map-file).
+  if (!flags.clang_module_file().second.empty()) {
+    string abs_path = file::JoinPathRespectAbsolute(
+        current_directory, flags.clang_module_file().second);
+    FileStat fs = file_stat_cache->Get(abs_path);
+    if (!fs.IsValid()) {
+      LOG(WARNING) << "module file not found: " << abs_path;
+      return false;
+    }
+    if (fs.is_directory) {
+      LOG(WARNING) << "directory is specified to module file: " << abs_path;
+      return false;
+    }
+    include_files->insert(flags.clang_module_file().second);
+  }
+
+  // module-map-file
+  modulemap::Processor modulemap_processor(current_directory);
+  if (!flags.clang_module_map_file().empty()) {
+    if (!modulemap_processor.AddModuleMapFile(flags.clang_module_map_file())) {
+      LOG(WARNING) << "failed to add a module map: "
+                   << flags.clang_module_map_file();
+      return false;
+    }
+  }
+
+  // module.modulemap is parsed only if flags.has_fimplicit_module_maps() is
+  // true.
+  if (flags.has_fimplicit_module_maps()) {
+    std::vector<string> dirs;
+    for (const auto& file : *include_files) {
+      dirs.emplace_back(file::Dirname(file));
+    }
+    std::sort(dirs.begin(), dirs.end());
+    dirs.erase(std::unique(dirs.begin(), dirs.end()), dirs.end());
+    for (const auto& d : dirs) {
+      // Check both module.modulemap and module.map. The latter is an older
+      // form.
+      for (const auto& name : {"module.modulemap", "module.map"}) {
+        string rel_path = file::JoinPath(d, name);
+        string abs_path =
+            file::JoinPathRespectAbsolute(current_directory, rel_path);
+        FileStat fs = file_stat_cache->Get(abs_path);
+        if (fs.IsValid() && !fs.is_directory) {
+          if (!modulemap_processor.AddModuleMapFile(rel_path)) {
+            return false;
+          }
+        }
+      }
+    }
+  }
+
+  // Append collected include files.
+  include_files->insert(modulemap_processor.collected_include_files().begin(),
+                        modulemap_processor.collected_include_files().end());
+
+  return true;
 }
 
 int CppIncludeProcessor::total_files() const {

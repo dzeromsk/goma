@@ -117,6 +117,7 @@ static_library("cpp_include_processor_lib") {
     "//client:content_lib",
     "//client:file_stat_cache_lib",
     "//client:ioutil_lib",
+    "//client/clang_modules/modulemap:modulemap_processor_lib",
     "//lib:gcc_specific",
     "//lib:vc_specific",
   ]
@@ -143,6 +144,19 @@ static_library("include_cache_lib") {
   ]
 
   public_deps = [
+    "//third_party/abseil",
+  ]
+}
+
+static_library("cpp_include_processor_unittest_helper_lib") {
+  testonly = true
+  sources = [
+    "cpp_include_processor_unittest_helper.cc",
+    "cpp_include_processor_unittest_helper.h",
+  ]
+  deps = [
+    "//client:goma_test_lib",
+    "//third_party:glog",
     "//third_party/abseil",
   ]
 }
@@ -373,6 +387,50 @@ executable("cpp_include_processor_unittest") {
     "//client/cxx:cxx_compiler_info_builder_lib",
     "//lib:compiler_flag_type_specific",
   ]
+}
+
+if (os == "win") {
+  executable("cpp_include_processor_win_unittest") {
+    testonly = true
+    sources = [
+      "cpp_include_processor_win_unittest.cc",
+    ]
+    deps = [
+      ":cpp_include_processor_lib",
+      ":cpp_include_processor_unittest_helper_lib",
+      ":include_cache_lib",
+      "//build/config:exe_and_shlib_deps",
+      "//client:compiler_info_lib",
+      "//client:compiler_proxy_lib",
+      "//client:file_stat_cache_lib",
+      "//client:goma_test_lib",
+      "//client:ioutil_lib",
+      "//client:subprocess_lib",
+      "//client/cxx:cxx_compiler_info_builder_lib",
+      "//lib:compiler_flag_type_specific",
+    ]
+  }
+} else {
+  executable("cpp_include_processor_posix_unittest") {
+    testonly = true
+    sources = [
+      "cpp_include_processor_posix_unittest.cc",
+    ]
+    deps = [
+      ":cpp_include_processor_lib",
+      ":cpp_include_processor_unittest_helper_lib",
+      ":include_cache_lib",
+      "//build/config:exe_and_shlib_deps",
+      "//client:compiler_info_lib",
+      "//client:compiler_proxy_lib",
+      "//client:file_stat_cache_lib",
+      "//client:goma_test_lib",
+      "//client:ioutil_lib",
+      "//client:subprocess_lib",
+      "//client/cxx:cxx_compiler_info_builder_lib",
+      "//lib:compiler_flag_type_specific",
+    ]
+  }
 }
 
 executable("include_cache_unittest") {

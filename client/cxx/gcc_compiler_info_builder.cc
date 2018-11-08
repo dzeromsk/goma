@@ -191,9 +191,6 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     const string& abs_local_compiler_path,
     const std::vector<string>& compiler_info_envs,
     CompilerInfoData* data) const {
-  // Ensure cxx exists.
-  (void)data->mutable_cxx();
-
   // Some compilers uses wrapper script to set build target, and in such a
   // situation, build target could be different.
   // To make goma backend use proper wrapper script, or set proper -target,
@@ -305,6 +302,22 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
       data->mutable_cxx()->add_hidden_predefined_macros("__has_include_next__");
     }
   }
+
+  // Experimental. Add compiler resource.
+  // TODO: We also need *.so, too.
+  // For chromium clang, we need *.so if sanitizer is used.
+  // If sanitizer is not used, clang works in normal case.
+  // TODO: Support the case local compiler and real compiler are
+  // different.
+  CompilerInfoData::ResourceInfo r;
+  if (!CompilerInfoBuilder::ResourceInfoFromPath(
+          flags.cwd(), local_compiler_path, CompilerInfoData::EXECUTABLE_BINARY,
+          &r)) {
+    AddErrorMessage("failed to get resource info for " + local_compiler_path,
+                    data);
+    return;
+  }
+  *data->add_resource() = std::move(r);
 }
 
 void GCCCompilerInfoBuilder::SetCompilerPath(

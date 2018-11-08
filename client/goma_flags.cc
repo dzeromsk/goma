@@ -149,7 +149,6 @@ GOMA_DEFINE_string(GOMACC_LOCK_GLOBALNAME,
 GOMA_DEFINE_int32(GOMACC_COMPILER_PROXY_RESTART_DELAY, 60,
                   "How long gomacc should wait before retrying to start the "
                   "compiler proxy.  This must be specified in sec.");
-GOMA_DEFINE_bool(EXTERNAL_USER, false, "Send as an external user.");
 GOMA_DEFINE_bool(DISABLED, false,
                  "Execute any commands locally without goma.  No throttling.  "
                  "Using with large -j option of ninja or make may be harmful.");
@@ -598,6 +597,10 @@ GOMA_DEFINE_int32(MAX_COMPILER_DISABLED_TASKS, -1,
                   "setup failure caused by compiler disabled gets larger than "
                   "this value.  This feature is disabled if negative value "
                   "is set.");
+
+GOMA_DEFINE_bool(SEND_COMPILER_BINARY_AS_INPUT,
+                 false,
+                 "EXPERIMENTAL. Send a compiler binary as an input.");
 
 #if HAVE_HEAP_PROFILER
 GOMA_DEFINE_string(COMPILER_PROXY_HEAP_PROFILE_FILE, "goma_compiler_proxy_heapz",

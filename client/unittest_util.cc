@@ -139,6 +139,17 @@ string GetTestFilePath(const string& test_name) {
 }
 
 string GetClangPath() {
+  // If GOMATEST_CLANG_PATH is specified, we prefer it.
+  char* clang = getenv("GOMATEST_CLANG_PATH");
+  if (clang != nullptr) {
+    if (access(clang, X_OK) < 0) {
+      LOG(ERROR)
+          << "GOMATEST_CLANG_PATH is specified, but it's not executable.";
+      return string();
+    }
+    return clang;
+  }
+
 #ifdef _WIN32
   const string clang_path = "clang-cl.exe";
 #else
@@ -147,8 +158,11 @@ string GetClangPath() {
   const string fullpath =
       file::JoinPath(GetMyDirectory(), "..", "..", "third_party", "llvm-build",
                      "Release+Asserts", "bin", clang_path);
-  CHECK_EQ(access(fullpath.c_str(), R_OK), 0) << "Cannot read test file:"
-                                              << " filename=" << fullpath;
+  if (access(fullpath.c_str(), X_OK) < 0) {
+    LOG(ERROR) << "clang is not an executable: clang=" << fullpath;
+    return string();
+  }
+
   return fullpath;
 }
 

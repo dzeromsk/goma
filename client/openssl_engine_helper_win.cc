@@ -16,9 +16,9 @@ using std::string;
 
 namespace {
 
-bool LoadTrustedRootCertsInResource(string* certs) {
+bool LoadTrustedRootCertsInResource(string* certs, int resource_id) {
   // Since we use the current process resource, HMODULE can be nullptr.
-  HRSRC resource_info = FindResource(nullptr, MAKEINTRESOURCE(ROOT_CA_NAME),
+  HRSRC resource_info = FindResource(nullptr, MAKEINTRESOURCE(resource_id),
                                      RT_RCDATA);
   if (resource_info == nullptr) {
     LOG_SYSRESULT(GetLastError());
@@ -53,7 +53,16 @@ bool LoadTrustedRootCertsInResource(string* certs) {
 namespace devtools_goma {
 
 bool GetTrustedRootCerts(string* certs) {
-  return LoadTrustedRootCertsInResource(certs);
+  string roots;
+  if (!LoadTrustedRootCertsInResource(&roots, ROOT_CA_NAME)) {
+    return false;
+  }
+  string dst_root;
+  if (!LoadTrustedRootCertsInResource(&dst_root, DST_CA_NAME)) {
+    return false;
+  }
+  *certs = roots + dst_root;
+  return true;
 }
 
 }  // namespace devtools_goma

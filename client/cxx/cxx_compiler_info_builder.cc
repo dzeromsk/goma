@@ -187,4 +187,9 @@ bool CxxCompilerInfoBuilder::SubprogramInfoFromPath(
   return true;
 }
 
+void CxxCompilerInfoBuilder::SetLanguageExtension(
+    CompilerInfoData* data) const {
+  (void)data->mutable_cxx();
+}
+
 }  // namespace devtools_goma

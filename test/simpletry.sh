@@ -785,6 +785,9 @@ expect_success "${CXX}_expected_umask_local" \
   "[ \"$(ls -l out.o | awk '{ print $1}')\" = \"----------\" ]"
 rm -f out.o
 
+# TODO
+# write a test to send a compiler binary to the backend.
+
 curl --dump-header header.out \
   -X POST --data-binary @${test_dir}/badreq.bin \
   -H 'Content-Type: binary/x-protocol-buffer' \

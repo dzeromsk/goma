@@ -330,6 +330,7 @@ CompileService::CompileService(WorkerThreadManager* wm, int compiler_info_pool)
       enable_gch_hack_(true),
       use_relative_paths_in_argv_(false),
       send_expected_outputs_(false),
+      send_compiler_binary_as_input_(false),
       hermetic_(false),
       hermetic_fallback_(false),
       dont_kill_subprocess_(false),

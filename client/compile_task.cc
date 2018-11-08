@@ -2945,8 +2945,29 @@ void CompileTask::CopyEnvFromRequest() {
     stats_->set_username(req_->requester_info().username());
     stats_->set_nodename(service_->nodename());
   }
+  if (req_->requester_info().has_build_id()) {
+    stats_->set_build_id(req_->requester_info().build_id());
+    LOG(INFO) << trace_id_ << " build_id:" << req_->requester_info().build_id();
+  }
   req_->mutable_requester_info()->set_compiler_proxy_id(
       GenerateCompilerProxyId());
+
+  // TODO: Is here the best position to set these requester info?
+  // pathtype/dimension might be changed after compiler_proxy understand the
+  // compile request well.
+#ifdef _WIN32
+  req_->mutable_requester_info()->add_dimensions("os:win");
+  req_->mutable_requester_info()->set_path_style(RequesterInfo::WINDOWS_STYLE);
+#elif defined(__MACH__)
+  req_->mutable_requester_info()->add_dimensions("os:mac");
+  req_->mutable_requester_info()->set_path_style(RequesterInfo::POSIX_STYLE);
+#elif defined(__linux__)
+  req_->mutable_requester_info()->add_dimensions("os:linux");
+  req_->mutable_requester_info()->set_path_style(RequesterInfo::POSIX_STYLE);
+#else
+#error "unsupported platform"
+#endif
+
   stats_->set_port(rpc_->server_port());
   // TODO: Convert field to protobuf/timestamp.
   stats_->set_compiler_proxy_start_time(absl::ToTimeT(service_->start_time()));
@@ -3552,6 +3573,7 @@ static void FixCommandSpec(const CompilerInfo& compiler_info,
   if (!command_spec->has_target())
     command_spec->set_target(compiler_info.target());
   command_spec->set_binary_hash(compiler_info.request_compiler_hash());
+  command_spec->set_size(compiler_info.local_compiler_stat().size);
 
   command_spec->clear_system_include_path();
   command_spec->clear_cxx_system_include_path();
@@ -3605,10 +3627,30 @@ void CompileTask::SetExpectedOutputs() {
 void CompileTask::ModifyRequestArgs() {
   DCHECK(compiler_info_state_.get() != nullptr);
   const CompilerInfo& compiler_info = compiler_info_state_.get()->info();
+  bool found_executable_binary = false;
   for (const auto& r : compiler_info.resource()) {
+    if (r.type == CompilerInfoData::EXECUTABLE_BINARY) {
+      found_executable_binary = true;
+      continue;
+    }
     const string& path = r.name;
     req_->add_input()->set_filename(path);
     LOG(INFO) << trace_id_ << " input automatically added: " << path;
+  }
+
+  // Set toolchain information (if enabled and found)
+  if (service_->send_compiler_binary_as_input() && found_executable_binary) {
+    LOG(INFO) << trace_id_ << " input contains toolchain";
+    req_->set_toolchain_included(true);
+
+    for (const auto& r : compiler_info.resource()) {
+      if (r.type != CompilerInfoData::EXECUTABLE_BINARY) {
+        continue;
+      }
+      const string& path = r.name;
+      req_->add_input()->set_filename(path);
+      LOG(INFO) << trace_id_ << " input automatically added: " << path;
+    }
   }
 
   bool modified_args = false;
@@ -3688,6 +3730,7 @@ void CompileTask::MayFixSubprogramSpec(
     SubprogramSpec* subprog_spec = subprogram_specs->Add();
     subprog_spec->set_path(info.name);
     subprog_spec->set_binary_hash(info.hash);
+    subprog_spec->set_size(info.file_stat.size);
   }
 }
 
@@ -4947,8 +4990,8 @@ void CompileTask::AddErrorToResponse(
     else
       LOG(WARNING) << trace_id_ << " " << error_message;
     std::ostringstream msg;
-    msg << "compiler_proxy:";
-    msg << handler_timer_.GetDuration();
+    msg << "compiler_proxy ";
+    msg << "[" << handler_timer_.GetDuration() << "]: ";
     msg << error_message;
     if (dest == TO_USER) {
       DCHECK(set_error) << trace_id_

@@ -2,3 +2,4 @@
 
 #include "certs_resource.h"
 ROOT_CA_NAME RCDATA "roots.pem"
+DST_CA_NAME RCDATA "DST_Root_CA_X3.pem"

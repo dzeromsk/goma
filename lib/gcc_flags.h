@@ -66,6 +66,13 @@ class GCCFlags : public CxxFlags {
   bool is_precompiling_header() const { return is_precompiling_header_; }
   bool is_stdin_input() const { return is_stdin_input_; }
 
+  bool has_fmodules() const { return has_fmodules_; }
+  bool has_fimplicit_module_maps() const { return has_fimplicit_module_maps_; }
+  const string& clang_module_map_file() const { return clang_module_map_file_; }
+  const std::pair<string, string>& clang_module_file() const {
+    return clang_module_file_;
+  }
+
   CompilerFlagType type() const override { return CompilerFlagType::Gcc; }
 
   bool IsClientImportantEnv(const char* env) const override;
@@ -119,6 +126,16 @@ class GCCFlags : public CxxFlags {
   bool has_fplugin_;
   bool is_precompiling_header_;
   bool is_stdin_input_;
+
+  // clang-modules related variables
+  bool has_fmodules_;
+  bool has_fimplicit_module_maps_;
+  // explicit module-map-file (specified by -fmodule-map-file)
+  string clang_module_map_file_;
+  // explicit module-file (specified by -fmodule-file=[<name>=]<file>)
+  // .first is <name>, .second is <file>
+  // If <name> is omitted, .first is empty.
+  std::pair<string, string> clang_module_file_;
 };
 
 // Get the version of gcc/clang to fill CommandSpec.

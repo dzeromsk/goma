@@ -434,6 +434,10 @@ int main(int argc, char* argv[], const char* envp[]) {
   devtools_goma::FlushLogFiles();
   devtools_goma::SubProcessControllerClient::Get()->Quit();
   devtools_goma::LocalOutputCache::Quit();
+
+  // TODO: Remove this when b/118804052 is fixed.
+  devtools_goma::CompilerInfoCache::instance()->Save();
+
   server.Wait();
   handler->Wait();
   devtools_goma::CompilerInfoCache::Quit();

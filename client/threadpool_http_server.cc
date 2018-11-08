@@ -578,15 +578,16 @@ void ThreadpoolHttpServer::RequestFromSocket::DoRead() {
       << " content_length=" << request_content_length_;
   ssize_t read_size = socket_descriptor_->Read(buf, buf_size);
   if (read_size <= 0) {  // EOF or error
+    // EOF here means a request is finished unexpectedly.
+    // So, we can close the request like an error.
     if (socket_descriptor_->NeedRetry())
       return;
     socket_descriptor_->StopRead();
     read_finished_ = true;
     wm_->RunClosureInThread(
-        FROM_HERE,
-        thread_id_,
-        NewCallback(
-            this, &ThreadpoolHttpServer::RequestFromSocket::ReadFinished),
+        FROM_HERE, thread_id_,
+        NewCallback(this,
+                    &ThreadpoolHttpServer::RequestFromSocket::DoCheckClosed),
         WorkerThread::PRIORITY_IMMEDIATE);
     return;
   }
@@ -640,11 +641,9 @@ void ThreadpoolHttpServer::RequestFromSocket::DoWrite() {
       return;
     socket_descriptor_->StopWrite();
     wm_->RunClosureInThread(
-        FROM_HERE,
-        thread_id_,
-        NewCallback(
-            this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
-        WorkerThread::PRIORITY_HIGH);
+        FROM_HERE, thread_id_,
+        NewCallback(this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
+        WorkerThread::PRIORITY_IMMEDIATE);
     return;
   }
   response_written_ += write_size;
@@ -669,11 +668,9 @@ void ThreadpoolHttpServer::RequestFromSocket::DoTimeout() {
   socket_descriptor_->StopWrite();
   timed_out_ = true;
   wm_->RunClosureInThread(
-      FROM_HERE,
-      thread_id_,
-      NewCallback(
-          this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
-      WorkerThread::PRIORITY_HIGH);
+      FROM_HERE, thread_id_,
+      NewCallback(this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
+      WorkerThread::PRIORITY_IMMEDIATE);
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::DoCheckClosed() {
@@ -703,6 +700,11 @@ void ThreadpoolHttpServer::RequestFromSocket::DoClosed() {
         NewCallback(static_cast<Closure*>(callback), &Closure::Run),
         WorkerThread::PRIORITY_HIGH);
   }
+
+  wm_->RunClosureInThread(
+      FROM_HERE, thread_id_,
+      NewCallback(this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
+      WorkerThread::PRIORITY_IMMEDIATE);
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::ReadFinished() {
@@ -743,11 +745,9 @@ void ThreadpoolHttpServer::RequestFromSocket::DoReadEOF() {
   }
   socket_descriptor_->StopRead();
   wm_->RunClosureInThread(
-      FROM_HERE,
-      thread_id_,
-      NewCallback(
-          this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
-      WorkerThread::PRIORITY_HIGH);
+      FROM_HERE, thread_id_,
+      NewCallback(this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
+      WorkerThread::PRIORITY_IMMEDIATE);
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::Finish() {
@@ -1096,8 +1096,8 @@ void ThreadpoolHttpServer::AddAccept(SocketType socket_type) {
 void ThreadpoolHttpServer::RemoveAccept(SocketType socket_type) {
   AUTOLOCK(lock, &mu_);
   --num_sockets_[socket_type];
-  // Notify some request waiting in AddAccept().
-  cond_.Signal();
+  // Notify some request waiting in AddAccept() or Wait() for shutdown.
+  cond_.Broadcast();
 }
 
 void ThreadpoolHttpServer::WaitPortReady() {

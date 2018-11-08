@@ -82,9 +82,6 @@ void VCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     const string& abs_local_compiler_path,
     const std::vector<string>& compiler_info_envs,
     CompilerInfoData* data) const {
-  // Ensure cxx exists.
-  (void)data->mutable_cxx();
-
   const VCFlags& vc_flags = static_cast<const VCFlags&>(flags);
   if (VCFlags::IsClangClCommand(local_compiler_path)) {
     const VCFlags& vc_flags = static_cast<const VCFlags&>(flags);

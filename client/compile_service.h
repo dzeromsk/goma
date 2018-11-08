@@ -286,6 +286,13 @@ class CompileService {
     return send_expected_outputs_;
   }
 
+  void SetSendCompilerBinaryAsInput(bool flag) {
+    send_compiler_binary_as_input_ = flag;
+  }
+  bool send_compiler_binary_as_input() const {
+    return send_compiler_binary_as_input_;
+  }
+
   void SetCommandCheckLevel(const string& level) {
     command_check_level_ = level;
   }
@@ -571,6 +578,7 @@ class CompileService {
   bool use_relative_paths_in_argv_;
   bool send_expected_outputs_;
   string command_check_level_;
+  bool send_compiler_binary_as_input_;
 
   // Set hermetic_mode in ExecReq, that is, don't choose different compiler
   // than local one.

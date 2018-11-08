@@ -36,7 +36,11 @@ class TmpdirUtil {
 
 string GetTestFilePath(const string& test_name);
 
-// GetClangPath returns path to clang under third_party.
+// Takes clang path.
+// If GOMATEST_CLANG_PATH is specified, it's preferred.
+// Otherwise, we find clang from third_party.
+//
+// If failed to find clang, empty string is returned.
 string GetClangPath();
 
 }  // namespace devtools_goma

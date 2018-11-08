@@ -58,7 +58,9 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
       has_wrapper_(false),
       has_fplugin_(false),
       is_precompiling_header_(false),
-      is_stdin_input_(false) {
+      is_stdin_input_(false),
+      has_fmodules_(false),
+      has_fimplicit_module_maps_(false) {
   if (!CompilerFlags::ExpandPosixArgs(cwd, args, &expanded_args_,
                                       &optional_input_filenames_)) {
     Fail("Unable to expand args", args);
@@ -71,6 +73,9 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
   bool fno_hosted = false;
   bool fsyntax_only = false;
   bool print_file_name = false;
+
+  bool fmodules = false;
+  bool fno_implicit_module_maps = false;
 
   FlagParser parser;
   DefineFlags(&parser);
@@ -173,6 +178,17 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
   parser.AddFlag("Xclang")->SetOutput(&compiler_info_flags_);
   parser.AddFlag("I")->SetValueOutputWithCallback(nullptr,
                                                   &non_system_include_dirs_);
+
+  // TODO: -fmodules is clang only.
+  // See https://clang.llvm.org/docs/Modules.html
+  // TODO: Support -fbuiltin-module-maps?
+  parser.AddBoolFlag("fmodules")->SetSeenOutput(&fmodules);
+  parser.AddBoolFlag("fno-implicit-module-maps")
+      ->SetSeenOutput(&fno_implicit_module_maps);
+  FlagParser::Flag* flag_fmodule_file = parser.AddPrefixFlag("fmodule-file=");
+  FlagParser::Flag* flag_fmodule_map_file =
+      parser.AddPrefixFlag("fmodule-map-file=");
+
   // We should allow both -imacro and --imacro, -include and --include.
   // See: b/10020850.
   std::vector<string> includes, imacros;
@@ -402,6 +418,15 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
     compiler_info_flags_.push_back("-fsyntax-only");
     has_fsyntax_only_ = true;
   }
+  if (fmodules) {
+    compiler_info_flags_.push_back("-fmodules");
+    has_fmodules_ = true;
+    if (!fno_implicit_module_maps) {
+      // -fmodules implies -fimplicit-module-maps
+      // unless -fno-implicit-module-maps.
+      has_fimplicit_module_maps_ = true;
+    }
+  }
 
   if (!isysroot_.empty()) {
     compiler_info_flags_.push_back("-isysroot");
@@ -537,6 +562,32 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
         optional_input_filenames_.push_back(
             file::JoinPathRespectAbsolute(profile_input_dir, use_path));
       }
+    }
+  }
+
+  if (fmodules) {
+    // -fmodule-file=[<name>=]<file>
+    // According to my experiment, if several -fmodule-file are specified,
+    // only the first one is valid.
+    // -fmodule-file works only if -fmodules is specified.
+    //
+    // See https://clang.llvm.org/docs/Modules.html
+    if (flag_fmodule_file->seen() && !flag_fmodule_file->values().empty()) {
+      absl::string_view path = flag_fmodule_file->value(0);
+      absl::string_view::size_type pos = path.find('=');
+      if (pos != absl::string_view::npos) {
+        clang_module_file_.first = string(path.substr(0, pos));
+        clang_module_file_.second = string(path.substr(pos + 1));
+      } else {
+        clang_module_file_.first = "";
+        clang_module_file_.second = string(path);
+      }
+    }
+
+    // -fmodule-map-file=<file>
+    if (flag_fmodule_map_file->seen() &&
+        !flag_fmodule_map_file->values().empty()) {
+      clang_module_map_file_ = flag_fmodule_map_file->values().front();
     }
   }
 

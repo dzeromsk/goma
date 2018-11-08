@@ -427,7 +427,6 @@ Input {
   hash_key: "7c893b5861ad2cc08fbf8aa9a23e294447694f01c94fa3be5b643ba9d3d65adc"
 }
 hermetic_mode: true
-experimental_is_external_user: false
 expected_output_files: "obj/base/allocator/tcmalloc/malloc_hook.o"
 expected_output_files: "obj/base/allocator/tcmalloc/malloc_hook.o.d"
 )";
@@ -505,7 +504,6 @@ Input {
   hash_key: "7c893b5861ad2cc08fbf8aa9a23e294447694f01c94fa3be5b643ba9d3d65adc"
 }
 hermetic_mode: true
-experimental_is_external_user: false
 expected_output_files: "obj/base/allocator/tcmalloc/malloc_hook.o"
 expected_output_files: "obj/base/allocator/tcmalloc/malloc_hook.o.d"
 )";

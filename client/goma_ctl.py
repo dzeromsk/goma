@@ -485,7 +485,7 @@ class GomaDriver(object):
     self._backend = backend
     self._latest_package_dir = 'latest'
     self._action_mappings = {
-        'audit': self._Audit,
+        'audit': self._CheckAudit,
         'ensure_start': self._EnsureStartCompilerProxy,
         'ensure_stop': self._EnsureStopCompilerProxy,
         'histogram': self._PrintHistogram,
@@ -495,7 +495,7 @@ class GomaDriver(object):
         'showflags': self._PrintFlags,
         'start': self._StartCompilerProxy,
         'stat': self._PrintStatistics,
-        'status': self._GetStatus,
+        'status': self._CheckStatus,
         'stop': self._ShutdownCompilerProxy,
     }
     self._version = 0
@@ -685,6 +685,12 @@ class GomaDriver(object):
     self._ShutdownCompilerProxy()
     if not self._WaitCooldown():
       self._KillStakeholders()
+
+  def _CheckStatus(self):
+    status = self._GetStatus()
+    if not status:
+      sys.exit(1)
+    return
 
   def _GetStatus(self):
     reply = self._env.ControlCompilerProxy('/healthz', need_pids=True)
@@ -1039,6 +1045,12 @@ class GomaDriver(object):
           ]})
     return reply['message']
 
+  def _CheckAudit(self):
+    """Audit files in the goma client package.  Exit failure on error."""
+    if not self._Audit():
+      sys.exit(1)
+    return
+
   def _Audit(self, update_dir=''):
     """Audit files in the goma client package.
 
@@ -1119,9 +1131,13 @@ class GomaDriver(object):
 
   def Dispatch(self, args):
     """Parse and dispatch commands."""
-    self._CreateGomaTmpDirectory()
-    self._CreateCrashDumpDirectory()
-    self._CreateCacheDirectory()
+    is_audit = args and (args[0] == 'audit')
+    if not is_audit:
+      # when audit, we don't want to run gomacc to detect temp directory,
+      # since gomacc might be binary for different platform.
+      self._CreateGomaTmpDirectory()
+      self._CreateCrashDumpDirectory()
+      self._CreateCacheDirectory()
     self._args = args
     if not args:
       self._GetStatus()

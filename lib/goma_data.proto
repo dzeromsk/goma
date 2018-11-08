@@ -47,11 +47,16 @@ message FileBlob {
 }
 
 // Goma backend selects compiler with CommandSpec.
+// NEXT ID TO USE: 14
 message CommandSpec {
   optional string name = 1;  // "gcc", "g++", "cl.exe", etc, without
                              // path, version number and architecture.
   optional string version = 2;  // "4.4.3[Ubuntu 4.4.3-4ubuntu5]"
   optional string target = 3;  // "x86_64-linux-gnu
+
+  // Binary size of the command.
+  // Necessary if toolchain is sent to the server.
+  optional int64 size = 13;
 
   // The followings will be used to request more specific version of
   // command, populated by compiler_proxy.
@@ -86,6 +91,8 @@ message SubprogramSpec {
   // or basename (in result when default subprogram is used).
   optional string path = 1;
   optional string binary_hash = 2;
+  // Binary size of the subprogram.
+  optional int64 size = 3;
 }
 
 message ExecResult {
@@ -108,6 +115,7 @@ message ExecResult {
 
 // Common RPC message
 
+// NEXT ID TO USE: 12
 message RequesterInfo {
   optional string addr = 1;  // requester's ip addr.
   optional string username = 2;  // requester's user name
@@ -142,6 +150,32 @@ message RequesterInfo {
   optional int32 retry = 7;
 
   optional string goma_revision = 8;
+
+  // Unique ID per build.
+  // Client should set unique identifier of the build in this field.
+  //
+  // Note to LUCI users: since there could be multiple compile steps for
+  //                     recipes, you cannot use buildbucket build_id here.
+  optional string build_id = 9;
+
+  // Requester's dimensions. Each dimension is a "<key>:<value>" pair.
+  //
+  // `dimensions` can define the constraint of the remote machine.
+  // e.g. "os":"linux".
+  //
+  // Inspired from swarming bot dimensions.
+  // https://cs.chromium.org/chromium/infra/luci/appengine/swarming/proto/bots.proto
+  repeated string dimensions = 10;
+
+  // Implementation Note: `WINDOWS` is defined on Win, so we have to add
+  // prefix or suffix.
+  enum PathStyle {
+    UNKNOWN_STYLE = 0;
+    POSIX_STYLE = 1;    // unix-style, slash separated.
+    WINDOWS_STYLE = 2;  // windows-style. backslash separated.
+  }
+  // Requester's path style.
+  optional PathStyle path_style = 11;
 }
 
 message RequesterEnv {
@@ -222,8 +256,11 @@ message ExecReq {
   repeated string expected_output_files = 35;
   repeated string expected_output_dirs = 36;
 
-  // EXPERIMENTAL.  Should be true if the user is external.
-  optional bool experimental_is_external_user = 99;
+  // EXPERIMENTAL.
+  // True if ExecReq contains toolchains as input.
+  optional bool toolchain_included = 37;
+
+  reserved 99;
 }
 
 message MultiExecReq {

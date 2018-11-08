@@ -266,6 +266,7 @@ class SubProcessTaskTest : public ::testing::Test {
     tmp_source_file.Close();
 
     string clang_path = GetClangPath();
+    ASSERT_TRUE(!clang_path.empty());
     string clang_name = string(file::Basename(clang_path));
     const char* const argv[] = {clang_name.c_str(), "-c",
                                 tmp_source_file.filename().c_str(), nullptr};

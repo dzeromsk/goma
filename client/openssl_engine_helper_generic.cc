@@ -4,12 +4,19 @@
 
 
 #include "openssl_engine_helper.h"
+
+#include "absl/strings/str_cat.h"
+
+#include "DST_Root_CA_X3.h"
 #include "roots.h"
 
 namespace devtools_goma {
 
 bool GetTrustedRootCerts(string* certs) {
-  certs->assign(certs_roots_pem_start, certs_roots_pem_size);
+  *certs = absl::StrCat(
+      absl::string_view(certs_roots_pem_start, certs_roots_pem_size),
+      absl::string_view(certs_DST_Root_CA_X3_pem_start,
+                        certs_DST_Root_CA_X3_pem_size));
   return true;
 }
 

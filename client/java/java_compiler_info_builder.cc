@@ -14,13 +14,17 @@
 
 namespace devtools_goma {
 
+void JavacCompilerInfoBuilder::SetLanguageExtension(
+    CompilerInfoData* data) const {
+  (void)data->mutable_javac();
+}
+
 void JavacCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     const CompilerFlags& flags,
     const string& local_compiler_path,
     const string& abs_local_compiler_path,
     const std::vector<string>& compiler_info_envs,
     CompilerInfoData* data) const {
-  (void)data->mutable_javac();
   if (!GetJavacVersion(local_compiler_path, compiler_info_envs, flags.cwd(),
                        data->mutable_version())) {
     AddErrorMessage("Failed to get java version for " + local_compiler_path,
@@ -75,14 +79,18 @@ bool JavacCompilerInfoBuilder::GetJavacVersion(
   return ret;
 }
 
+void JavaCompilerInfoBuilder::SetLanguageExtension(
+    CompilerInfoData* data) const {
+  (void)data->mutable_java();
+  LOG(ERROR) << "java is not supported";
+}
+
 void JavaCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     const CompilerFlags& flags,
     const string& local_compiler_path,
     const string& abs_local_compiler_path,
     const std::vector<string>& compiler_info_envs,
     CompilerInfoData* data) const {
-  (void)data->mutable_java();
-  LOG(ERROR) << "java is not supported";
 }
 
 }  // namespace devtools_goma

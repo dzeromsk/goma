@@ -239,6 +239,7 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
   service_.SetUseRelativePathsInArgv(FLAGS_USE_RELATIVE_PATHS_IN_ARGV);
   service_.SetSendExpectedOutputs(FLAGS_SEND_EXPECTED_OUTPUTS);
   service_.SetCommandCheckLevel(FLAGS_COMMAND_CHECK_LEVEL);
+  service_.SetSendCompilerBinaryAsInput(FLAGS_SEND_COMPILER_BINARY_AS_INPUT);
   if (FLAGS_HERMETIC == "off") {
     service_.SetHermetic(false);
   } else if (FLAGS_HERMETIC == "fallback") {

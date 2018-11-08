@@ -1,7 +1,3 @@
-*.mk
 *.pyc
+mac_files/
 win_toolchain.json
-Debug/
-Debug64/
-Release/
-Release64/

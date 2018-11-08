@@ -40,6 +40,8 @@ class CxxCompilerInfoBuilder : public CompilerInfoBuilder {
 
   static bool SubprogramInfoFromPath(const string& path,
                                      CompilerInfoData::SubprogramInfo* s);
+
+  void SetLanguageExtension(CompilerInfoData* data) const override;
 };
 
 }  // namespace devtools_goma

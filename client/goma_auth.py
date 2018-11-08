@@ -65,9 +65,15 @@ id that changes when compiler_proxy starts, sequential compile id)
 
 2. What data will be shared?
 
-Contents in source code and header files are shared among users who send
-SHA256 hash values of them.  Compile results are shared among users who have
-sent the requests that bring the same compile result.
+Contents in source code and header files are stored in Google servers and
+shared among users who send SHA256 hash values of them.  Compile results
+are shared among users who have sent the requests that bring the same
+compile result.
+
+3. How long data will be kept?
+
+Contents in source code and header files will be kept at most 153 days
+since last used.
 """
 
   yn = raw_input('Do you agree to our data usage policy? (y/n) -->')
