@@ -43,8 +43,10 @@ config("compiler") {
     if (may_make_pie) {
       cflags += [ "-fPIE" ]
     }
-    if (!is_asan) {
-      # sanitizer build with _FORTIFY_SOURCE is not supported.
+
+    # sanitizer build with _FORTIFY_SOURCE is not supported, and it requires a
+    # -O level bigger than 0.
+    if (!is_asan && !is_debug) {
       defines += [ "_FORTIFY_SOURCE=2" ]
     }
   }
