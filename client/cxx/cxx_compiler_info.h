@@ -19,7 +19,7 @@ class CxxCompilerInfo : public CompilerInfo {
 
   bool IsSystemInclude(const string& filepath) const;
 
-  bool IsCwdRelative(const string& cwd) const override;
+  bool DependsOnCwd(const string& cwd) const override;
 
   // include paths could be relative path from cwd.
   // Also, system include paths could be relative path from toolchain root

@@ -431,6 +431,15 @@ class ThreadpoolHttpServer::RequestFromSocket : public HttpServerRequest {
   // In other words, callback to Finish on the fly in worker thread manager.
   bool timed_out_;
 
+  // True if the request has already been forwarded to compile_service, and
+  // handled there.  Let me call it as inflight handle.
+  // The inflight handle will call SendReply at the end, and we must keep the
+  // object to avoid use-after-free.
+  bool has_inflight_handle_;
+
+  // True if the socket has already been closed by peer.
+  bool closed_;
+
   WorkerThread::ThreadId closed_thread_id_;
   OneshotClosure* closed_callback_;
 };
@@ -450,6 +459,8 @@ ThreadpoolHttpServer::RequestFromSocket::RequestFromSocket(
       trustedipsmanager_(trustedipsmanager),
       read_finished_(false),
       timed_out_(false),
+      has_inflight_handle_(false),
+      closed_(false),
       closed_thread_id_(0),
       closed_callback_(nullptr) {
 }
@@ -690,6 +701,7 @@ void ThreadpoolHttpServer::RequestFromSocket::DoCheckClosed() {
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::DoClosed() {
+  closed_ = true;
   socket_descriptor_->ClearReadable();
   OneshotClosure* callback = closed_callback_;
   closed_callback_ = nullptr;
@@ -701,10 +713,12 @@ void ThreadpoolHttpServer::RequestFromSocket::DoClosed() {
         WorkerThread::PRIORITY_HIGH);
   }
 
-  wm_->RunClosureInThread(
-      FROM_HERE, thread_id_,
-      NewCallback(this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
-      WorkerThread::PRIORITY_IMMEDIATE);
+  if (!has_inflight_handle_) {
+    wm_->RunClosureInThread(
+        FROM_HERE, thread_id_,
+        NewCallback(this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
+        WorkerThread::PRIORITY_IMMEDIATE);
+  }
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::ReadFinished() {
@@ -714,6 +728,7 @@ void ThreadpoolHttpServer::RequestFromSocket::ReadFinished() {
   socket_descriptor_->ClearTimeout();
 
   server_->HandleIncoming(this);
+  has_inflight_handle_ = true;
 }
 
 void ThreadpoolHttpServer::RequestFromSocket::WriteFinished() {
@@ -758,6 +773,13 @@ void ThreadpoolHttpServer::RequestFromSocket::Finish() {
 
 void ThreadpoolHttpServer::RequestFromSocket::SendReply(
     const string& response) {
+  if (closed_) {  // No need to reply response for the closed socket.
+    wm_->RunClosureInThread(
+        FROM_HERE, thread_id_,
+        NewCallback(this, &ThreadpoolHttpServer::RequestFromSocket::Finish),
+        WorkerThread::PRIORITY_IMMEDIATE);
+    return;
+  }
   response_ = response;
   stat_.handler_time = stat_.timer.GetDuration();
   stat_.resp_size = response.size();

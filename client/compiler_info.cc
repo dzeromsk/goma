@@ -19,15 +19,17 @@ namespace devtools_goma {
 void CompilerInfo::SubprogramInfo::FromData(
     const CompilerInfoData::SubprogramInfo& info_data,
     SubprogramInfo* info) {
-  info->name = info_data.name();
+  info->abs_path = info_data.abs_path();
+  info->user_specified_path = info_data.user_specified_path();
   info->hash = info_data.hash();
   GetFileStatFromData(info_data.file_stat(), &info->file_stat);
 }
 
 string CompilerInfo::SubprogramInfo::DebugString() const {
   std::stringstream ss;
-  ss << "name: " << name;
-  ss << ", valid:" << file_stat.IsValid();
+  ss << "abs_path: " << abs_path;
+  ss << ", user_specified_path: " << user_specified_path;
+  ss << ", valid: " << file_stat.IsValid();
   ss << ", hash: " << hash;
   return ss.str();
 }
@@ -98,11 +100,11 @@ bool CompilerInfo::IsUpToDate(const string& local_compiler_path) const {
   }
 
   for (const auto& subprog : subprograms_) {
-    FileStat file_stat(subprog.name);
+    FileStat file_stat(subprog.abs_path);
     if (file_stat != subprog.file_stat) {
       LOG(INFO) << "subprogram is not matched:"
                 << " local_compiler_path=" << local_compiler_path
-                << " subprogram=" << subprog.name
+                << " subprogram=" << subprog.abs_path
                 << " subprogram_file_stat=" << subprog.file_stat.DebugString()
                 << " file_stat=" << file_stat.DebugString();
       return false;
@@ -159,17 +161,17 @@ bool CompilerInfo::UpdateFileStatIfHashMatch(SHA256HashCache* sha256_cache) {
 
   for (const auto& subprog : subprograms_) {
     string subprogram_hash;
-    if (!sha256_cache->GetHashFromCacheOrFile(subprog.name, &subprogram_hash)) {
+    if (!sha256_cache->GetHashFromCacheOrFile(subprog.abs_path,
+                                              &subprogram_hash)) {
       LOG(WARNING) << "calculating subprogram hash failed: "
-                   << "name=" << subprog.name;
+                   << "abs_path=" << subprog.abs_path;
       return false;
     }
     if (subprogram_hash != subprog.hash) {
       LOG(INFO) << "subprogram hash didn't match:"
                 << " path=" << real_compiler_path()
-                << " subprogram=" << subprog.name
-                << " prev=" << subprog.hash
-                << " current=" << subprogram_hash;
+                << " subprogram=" << subprog.abs_path
+                << " prev=" << subprog.hash << " current=" << subprogram_hash;
       return false;
     }
   }
@@ -184,11 +186,15 @@ bool CompilerInfo::UpdateFileStatIfHashMatch(SHA256HashCache* sha256_cache) {
   for (size_t i = 0; i < subprograms_.size(); ++i) {
     const auto& subprog = subprograms_[i];
     const auto& data_subprog = data_->subprograms(i);
-    if (subprog.name != data_subprog.name()) {
+    if (subprog.user_specified_path != data_subprog.user_specified_path() ||
+        subprog.abs_path != data_subprog.abs_path()) {
       LOG(ERROR) << "CompilerInfo subprogram and its data subprograms"
                  << " is inconsistent: compiler=" << data_->real_compiler_path()
                  << " inconsistent subprogram: "
-                 << subprog.name << " != " << data_subprog.name();
+                 << " user_specified_path: " << subprog.user_specified_path
+                 << " vs " << data_subprog.user_specified_path()
+                 << " abs_path: " << subprog.abs_path << " vs "
+                 << data_subprog.abs_path();
       return false;
     }
   }
@@ -260,10 +266,10 @@ bool CompilerInfo::UpdateFileStatIfHashMatch(SHA256HashCache* sha256_cache) {
     auto& subprog = subprograms_[i];
     auto* data_subprog = data_->mutable_subprograms(i);
 
-    FileStat file_stat(subprog.name);
+    FileStat file_stat(subprog.abs_path);
     if (file_stat != subprog.file_stat) {
       LOG(INFO) << "subprogram id is updated:"
-                << " name=" << subprog.name
+                << " abs_path=" << subprog.abs_path
                 << " old=" << subprog.file_stat.DebugString()
                 << " new=" << file_stat.DebugString();
       subprog.file_stat = file_stat;
@@ -274,18 +280,22 @@ bool CompilerInfo::UpdateFileStatIfHashMatch(SHA256HashCache* sha256_cache) {
   return true;
 }
 
-bool CompilerInfo::IsCwdRelative(const string& cwd) const {
-  if (HasPrefixDir(data_->real_compiler_path(), cwd)) {
-    VLOG(1) << "real_compiler_path is cwd relative:"
-            << data_->real_compiler_path()
-            << " @" << cwd;
-    return true;
+bool CompilerInfo::DependsOnCwd(const string& cwd) const {
+  if (!data_->real_compiler_path().empty()) {
+    if (!file::IsAbsolutePath(data_->real_compiler_path()) ||
+        HasPrefixDir(data_->real_compiler_path(), cwd)) {
+      VLOG(1) << "real_compiler_path is cwd relative:"
+              << data_->real_compiler_path() << " @" << cwd;
+      return true;
+    }
   }
   for (size_t i = 0; i < subprograms_.size(); ++i) {
-    const string& name = subprograms_[i].name;
-    if (HasPrefixDir(name, cwd)) {
-      VLOG(1) << "subprograms[" << i << "] is cwd relative: "
-              << name << " @" << cwd;
+    // user_specified_path can be absolute (if specified so).
+    const string& user_specified_path = subprograms_[i].user_specified_path;
+    if (!file::IsAbsolutePath(user_specified_path) ||
+        HasPrefixDir(user_specified_path, cwd)) {
+      VLOG(1) << "subprograms[" << i
+              << "] is cwd relative: " << user_specified_path << " @" << cwd;
       return true;
     }
   }

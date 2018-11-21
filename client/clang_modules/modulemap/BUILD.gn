@@ -6,10 +6,30 @@ static_library("modulemap_processor_lib") {
 
   public_deps = [
     ":modulemap_parser_lib",
+    "//client:common",
+    "//client:file_stat_cache_lib",
     "//third_party/abseil",
   ]
 
   deps = [
+    "//client:content_lib",
+    "//lib",
+  ]
+}
+
+static_library("modulemap_cache_lib") {
+  sources = [
+    "cache.cc",
+    "cache.h",
+  ]
+
+  public_deps = [
+    ":modulemap_processor_lib",
+    "//third_party/abseil",
+  ]
+
+  deps = [
+    "//client:compiler_proxy_base_lib",
     "//client:content_lib",
     "//lib",
   ]
@@ -101,6 +121,20 @@ executable("modulemap_parser_unittest") {
   deps = [
     ":modulemap_parser_lib",
     "//build/config:exe_and_shlib_deps",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("modulemap_cache_unittest") {
+  testonly = true
+  sources = [
+    "cache_unittest.cc",
+  ]
+
+  deps = [
+    ":modulemap_cache_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//client:file_stat_cache_lib",
     "//client:goma_test_lib",
   ]
 }

@@ -5,11 +5,15 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_CLANG_MODULES_MODULEMAP_PROCESSOR_H_
 #define DEVTOOLS_GOMA_CLIENT_CLANG_MODULES_MODULEMAP_PROCESSOR_H_
 
-#include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
+#include "file_stat.h"
+#include "file_stat_cache.h"
 #include "type.h"
 
 using std::string;
@@ -17,10 +21,29 @@ using std::string;
 namespace devtools_goma {
 namespace modulemap {
 
+struct CollectedModuleMapFile {
+  CollectedModuleMapFile(string rel_path,
+                         string abs_path,
+                         FileStat file_stat,
+                         absl::Time checked_at)
+      : rel_path(std::move(rel_path)),
+        abs_path(std::move(abs_path)),
+        file_stat(std::move(file_stat)),
+        checked_at(std::move(checked_at)) {}
+
+  // An relative path from cwd.
+  // Possible absolute if an absolute path is specified as a module map file.
+  string rel_path;
+  string abs_path;
+  FileStat file_stat;
+  absl::Time checked_at;
+};
+
 // Processor parses a modulemap file, and lists all extern modulemap files.
 class Processor {
  public:
-  explicit Processor(string cwd) : cwd_(std::move(cwd)) {}
+  Processor(string cwd, FileStatCache* file_stat_cache)
+      : cwd_(std::move(cwd)), file_stat_cache_(file_stat_cache) {}
 
   Processor(const Processor&) = delete;
   void operator=(const Processor&) = delete;
@@ -35,8 +58,13 @@ class Processor {
   // Returns false otherwise (e.g. parse failure)
   bool AddModuleMapFile(absl::string_view module_map_file);
 
-  const std::set<string>& collected_include_files() const {
-    return collected_include_files_;
+  const std::vector<CollectedModuleMapFile>& collected_module_map_files()
+      const {
+    return collected_module_map_files_;
+  }
+
+  std::vector<CollectedModuleMapFile>* mutable_collected_module_map_files() {
+    return &collected_module_map_files_;
   }
 
  private:
@@ -45,7 +73,9 @@ class Processor {
                                            absl::string_view module_map_dir);
 
   const string cwd_;
-  std::set<string> collected_include_files_;
+  FileStatCache* file_stat_cache_;
+
+  std::vector<CollectedModuleMapFile> collected_module_map_files_;
   absl::flat_hash_set<string> visited_abs_paths_;
 };
 

@@ -4,7 +4,7 @@
 
 roots = "roots"
 
-if (os == "linux") {
+if (os != "win") {
   genc = "//client/genc.py"
 
   action("gen_roots_certs") {
@@ -57,9 +57,7 @@ if (os == "linux") {
     ]
     public_configs = [ ":certs_config" ]
   }
-}
-
-if (os == "win") {
+} else {  # os == "win"
   config("certs_resource_config") {
     include_dirs = [ "." ]
   }

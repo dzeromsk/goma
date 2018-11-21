@@ -466,4 +466,41 @@ bool HttpChunkParser::Parse(absl::string_view input,
   return true;
 }
 
+bool ParseURL(absl::string_view url, URL* out) {
+  DCHECK(out != nullptr);
+  size_t pos = url.find("://");
+  absl::string_view hostport = url;
+  if (pos == string::npos) {
+    out->scheme = "http";
+  } else {
+    out->scheme = string(url.substr(0, pos));
+    hostport = url.substr(pos + 3);
+  }
+  // set default port number.
+  if (out->scheme == "http") {
+    out->port = 80;
+  } else if (out->scheme == "https") {
+    out->port = 443;
+  } else {
+    return false;
+  }
+  pos = hostport.find('/');
+  if (pos != string::npos) {
+    out->path = string(hostport.substr(pos));
+    hostport = hostport.substr(0, pos);
+  } else {
+    out->path = "/";
+  }
+  pos = hostport.find(':');
+  if (pos != string::npos) {
+    out->hostname = string(hostport.substr(0, pos));
+    if (!absl::SimpleAtoi(hostport.substr(pos+1), &out->port)) {
+      return false;
+    }
+  } else {
+    out->hostname = string(hostport);
+  }
+  return true;
+}
+
 }  // namespace devtools_goma

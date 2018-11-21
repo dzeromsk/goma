@@ -219,7 +219,7 @@ CompilerInfoState* CompilerInfoCache::Store(
   string old_hash;
   const string compiler_info_key =
       key.ToString(!file::IsAbsolutePath(key.local_compiler_path) ||
-                   state.get()->info().IsCwdRelative(key.cwd));
+                   state.get()->info().DependsOnCwd(key.cwd));
   {
     auto p = compiler_info_.insert(
         std::make_pair(compiler_info_key, state.get()));

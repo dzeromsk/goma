@@ -292,6 +292,12 @@ class CompileService {
   bool send_compiler_binary_as_input() const {
     return send_compiler_binary_as_input_;
   }
+  void SetUseUserSpecifiedPathForSubprograms(bool flag) {
+    use_user_specified_path_for_subprograms_ = flag;
+  }
+  bool use_user_specified_path_for_subprograms() const {
+    return use_user_specified_path_for_subprograms_;
+  }
 
   void SetCommandCheckLevel(const string& level) {
     command_check_level_ = level;
@@ -579,6 +585,7 @@ class CompileService {
   bool send_expected_outputs_;
   string command_check_level_;
   bool send_compiler_binary_as_input_;
+  bool use_user_specified_path_for_subprograms_;
 
   // Set hermetic_mode in ExecReq, that is, don't choose different compiler
   // than local one.

@@ -213,7 +213,7 @@ class FakeGomaEnv(object):
   def IsValidMagic(self, _):
     return True
 
-  def KillStakeholders(self):
+  def KillStakeholders(self, force=False):
     pass
 
   def LoadChecksum(self, update_dir=''):
@@ -289,11 +289,6 @@ def _ClearGomaEnv():
     del os.environ['GOMAMODE']
   if os.environ.has_key('PLATFORM'):
     del os.environ['PLATFORM']
-
-  proxy_env_names = ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy']
-  for proxy_env_name in proxy_env_names:
-    if os.environ.has_key(proxy_env_name):
-      del os.environ[proxy_env_name]
 
 
 class GomaCtlTestCommon(unittest.TestCase):
@@ -909,9 +904,6 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
     driver = self._module.GomaDriver(FakeGomaEnv(), FakeGomaBackend())
     driver._PrintLatestVersion()
 
-  def testGetProxyEnvShouldReturnEmptyDictIfNoEnvConfigured(self):
-    self.assertFalse(self._module._GetProxyEnv())
-
   def testReportMakeTgz(self):
     class SpyGomaEnv(FakeGomaEnv):
       """Spy GomaEnv to provide WriteFile, CopyFile and MakeTgzFromDirectory"""
@@ -1050,38 +1042,6 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
     for f in env.output_files:
       self.assertTrue(f.startswith(env.tgz_source_dir))
     self.assertTrue(env.tgz_file.startswith(self._module._GetTempDirectory()))
-
-  def testGetProxyEnvShouldReturnDictIfEnvIsSet(self):
-    proxy_env_names = ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy']
-    for name in proxy_env_names:
-      self.assertFalse(os.environ.has_key(name))
-      os.environ[name] = 'http://example.org:3128/'
-      proxy_env = self._module._GetProxyEnv()
-      self.assertTrue(proxy_env, msg=('proxy env=%s' % name))
-      self.assertEqual(proxy_env, {'host': 'example.org', 'port': '3128'})
-      del os.environ[name]
-
-  def testGetProxyEnvShouldRaiseForHttps(self):
-    os.environ['HTTP_PROXY'] = 'https://example.org:3128/'
-    self.assertRaises(self._module.ConfigError, self._module._GetProxyEnv)
-
-  def testGetProxyEnvShouldRaiseForProxyWithPassword(self):
-    os.environ['HTTP_PROXY'] = 'http://user:pass@example.org:3128'
-    self.assertRaises(self._module.ConfigError, self._module._GetProxyEnv)
-
-  def testGetProxyEnvShouldRaiseEnvWithoutPort(self):
-    os.environ['HTTP_PROXY'] = 'http://example.org/'
-    self.assertRaises(self._module.ConfigError, self._module._GetProxyEnv)
-
-  def testGetProxyEnvShouldAllowEnvWithoutScheme(self):
-    os.environ['HTTP_PROXY'] = 'example.org:3128'
-    proxy_env = self._module._GetProxyEnv()
-    self.assertTrue(proxy_env)
-    self.assertEqual(proxy_env, {'host': 'example.org', 'port': '3128'})
-
-  def testGetProxyEnvShouldRaiseEnvWithoutSchemeAndPort(self):
-    os.environ['HTTP_PROXY'] = 'example.org'
-    self.assertRaises(self._module.ConfigError, self._module._GetProxyEnv)
 
   def testAutoUpdate(self):
     class SpyGomaEnv(FakeGomaEnv):
@@ -1442,7 +1402,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.installed_before = True
         return True
 
-      def KillStakeholders(self):
+      def KillStakeholders(self, force=False):
         self.kill_stakeholders = True
 
       def CompilerProxyRunning(self):
@@ -1481,7 +1441,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.installed_before = True
         return True
 
-      def KillStakeholders(self):
+      def KillStakeholders(self, force=False):
         self.kill_stakeholders = True
 
       def CompilerProxyRunning(self):
@@ -1522,7 +1482,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.is_installed_before = True
         return True
 
-      def KillStakeholders(self):
+      def KillStakeholders(self, force=False):
         self.kill_all_goma_processes = True
 
       def InstallPackage(self, _):
@@ -1664,7 +1624,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
         self.can_auto_update = True
         return False
 
-      def KillStakeholders(self):
+      def KillStakeholders(self, force=False):
         self.kill_all = True
 
       def MayUsingDefaultIPCPort(self):
@@ -1898,7 +1858,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
                                                             check_running,
                                                             need_pids)
 
-      def KillStakeholders(self):
+      def KillStakeholders(self, force=False):
         self.kill_stakeholders = True
 
     env = SpyGomaEnv()
@@ -1962,7 +1922,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
                                                             check_running,
                                                             need_pids)
 
-      def KillStakeholders(self):
+      def KillStakeholders(self, force=False):
         self.kill_stakeholders = True
         self.status_compiler_proxy_running = False
 
@@ -2026,7 +1986,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
                                                             check_running,
                                                             need_pids)
 
-      def KillStakeholders(self):
+      def KillStakeholders(self, force=False):
         self.kill_stakeholders = True
 
     os.environ['GOMA_TEST'] = 'flag should be different'
@@ -2086,7 +2046,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
                                                             check_running,
                                                             need_pids)
 
-      def KillStakeholders(self):
+      def KillStakeholders(self, force=False):
         self.kill_stakeholders = True
 
     env = SpyGomaEnv()
@@ -2144,7 +2104,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
                                                             check_running,
                                                             need_pids)
 
-      def KillStakeholders(self):
+      def KillStakeholders(self, force=False):
         self.kill_stakeholders = True
 
     env = SpyGomaEnv()
@@ -2200,7 +2160,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
                                                             check_running,
                                                             need_pids)
 
-      def KillStakeholders(self):
+      def KillStakeholders(self, force=False):
         self.kill_stakeholders = True
 
     env = SpyGomaEnv()
@@ -2676,23 +2636,6 @@ class GomaEnvTest(GomaCtlTestCommon):
   """
   # test should be able to access protected members and variables.
   # pylint: disable=W0212
-
-  def testSetupEnvShouldAutomaticallySetProxyParamIfGomaProxyEnvIsSet(self):
-    os.environ['GOMA_PROXY_HOST'] = 'proxy.example.com'
-    os.environ['GOMA_PROXY_PORT'] = '3128'
-    env = self._module.GomaEnv()
-    self.assertEqual(env._https_proxy, 'proxy.example.com:3128')
-
-  def testSetupEnvShouldAutomaticallySetProxyParamIfHttpProxyEnvIsSet(self):
-    os.environ['https_proxy'] = 'proxy.example.com:3128'
-    env = self._module.GomaEnv()
-    self.assertEqual(env._https_proxy, 'proxy.example.com:3128')
-
-  def testSetupEnvShouldNotSetProxyParamIfGomaProxyEnvIsBroken(self):
-    os.environ['GOMA_PROXY_HOST'] = 'proxy.example.com'
-    os.environ['GOMA_PROXY_PORT'] = '3128'
-    env = self._module.GomaEnv()
-    self.assertEqual(env._https_proxy, 'proxy.example.com:3128')
 
   def testBackupCurrentPackageShouldCreateBackup(self):
     env = self._module.GomaEnv()

@@ -37,7 +37,7 @@ deps = {
 
      # chrome's deps/third_party/boringssl
      "client/third_party/boringssl/src":
-     "https://boringssl.googlesource.com/boringssl@d2ed382e647bfe6148bdc192d77b48406af85a94",
+     "https://boringssl.googlesource.com/boringssl@46e12b03f97b367344bbd6d360cb36b7669eda95",
 
      # google-breakpad
      "client/third_party/breakpad/breakpad":

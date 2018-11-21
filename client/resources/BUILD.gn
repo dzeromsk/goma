@@ -144,3 +144,19 @@ action("gen_compilerz_style") {
   public_configs = [ ":include_target_gen_dir" ]
 }
 
+action("gen_compiler_proxy_status_logo") {
+  script = genc
+  sources = [
+    "compiler_proxy_status_logo.png",
+  ]
+  outputs = [
+    "$target_gen_dir/compiler_proxy_status_logo.c",
+    "$target_gen_dir/compiler_proxy_status_logo.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+    rebase_path("compiler_proxy_status_logo.png"),
+  ]
+  public_configs = [ ":include_target_gen_dir" ]
+}

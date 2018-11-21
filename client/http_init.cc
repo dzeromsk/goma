@@ -10,6 +10,7 @@
 #include "file_helper.h"
 #include "glog/logging.h"
 #include "http.h"
+#include "http_util.h"
 #include "ioutil.h"
 #include "oauth2.h"
 #include "path.h"
@@ -51,6 +52,39 @@ static string GetHomeDir() {
   return GetEnv(kHomeEnv);
 }
 
+void SetHttpProxyFromEnv(devtools_goma::HttpClient::Options* http_options) {
+  if (!FLAGS_PROXY_HOST.empty()) {
+    http_options->proxy_host_name = FLAGS_PROXY_HOST;
+    http_options->proxy_port = FLAGS_PROXY_PORT;
+    return;
+  }
+
+  // We follow the order curl (https://curl.haxx.se/) searches
+  // environment variables.
+  // TODO: use http_proxy instead if GOMA_USE_SSL=false?
+  const std::vector<string> envs = {
+    "https_proxy",
+    "HTTPS_PROXY",
+    "all_proxy",
+    "ALL_PROXY",
+  };
+  for (const auto& env : envs) {
+    const string& proxy = devtools_goma::GetEnv(env);
+    if (proxy.empty()) {
+      continue;
+    }
+
+    URL u;
+    if (!ParseURL(proxy, &u)) {
+      continue;
+    }
+
+    http_options->proxy_host_name = std::move(u.hostname);
+    http_options->proxy_port = u.port;
+    return;
+  }
+}
+
 }  // namespace
 
 static void InitOAuth2(HttpClient::Options* http_options) {
@@ -71,8 +105,7 @@ static void InitOAuth2(HttpClient::Options* http_options) {
 }
 
 void InitHttpClientOptions(HttpClient::Options* http_options) {
-  http_options->proxy_host_name = FLAGS_PROXY_HOST;
-  http_options->proxy_port = FLAGS_PROXY_PORT;
+  SetHttpProxyFromEnv(http_options);
 
   // fields that would be updated by InitFromURL.
   http_options->dest_host_name = FLAGS_STUBBY_PROXY_IP_ADDRESS;

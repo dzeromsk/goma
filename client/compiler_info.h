@@ -63,14 +63,18 @@ class CompilerInfo {
     static void FromData(const CompilerInfoData::SubprogramInfo& info_data,
                          SubprogramInfo* info);
     bool IsValid() const {
-      return file_stat.IsValid() && !hash.empty() && !name.empty();
+      return file_stat.IsValid() && !hash.empty() &&
+             !user_specified_path.empty() && !abs_path.empty();
     }
     bool operator==(const SubprogramInfo& rhs) const {
-      return name == rhs.name && hash == rhs.hash && file_stat == rhs.file_stat;
+      return user_specified_path == rhs.user_specified_path &&
+             abs_path == rhs.abs_path && hash == rhs.hash &&
+             file_stat == rhs.file_stat;
     }
     string DebugString() const;
 
-    string name;
+    string abs_path;
+    string user_specified_path;
     string hash;
     FileStat file_stat;
   };
@@ -114,9 +118,17 @@ class CompilerInfo {
   // Returns true if CompilerInfo has some error.
   bool HasError() const { return data_->has_error_message(); }
 
-  // Returns true if paths in CompilerInfo are all cwd relative.
-  // For example, compiler path, subprograms paths and resouce paths.
-  virtual bool IsCwdRelative(const string& cwd) const;
+  // Returns true if CompilerInfo content depends on cwd.
+  // compiler path, subprograms paths and resouce paths
+  // can be relative paths. In that case, CompilerInfo content depends on
+  // cwd.
+  //
+  // We say CompilerInfo depends on cwd when one of the followings is
+  // satisfied.
+  //   (a) a path is relative
+  //   (b) a path starts with cwd
+  // (b) is to cover a path like /path/to/cwd/../../somewhere/to/gcc.
+  virtual bool DependsOnCwd(const string& cwd) const;
 
   // See field's comment below.
   const FileStat& local_compiler_stat() const { return local_compiler_stat_; }

@@ -37,6 +37,7 @@
 #include "absl/time/time.h"
 #include "auto_updater.h"
 #include "breakpad.h"
+#include "clang_modules/modulemap/cache.h"
 #include "compiler_info_cache.h"
 #include "compiler_proxy_http_handler.h"
 #include "counterz.h"
@@ -348,6 +349,7 @@ int main(int argc, char* argv[], const char* envp[]) {
 
   devtools_goma::IncludeCache::Init(FLAGS_MAX_INCLUDE_CACHE_ENTRIES,
                                     !FLAGS_DEPS_CACHE_FILE.empty());
+  devtools_goma::modulemap::Cache::Init(FLAGS_MAX_MODULEMAP_CACHE_ENTRIES);
   devtools_goma::ListDirCache::Init(FLAGS_MAX_LIST_DIR_CACHE_ENTRY_NUM);
 
   std::unique_ptr<devtools_goma::WorkerThreadRunner> init_deps_cache(
@@ -443,6 +445,7 @@ int main(int argc, char* argv[], const char* envp[]) {
   devtools_goma::CompilerInfoCache::Quit();
   devtools_goma::DepsCache::Quit();
   devtools_goma::IncludeCache::Quit();
+  devtools_goma::modulemap::Cache::Quit();
   devtools_goma::ListDirCache::Quit();
   devtools_goma::SubProcessControllerClient::Get()->Shutdown();
 

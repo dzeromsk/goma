@@ -308,7 +308,16 @@ def CopyDlls(target_dir, configuration, target_cpu):
   if not vs_runtime_dll_dirs:
     return
 
-  x64_runtime, x86_runtime = vs_runtime_dll_dirs
+  # workaround for b/119741843.
+  # vs_runtime_dll_dirs might have arm64 runtime in the 3rd item.
+  if len(vs_runtime_dll_dirs) == 2:
+    x64_runtime, x86_runtime = vs_runtime_dll_dirs
+  elif len(vs_runtime_dll_dirs) == 3:
+    x64_runtime, x86_runtime, _ = vs_runtime_dll_dirs
+  else:
+    raise Exception('vs_runtime_dll_dirs is unexpected form: %s' %
+        vs_runtime_dll_dirs)
+
   runtime_dir = x64_runtime if target_cpu == 'x64' else x86_runtime
   _CopyRuntime(target_dir, runtime_dir, target_cpu, debug=False)
   if configuration == 'Debug':

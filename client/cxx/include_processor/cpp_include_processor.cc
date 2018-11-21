@@ -31,7 +31,7 @@
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "autolock_timer.h"
-#include "clang_modules/modulemap/processor.h"
+#include "clang_modules/modulemap/cache.h"
 #include "clang_tidy_flags.h"
 #include "compiler_flags.h"
 #include "compiler_info.h"
@@ -790,9 +790,10 @@ bool CppIncludeProcessor::AddClangModulesFiles(
   }
 
   // module-map-file
-  modulemap::Processor modulemap_processor(current_directory);
   if (!flags.clang_module_map_file().empty()) {
-    if (!modulemap_processor.AddModuleMapFile(flags.clang_module_map_file())) {
+    if (!modulemap::Cache::instance()->AddModuleMapFileAndDependents(
+            flags.clang_module_map_file(), current_directory, include_files,
+            file_stat_cache)) {
       LOG(WARNING) << "failed to add a module map: "
                    << flags.clang_module_map_file();
       return false;
@@ -817,17 +818,15 @@ bool CppIncludeProcessor::AddClangModulesFiles(
             file::JoinPathRespectAbsolute(current_directory, rel_path);
         FileStat fs = file_stat_cache->Get(abs_path);
         if (fs.IsValid() && !fs.is_directory) {
-          if (!modulemap_processor.AddModuleMapFile(rel_path)) {
+          if (!modulemap::Cache::instance()->AddModuleMapFileAndDependents(
+                  rel_path, current_directory, include_files,
+                  file_stat_cache)) {
             return false;
           }
         }
       }
     }
   }
-
-  // Append collected include files.
-  include_files->insert(modulemap_processor.collected_include_files().begin(),
-                        modulemap_processor.collected_include_files().end());
 
   return true;
 }

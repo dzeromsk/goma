@@ -48,7 +48,7 @@ _DEFAULT_ENV = [
 _DEFAULT_NO_SSL_ENV = [
     ('STUBBY_PROXY_PORT', '80'),
     ]
-_MAX_COOLDOWN_WAIT = 5  # seconds to wait for compiler_proxy to shutdown.
+_MAX_COOLDOWN_WAIT = 10  # seconds to wait for compiler_proxy to shutdown.
 _COOLDOWN_SLEEP = 1  # seconds to each wait for compiler_proxy to shutdown.
 _CRASH_DUMP_DIR = 'goma_crash'
 _CACHE_DIR = 'goma_cache'
@@ -775,6 +775,10 @@ class GomaDriver(object):
     self._env.KillStakeholders()
     if not self._WaitCooldown():
       print 'Could not kill compiler_proxy.'
+      print 'trying to kill it forcefully.'
+      self._env.KillStakeholders(force=True)
+    if not self._WaitCooldown():
+      print 'Could not kill compiler_proxy.'
       print 'Probably, somebody else also runs compiler_proxy.'
 
   def _UpdatePackage(self):
@@ -1177,7 +1181,6 @@ class GomaEnv(object):
     self._goma_params = None
     self._gomacc_socket = None
     self._gomacc_port = None
-    self._https_proxy = None
     self._backup = None
     self._goma_tmp_dir = None
     # TODO: remove this in python3
@@ -1236,6 +1239,8 @@ class GomaEnv(object):
       directory: a string of directory name to write the manifest file.
     """
     manifest_path = os.path.join(self._dir, directory, 'MANIFEST')
+    if os.path.exists(manifest_path):
+      os.chmod(manifest_path, 0644)
     with open(manifest_path, 'w') as manifest_file:
       for key, value in manifest.items():
         manifest_file.write('%s=%s\n' % (key, value))
@@ -1411,17 +1416,12 @@ class GomaEnv(object):
     if sys.hexversion < 0x2070900:
       raise Error('Please use python version >= 2.7.9')
 
-    http_handler = urllib2.BaseHandler()
-    if self._https_proxy:
-      http_handler = urllib2.ProxyHandler({'https': self._https_proxy})
-    http_opener = urllib2.build_opener(http_handler)
-
     http_req = urllib2.Request(source_url)
     if headers:
       for name, value in headers.items():
         http_req.add_header(name, value)
 
-    r = http_opener.open(http_req)
+    r = urllib2.urlopen(http_req)
     if destination_file:
       with open(os.path.join(self._dir, destination_file), 'wb') as f:
         shutil.copyfileobj(r, f)
@@ -1589,17 +1589,6 @@ class GomaEnv(object):
     if _IsGomaFlagTrue('USE_SSL'):
       for flag_name, default_value in self._DEFAULT_SSL_ENV:
         _SetGomaFlagDefaultValueIfEmpty(flag_name, default_value)
-
-    # Automatic Proxy configuration.
-    proxy_env = _GetProxyEnv()
-    if proxy_env:
-      os.environ['GOMA_PROXY_HOST'] = proxy_env['host']
-      os.environ['GOMA_PROXY_PORT'] = proxy_env['port']
-    if (os.environ.has_key('GOMA_PROXY_HOST') and
-        os.environ.has_key('GOMA_PROXY_PORT')):
-      # Set HTTPS proxy for urllib2.
-      self._https_proxy = '%s:%s' % (os.environ['GOMA_PROXY_HOST'],
-                                     os.environ['GOMA_PROXY_PORT'])
 
   def ExecCompilerProxy(self):
     """Execute compiler proxy in platform dependent way."""
@@ -1863,8 +1852,11 @@ class GomaEnv(object):
     """
     raise NotImplementedError('CompilerProxyRunning should be implemented.')
 
-  def KillStakeholders(self):
+  def KillStakeholders(self, force=False):
     """Kills stake holder processes.
+
+    Args:
+      force: kills forcefully.
 
     This will kill all processes having locks compiler_proxy needs.
     """
@@ -2037,10 +2029,12 @@ class GomaEnvWin(GomaEnv):
         pids.add(m.group(1))
     return pids
 
-  def KillStakeholders(self):
+  def KillStakeholders(self, force=False):
     pids = self._GetStakeholderPids()
     if pids:
       args = []
+      if force:
+        args.append('/F')
       for pid in pids:
         args.extend(['/PID', pid])
       subprocess.check_call(['taskkill'] + args)
@@ -2257,10 +2251,14 @@ class GomaEnvPosix(GomaEnv):
 
     return set([str(x['pid']) for x in results])
 
-  def KillStakeholders(self):
+  def KillStakeholders(self, force=False):
     pids = self._GetStakeholderPids()
     if pids:
-      subprocess.check_call(['kill'] + list(pids))
+      args = []
+      if force:
+        args.append('-9')
+      args.extend(list(pids))
+      subprocess.check_call(['kill'] + args)
 
   def _GetFuserPath(self):
     if self._fuser_path is None:

@@ -4,6 +4,7 @@
 
 #include "cxx_compiler_info_builder.h"
 
+#include "absl/memory/memory.h"
 #include "cxx_compiler_info.h"
 #include "gtest/gtest.h"
 #include "mypath.h"
@@ -29,12 +30,36 @@ class CxxCompilerInfoBuilderTest : public testing::Test {
   }
 };
 
-TEST_F(CxxCompilerInfoBuilderTest, IsCwdRelativeWithSubprogramInfo) {
+TEST_F(CxxCompilerInfoBuilderTest, DependsOnCwdWhenRealCompilerIsAbsolute) {
+  auto cid = absl::make_unique<CompilerInfoData>();
+  cid->set_found(true);
+  cid->mutable_cxx();
+  cid->set_real_compiler_path("/path/to/gcc");
+
+  CxxCompilerInfo info(std::move(cid));
+  EXPECT_TRUE(info.DependsOnCwd("/path"));
+  EXPECT_FALSE(info.DependsOnCwd("/pat"));
+  EXPECT_FALSE(info.DependsOnCwd("/paths"));
+  EXPECT_FALSE(info.DependsOnCwd("/nonexistent"));
+}
+
+TEST_F(CxxCompilerInfoBuilderTest, DependsOnCwdWhenRealCompilerIsRelative) {
+  auto cid = absl::make_unique<CompilerInfoData>();
+  cid->set_found(true);
+  cid->mutable_cxx();
+  cid->set_real_compiler_path("../../path/to/gcc");
+
+  CxxCompilerInfo info(std::move(cid));
+  EXPECT_TRUE(info.DependsOnCwd("/path"));
+  EXPECT_TRUE(info.DependsOnCwd("/nonexistent"));
+}
+
+TEST_F(CxxCompilerInfoBuilderTest, DependsOnCwdWithSubprogramInfo) {
   TmpdirUtil tmpdir("is_cwd_relative");
   tmpdir.CreateEmptyFile("as");
 
   CompilerInfoData::SubprogramInfo subprog_data;
-  CxxCompilerInfoBuilder::SubprogramInfoFromPath(tmpdir.FullPath("as"),
+  CxxCompilerInfoBuilder::SubprogramInfoFromPath("as", tmpdir.FullPath("as"),
                                                  &subprog_data);
   CompilerInfo::SubprogramInfo subprog;
   CompilerInfo::SubprogramInfo::FromData(subprog_data, &subprog);
@@ -47,8 +72,9 @@ TEST_F(CxxCompilerInfoBuilderTest, IsCwdRelativeWithSubprogramInfo) {
   cid->mutable_cxx();
 
   CxxCompilerInfo info(std::move(cid));
-  EXPECT_TRUE(info.IsCwdRelative(tmpdir.tmpdir()));
-  EXPECT_FALSE(info.IsCwdRelative("/nonexistent"));
+  EXPECT_TRUE(info.DependsOnCwd(tmpdir.tmpdir()));
+  // Since a subprogram uses a relative path, it should depend on cwd.
+  EXPECT_TRUE(info.DependsOnCwd("/nonexistent"));
 }
 
 TEST_F(CxxCompilerInfoBuilderTest, ParseGetSubprogramsOutput) {

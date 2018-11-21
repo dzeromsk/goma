@@ -408,11 +408,11 @@ arg: "obj/base/allocator/tcmalloc/malloc_hook.o"
 env: "PWD=/home/goma/chromium/src/out/rel_ng"
 cwd: "/home/goma/chromium/src/out/rel_ng"
 subprogram {
-  path: "../../third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs.so"
+  path: "/home/goma/chromium/src/third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs.so"
   binary_hash: "119407f17eb4777402734571183eb5518806900d9c7c7ce5ad71d242aad249f0"
 }
 subprogram {
-  path: "../../third_party/binutils/Linux_x64/Release/bin/objcopy"
+  path: "/home/goma/chromium/src/third_party/binutils/Linux_x64/Release/bin/objcopy"
   binary_hash: "9ccd249906d57ef2ccd24cf19c67c8d645d309c49c284af9d42813caf87fba7e"
 }
 requester_info {
@@ -485,11 +485,11 @@ arg: "obj/base/allocator/tcmalloc/malloc_hook.o"
 env: "PWD=/home/goma/chromium/src/out/rel_ng"
 cwd: "/home/goma/chromium/src/out/rel_ng"
 subprogram {
-  path: "../../third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs.so"
+  path: "/home/goma/chromium/src/third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs.so"
   binary_hash: "119407f17eb4777402734571183eb5518806900d9c7c7ce5ad71d242aad249f0"
 }
 subprogram {
-  path: "../../third_party/binutils/Linux_x64/Release/bin/objcopy"
+  path: "/home/goma/chromium/src/third_party/binutils/Linux_x64/Release/bin/objcopy"
   binary_hash: "9ccd249906d57ef2ccd24cf19c67c8d645d309c49c284af9d42813caf87fba7e"
 }
 requester_info {
@@ -1656,11 +1656,14 @@ TEST(GCCExecReqNormalizerTest,
 
   ASSERT_TRUE(TextFormat::ParseFromString(kExecReqToNormalize, &req));
   devtools_goma::SubprogramSpec* s = req.add_subprogram();
-  s->set_path("../../third_party/binutils/Linux_x64/Release/bin/as");
+  s->set_path(
+      "/home/goma/chromium/src/third_party/binutils/Linux_x64/Release/bin/as");
   s->set_binary_hash(
       "2f931b1183b807976cb304a66d1b84dcfe5a32f02b45f54c2358e5c43f9183b0");
   s = req.add_subprogram();
-  s->set_path("../../third_party/binutils/Linux_x64/Release/bin/strip");
+  s->set_path(
+      "/home/goma/chromium/src/third_party/binutils/Linux_x64/Release/bin/"
+      "strip");
   s->set_binary_hash(
       "4956e195e962c7329c1fd0aee839d5cdbf7bb42bbc19e197be11751da1f3ea3c");
   ASSERT_TRUE(devtools_goma::VerifyExecReq(req));

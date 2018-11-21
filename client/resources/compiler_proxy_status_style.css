@@ -32,9 +32,16 @@ header h1 {
   float: left;
   height: 120px;
   width: 400px;
-  margin: 10px 0 0 0;
+  margin: 0;
+  background-image: url(/static/compiler_proxy_status_logo.png);
+  background-repeat: no-repeat;
+  background-position: center;
 }
 
+header h1 span {
+    position: fixed;
+    left: -9999px;
+}
 
 #account {
  float: right;

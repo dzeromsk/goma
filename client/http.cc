@@ -162,35 +162,17 @@ HttpClient::Options::Options()
 }
 
 bool HttpClient::Options::InitFromURL(absl::string_view url) {
-  size_t pos = url.find("://");
-  if (pos == string::npos) {
+  URL u;
+  if (!ParseURL(url, &u)) {
     return false;
   }
-  absl::string_view scheme = url.substr(0, pos);
-  if (scheme == "http") {
-    use_ssl = false;
-    dest_port = 80;
-  } else if (scheme == "https") {
+  use_ssl = false;
+  if (u.scheme == "https") {
     use_ssl = true;
-    dest_port = 443;
-  } else {
-    return false;
   }
-  absl::string_view hostport = url.substr(pos + 3);
-  pos = hostport.find("/");
-  if (pos != string::npos) {
-    url_path_prefix = string(hostport.substr(pos));
-    hostport = hostport.substr(0, pos);
-  } else {
-    url_path_prefix = "/";
-  }
-  pos = hostport.find(":");
-  if (pos != string::npos) {
-    dest_host_name = string(hostport.substr(0, pos));
-    dest_port = atoi(string(hostport.substr(pos+1)).c_str());
-  } else {
-    dest_host_name = string(hostport);
-  }
+  dest_host_name = std::move(u.hostname);
+  dest_port = u.port;
+  url_path_prefix = std::move(u.path);
   return true;
 }
 

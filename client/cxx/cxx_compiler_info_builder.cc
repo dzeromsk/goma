@@ -171,17 +171,19 @@ string CxxCompilerInfoBuilder::GetRealSubprogramPath(
 
 /* static */
 bool CxxCompilerInfoBuilder::SubprogramInfoFromPath(
-    const string& path,
+    const string& user_specified_path,
+    const string& abs_path,
     CompilerInfoData::SubprogramInfo* s) {
-  FileStat file_stat(path);
+  FileStat file_stat(abs_path);
   if (!file_stat.IsValid()) {
     return false;
   }
   string hash;
-  if (!GomaSha256FromFile(GetRealSubprogramPath(path), &hash)) {
+  if (!GomaSha256FromFile(GetRealSubprogramPath(abs_path), &hash)) {
     return false;
   }
-  s->set_name(path);
+  s->set_abs_path(abs_path);
+  s->set_user_specified_path(user_specified_path);
   s->set_hash(hash);
   SetFileStatToData(file_stat, s->mutable_file_stat());
   return true;

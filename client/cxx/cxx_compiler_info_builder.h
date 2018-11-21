@@ -38,7 +38,8 @@ class CxxCompilerInfoBuilder : public CompilerInfoBuilder {
   // See: go/ma/resources-for-developers/goma-compiler-selection-mechanism
   static string GetRealSubprogramPath(const string& subprogram_path);
 
-  static bool SubprogramInfoFromPath(const string& path,
+  static bool SubprogramInfoFromPath(const string& user_specified_path,
+                                     const string& abs_path,
                                      CompilerInfoData::SubprogramInfo* s);
 
   void SetLanguageExtension(CompilerInfoData* data) const override;

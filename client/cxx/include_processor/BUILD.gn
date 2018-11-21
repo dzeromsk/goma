@@ -117,7 +117,7 @@ static_library("cpp_include_processor_lib") {
     "//client:content_lib",
     "//client:file_stat_cache_lib",
     "//client:ioutil_lib",
-    "//client/clang_modules/modulemap:modulemap_processor_lib",
+    "//client/clang_modules/modulemap:modulemap_cache_lib",
     "//lib:gcc_specific",
     "//lib:vc_specific",
   ]
@@ -427,6 +427,7 @@ if (os == "win") {
       "//client:goma_test_lib",
       "//client:ioutil_lib",
       "//client:subprocess_lib",
+      "//client/clang_modules/modulemap:modulemap_cache_lib",
       "//client/cxx:cxx_compiler_info_builder_lib",
       "//lib:compiler_flag_type_specific",
     ]

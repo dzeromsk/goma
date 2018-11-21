@@ -237,9 +237,14 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
       absl::Seconds(FLAGS_COMPILER_PROXY_NEW_FILE_THRESHOLD));
   service_.SetEnableGchHack(FLAGS_ENABLE_GCH_HACK);
   service_.SetUseRelativePathsInArgv(FLAGS_USE_RELATIVE_PATHS_IN_ARGV);
-  service_.SetSendExpectedOutputs(FLAGS_SEND_EXPECTED_OUTPUTS);
+  service_.SetSendExpectedOutputs(FLAGS_SEND_EXPECTED_OUTPUTS ||
+                                  FLAGS_ARBITRARY_TOOLCHAIN_SUPPORT);
   service_.SetCommandCheckLevel(FLAGS_COMMAND_CHECK_LEVEL);
-  service_.SetSendCompilerBinaryAsInput(FLAGS_SEND_COMPILER_BINARY_AS_INPUT);
+  service_.SetSendCompilerBinaryAsInput(FLAGS_SEND_COMPILER_BINARY_AS_INPUT ||
+                                        FLAGS_ARBITRARY_TOOLCHAIN_SUPPORT);
+  service_.SetUseUserSpecifiedPathForSubprograms(
+      FLAGS_USE_USER_SPECIFIED_PATH_FOR_SUBPROGRAMS ||
+      FLAGS_ARBITRARY_TOOLCHAIN_SUPPORT);
   if (FLAGS_HERMETIC == "off") {
     service_.SetHermetic(false);
   } else if (FLAGS_HERMETIC == "fallback") {

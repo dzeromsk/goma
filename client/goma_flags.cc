@@ -359,6 +359,9 @@ GOMA_DEFINE_int32(MAX_INCLUDE_CACHE_ENTRIES,
                   "The max count of include cache.");
 GOMA_DEFINE_int32(MAX_LIST_DIR_CACHE_ENTRY_NUM, 32768,
                   "The entry limit in list dir cache.");
+GOMA_DEFINE_int32(MAX_MODULEMAP_CACHE_ENTRIES,
+                  32768,
+                  "The max number of entries for modulemap cache.");
 GOMA_DEFINE_string(CONTENT_TYPE_FOR_PROTOBUF, "binary/x-protocol-buffer",
                    "Content-Type for goma's HttpRPC requests.");
 GOMA_DEFINE_bool(BACKEND_SOFT_STICKINESS, false,
@@ -601,6 +604,17 @@ GOMA_DEFINE_int32(MAX_COMPILER_DISABLED_TASKS, -1,
 GOMA_DEFINE_bool(SEND_COMPILER_BINARY_AS_INPUT,
                  false,
                  "EXPERIMENTAL. Send a compiler binary as an input.");
+GOMA_DEFINE_bool(USE_USER_SPECIFIED_PATH_FOR_SUBPROGRAMS,
+                 false,
+                 "EXPERIMENTAL. Send a subprogram spec with "
+                 "a user specified path to goma server.");
+GOMA_DEFINE_bool(
+    ARBITRARY_TOOLCHAIN_SUPPORT,
+    false,
+    "EXPERIMENTAL. Enable all flags related to arbitrary toolchain support, "
+    "regardless of their explicit setting. Currently "
+    "GOMA_SEND_EXPECTED_OUTPUTS, GOMA_SEND_COMPILER_BINARY_AS_INPUT "
+    "and USE_USER_SPECIFIED_PATH_FOR_SUBPROGRAMS.");
 
 #if HAVE_HEAP_PROFILER
 GOMA_DEFINE_string(COMPILER_PROXY_HEAP_PROFILE_FILE, "goma_compiler_proxy_heapz",

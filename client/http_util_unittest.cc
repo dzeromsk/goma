@@ -496,4 +496,47 @@ TEST(HttpChunkParser, ParseError) {
   TestHttpChunkParserErrorInput("\r\n\r\n");
 }
 
+TEST(URL, Basic) {
+  {
+    URL u;
+    ASSERT_TRUE(ParseURL("http://www.google.com:8080/test/path", &u));
+    EXPECT_EQ(u.scheme, "http");
+    EXPECT_EQ(u.hostname, "www.google.com");
+    EXPECT_EQ(u.port, 8080);
+    EXPECT_EQ(u.path, "/test/path");
+  }
+  {  // default HTTP port.
+    URL u;
+    ASSERT_TRUE(ParseURL("http://www.google.com/", &u));
+    EXPECT_EQ(u.scheme, "http");
+    EXPECT_EQ(u.hostname, "www.google.com");
+    EXPECT_EQ(u.port, 80);
+    EXPECT_EQ(u.path, "/");
+  }
+  {  // default HTTPS port.
+    URL u;
+    ASSERT_TRUE(ParseURL("https://www.google.com/", &u));
+    EXPECT_EQ(u.scheme, "https");
+    EXPECT_EQ(u.hostname, "www.google.com");
+    EXPECT_EQ(u.port, 443);
+    EXPECT_EQ(u.path, "/");
+  }
+  {  // default scheme.
+    URL u;
+    ASSERT_TRUE(ParseURL("www.google.com", &u));
+    EXPECT_EQ(u.scheme, "http");
+    EXPECT_EQ(u.hostname, "www.google.com");
+    EXPECT_EQ(u.port, 80);
+    EXPECT_EQ(u.path, "/");
+  }
+  {  // unsupported scheme.
+    URL u;
+    ASSERT_FALSE(ParseURL("gopher://www.google.com", &u));
+  }
+  {  // unsupported port.
+    URL u;
+    ASSERT_FALSE(ParseURL("http://www.google.com:foo/", &u));
+  }
+}
+
 }  // namespace devtools_goma

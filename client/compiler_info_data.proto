@@ -48,9 +48,16 @@ message CompilerInfoData {
   };
 
   message SubprogramInfo {
-    optional string name = 1;
+    reserved 1;
+    // Absolute path of the subprogram.
+    optional string abs_path = 5;
+    // User specified path of the subprogram. It might be a relative path
+    // or an absolute path.
+    optional string user_specified_path = 6;
+    // SHA256 hash of the subprogram.
     optional string hash = 2;
     optional FileId DEPRECATED_file_id = 3 [deprecated = true];
+    // FileStat of the subprogram.
     optional FileStat file_stat = 4;
   };
 

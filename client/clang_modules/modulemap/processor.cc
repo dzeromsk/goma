@@ -4,6 +4,7 @@
 
 #include "processor.h"
 
+#include "absl/time/clock.h"
 #include "base/path.h"
 #include "client/content.h"
 #include "lexer.h"
@@ -22,7 +23,17 @@ bool Processor::AddModuleMapFile(const absl::string_view module_map_file) {
     return true;
   }
 
-  collected_include_files_.emplace(module_map_file);
+  // Implementation Note: `now` should be taken before file_stat_cache_->Get()
+  // to prevent race condition.
+  absl::Time now = absl::Now();
+  FileStat stat = file_stat_cache_->Get(abs_module_map_file);
+  if (!stat.IsValid() || stat.is_directory) {
+    LOG(WARNING) << "failed to read " << abs_module_map_file;
+    return false;
+  }
+
+  collected_module_map_files_.emplace_back(string(module_map_file),
+                                           abs_module_map_file, stat, now);
   visited_abs_paths_.emplace(abs_module_map_file);
 
   // Parse modulemap.

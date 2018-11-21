@@ -7,6 +7,7 @@
 // GOMATEST_CLANG_PATH=/somewhere/bin/clang ./include_processor_unittest
 
 #include "absl/strings/str_split.h"
+#include "clang_modules/modulemap/cache.h"
 #include "compiler_flags.h"
 #include "compiler_flags_parser.h"
 #include "compiler_info.h"
@@ -47,9 +48,13 @@ class CppIncludeProcessorPosixTest : public testing::Test {
     InstallReadCommandOutputFunc(ReadCommandOutputByPopen);
     IncludeFileFinder::Init(true);
     ListDirCache::Init(4096);
+    modulemap::Cache::Init(10);
   }
 
-  void TearDown() override { ListDirCache::Quit(); }
+  void TearDown() override {
+    modulemap::Cache::Quit();
+    ListDirCache::Quit();
+  }
 
   std::unique_ptr<CompilerInfoData> CreateCompilerInfoWithArgs(
       const CompilerFlags& flags,

@@ -116,6 +116,17 @@ class HttpChunkParser {
   std::string error_message_;
 };
 
+struct URL {
+  std::string scheme;
+  std::string hostname;
+  int port;
+  std::string path;
+  // TODO: support the case with username & password?
+};
+
+// Parse a given |url| and set the parsed result to |out|.
+// It returns false if the parse failed.
+bool ParseURL(absl::string_view url, URL* out);
 
 }  // namespace devtools_goma
 

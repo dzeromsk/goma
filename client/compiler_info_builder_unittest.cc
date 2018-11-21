@@ -43,7 +43,7 @@ class CompilerInfoBuilderTest : public testing::Test {
   CompilerTypeSpecificCollection cts_collection_;
 };
 
-TEST_F(CompilerInfoBuilderTest, IsCwdRelative) {
+TEST_F(CompilerInfoBuilderTest, DependsOnCwd) {
   {
     std::unique_ptr<CompilerInfoData> cid(new CompilerInfoData);
     cid->mutable_cxx()->add_cxx_system_include_paths("/usr/local/include");
@@ -54,8 +54,8 @@ TEST_F(CompilerInfoBuilderTest, IsCwdRelative) {
     cid->mutable_cxx()->add_cxx_system_include_paths("/usr/include");
     cid->set_found(true);
     CxxCompilerInfo info(std::move(cid));
-    EXPECT_FALSE(info.IsCwdRelative("/tmp"));
-    EXPECT_TRUE(info.IsCwdRelative("/usr"));
+    EXPECT_FALSE(info.DependsOnCwd("/tmp"));
+    EXPECT_TRUE(info.DependsOnCwd("/usr"));
   }
 
   {
@@ -69,8 +69,8 @@ TEST_F(CompilerInfoBuilderTest, IsCwdRelative) {
     cid->mutable_cxx()->add_cxx_system_include_paths("/usr/include");
     cid->set_found(true);
     CxxCompilerInfo info(std::move(cid));
-    EXPECT_TRUE(info.IsCwdRelative("/tmp"));
-    EXPECT_FALSE(info.IsCwdRelative("/usr/src"));
+    EXPECT_TRUE(info.DependsOnCwd("/tmp"));
+    EXPECT_FALSE(info.DependsOnCwd("/usr/src"));
   }
 }
 
@@ -96,7 +96,7 @@ TEST_F(CompilerInfoBuilderTest, FillFromCompilerOutputsShouldUseProperPath) {
   EXPECT_EQ(0, data->failed_at());
 }
 
-TEST_F(CompilerInfoBuilderTest, IsCwdRelativeWithResource) {
+TEST_F(CompilerInfoBuilderTest, DependsOnCwdWithResource) {
   TmpdirUtil tmpdir("is_cwd_relative");
   tmpdir.CreateEmptyFile("asan_blacklist.txt");
 
@@ -111,8 +111,8 @@ TEST_F(CompilerInfoBuilderTest, IsCwdRelativeWithResource) {
     *cid->add_resource() = r_data;
 
     CxxCompilerInfo info(std::move(cid));
-    EXPECT_TRUE(info.IsCwdRelative(tmpdir.tmpdir()));
-    EXPECT_FALSE(info.IsCwdRelative("/nonexistent"));
+    EXPECT_TRUE(info.DependsOnCwd(tmpdir.tmpdir()));
+    EXPECT_FALSE(info.DependsOnCwd("/nonexistent"));
   }
 
   {  // relative path file.
@@ -126,8 +126,8 @@ TEST_F(CompilerInfoBuilderTest, IsCwdRelativeWithResource) {
     *cid->add_resource() = r_data;
 
     CxxCompilerInfo info(std::move(cid));
-    EXPECT_TRUE(info.IsCwdRelative(tmpdir.tmpdir()));
-    EXPECT_TRUE(info.IsCwdRelative("/nonexistent"));
+    EXPECT_TRUE(info.DependsOnCwd(tmpdir.tmpdir()));
+    EXPECT_TRUE(info.DependsOnCwd("/nonexistent"));
   }
 }
 

@@ -82,8 +82,8 @@ bool CxxCompilerInfo::IsSystemInclude(const string& filepath) const {
   return false;
 }
 
-bool CxxCompilerInfo::IsCwdRelative(const string& cwd) const {
-  if (CompilerInfo::IsCwdRelative(cwd)) {
+bool CxxCompilerInfo::DependsOnCwd(const string& cwd) const {
+  if (CompilerInfo::DependsOnCwd(cwd)) {
     return true;
   }
 

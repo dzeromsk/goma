@@ -53,10 +53,12 @@ class GetClangPluginPath : public FlagParser::Callback {
 };
 
 bool AddSubprogramInfo(
-    const string& path,
+    const string& user_specified_path,
+    const string& abs_path,
     google::protobuf::RepeatedPtrField<CompilerInfoData::SubprogramInfo>* ss) {
   CompilerInfoData::SubprogramInfo* s = ss->Add();
-  if (!CxxCompilerInfoBuilder::SubprogramInfoFromPath(path, s)) {
+  if (!CxxCompilerInfoBuilder::SubprogramInfoFromPath(user_specified_path,
+                                                      abs_path, s)) {
     ss->RemoveLast();
     return false;
   }
@@ -379,7 +381,7 @@ bool GCCCompilerInfoBuilder::GetExtraSubprograms(
       LOG(INFO) << "ignored duplicated subprogram: " << absolute_path;
       continue;
     }
-    if (!AddSubprogramInfo(absolute_path,
+    if (!AddSubprogramInfo(path, absolute_path,
                            compiler_info->mutable_subprograms())) {
       LOG(ERROR) << "invalid plugin:"
                  << " absolute_path=" << absolute_path
@@ -428,7 +430,7 @@ bool GCCCompilerInfoBuilder::GetExtraSubprograms(
       LOG(INFO) << "ignored duplicated subprogram: " << absolute_path;
       continue;
     }
-    if (!AddSubprogramInfo(absolute_path,
+    if (!AddSubprogramInfo(path, absolute_path,
                            compiler_info->mutable_subprograms())) {
       LOG(ERROR) << "invalid subprogram:"
                  << " absolute_path=" << absolute_path

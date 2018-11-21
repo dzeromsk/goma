@@ -501,14 +501,6 @@ static_library("compiler_proxy_lib") {
   ]
 
   if (os == "mac") {
-    sources += [
-      "openssl_engine_helper.h",
-      "openssl_engine_helper_mac.cc",
-    ]
-    libs += [
-      "Security.framework",
-      "Foundation.framework",
-    ]
     deps += [ "//third_party/chromium_base:mac_version" ]
   }
   if (os == "win") {
@@ -520,7 +512,7 @@ static_library("compiler_proxy_lib") {
     ]
     deps += [ "//client/certs:certs_resource" ]
   }
-  if (os != "mac" && os != "win") {
+  if (os != "win") {
     sources += [
       "openssl_engine_helper.h",
       "openssl_engine_helper_generic.cc",
@@ -849,6 +841,7 @@ executable("compiler_proxy") {
     ":rand_util_lib",
     ":subprocess_lib",
     "//build/config:exe_and_shlib_deps",
+    "//client/clang_modules/modulemap:modulemap_cache_lib",
     "//client/cxx:cxx_compiler_info_builder_lib",
     "//client/cxx/include_processor:cpp_include_processor_lib",
     "//client/cxx/include_processor:include_cache_lib",

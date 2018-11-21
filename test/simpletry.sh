@@ -382,6 +382,10 @@ function objcmp() {
  cmp $want $got
 }
 
+# Emulate gomacc cancel and confirm the compiler_proxy won't crash.
+# (crbug.com/904532)
+GOMACC_PATH="$GOMACC" python gomacc_close.py
+
 expect_success "${CC}_v" "${GOMA_CC} -v"
 # test $CC
 rm -f out_plain.o

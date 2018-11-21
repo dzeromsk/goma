@@ -1677,8 +1677,11 @@ void CompileTask::ProcessCallExecDone() {
     // Don't Retry if it is client error: 3xx or 4xx.
     // Retry if it is server error: 5xx (e.g. 502 error from GFE)
     //
-    // Also, OK to retry on socket timeout occurred during reciving response.
+    // Also, OK to retry
+    //  on socket write failure during sending request.
+    //  on socket timeout occurred during receiving response.
     if (((http_rpc_status_->http_return_code / 100) == 5) ||
+        (http_rpc_status_->state == HttpClient::Status::SENDING_REQUEST) ||
         (http_rpc_status_->state == HttpClient::Status::RECEIVING_RESPONSE)) {
       std::ostringstream ss;
       ss << "RPC failed http=" << http_rpc_status_->http_return_code
@@ -1690,12 +1693,13 @@ void CompileTask::ProcessCallExecDone() {
     } else {
       // No retry for client error: 3xx, 4xx (302, 403 for dos block,
       // 401 for auth error, etc).
-      LOG(WARNING) << trace_id_ << " RPC failed http="
-                   << http_rpc_status_->http_return_code
-                   << " state="
-                   << HttpClient::Status::StateName(http_rpc_status_->state)
-                   << ": " << http_rpc_status_->err_message
-                   << ": no retry";
+      std::string error_message =
+          absl::StrCat("no retry: RPC failed http=",
+                       http_rpc_status_->http_return_code,
+                       " state=",
+                       HttpClient::Status::StateName(http_rpc_status_->state),
+                       ": ", http_rpc_status_->err_message);
+      AddErrorToResponse(TO_LOG, error_message, false);
     }
   }
   if (err == OK && resp_->missing_input_size() > 0) {
@@ -1742,14 +1746,22 @@ void CompileTask::ProcessCallExecDone() {
         AddErrorToResponse(TO_USER, msg, true);
         want_fallback_ = false;
       } else {
-        LOG(WARNING) << trace_id_ << " exec error:"
-                     << resp_->error()
-                     << " " << retry_reason
-                     << " but http is healthy";
+        AddErrorToResponse(
+            TO_LOG,
+            absl::StrCat("no retry: exec error=", resp_->error(),
+                         " retry=", stats_->exec_request_retry(),
+                         " reason=", retry_reason,
+                         " http=healthy"),
+            false);
       }
     } else {
-      LOG(WARNING) << trace_id_
-                   << " won't retry because http client is not healthy.";
+      AddErrorToResponse(
+          TO_LOG,
+          absl::StrCat("no retry: exec error=", resp_->error(),
+                       " retry=", stats_->exec_request_retry(),
+                       " reason=", retry_reason,
+                       " http=unhealthy"),
+          false);
     }
     CheckNoMatchingCommandSpec(retry_reason);
     ProcessFinished("fail in call exec");
@@ -3717,18 +3729,17 @@ void CompileTask::MayFixSubprogramSpec(
     return;
   }
   for (const auto& info : compiler_info_state_.get()->info().subprograms()) {
-    DCHECK(file::IsAbsolutePath(info.name))
-        << "filename of subprogram is expected to be absolute path."
-        << " info.name=" << info.name
-        << " info.hash=" << info.hash;
-    if (!used_subprogram_name.insert(info.name).second) {
+    if (!used_subprogram_name.insert(info.abs_path).second) {
       LOG(ERROR) << "The same subprogram is added twice.  Ignoring."
-                 << " info.name=" << info.name
+                 << " info.abs_path=" << info.abs_path
                  << " info.hash=" << info.hash;
       continue;
     }
     SubprogramSpec* subprog_spec = subprogram_specs->Add();
-    subprog_spec->set_path(info.name);
+
+    subprog_spec->set_path(service_->use_user_specified_path_for_subprograms()
+                               ? info.user_specified_path
+                               : info.abs_path);
     subprog_spec->set_binary_hash(info.hash);
     subprog_spec->set_size(info.file_stat.size);
   }
