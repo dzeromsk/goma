@@ -33,9 +33,7 @@ import sys
 import tarfile
 import tempfile
 import time
-import urllib
 import urllib2
-import urlparse
 import zipfile
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -145,46 +143,6 @@ def _ShouldUpdate(cur_ver, next_ver, bad_vers):
   if cur_ver == next_ver:
     return False
   return _IsBadVersion(cur_ver, bad_vers)
-
-
-def _GetProxyEnv():
-  """Detects HTTP proxy environmental variables.
-
-  Returns:
-    a dictionary of proxy host and port if found.  Otherwise, None.
-
-  Raises:
-    ConfigError: if GOMA cannot handle HTTP proxy environmental variables.
-  """
-  http_proxy = urllib.getproxies()
-  for proxy_type in ['https', 'http']:
-    if proxy_type in http_proxy:
-      proxy_env = http_proxy[proxy_type]
-      break
-  else:  # No acceptable HTTP proxy environmental variables configured.
-    return None
-
-  # Convert <host>[:<port>] to http://<host>[:<port>].
-  if '://' not in proxy_env:
-    proxy_env = 'http://%s' % proxy_env
-
-  parsed = urlparse.urlparse(proxy_env)
-  # I am confident that ParseResult has scheme parameter.
-  # See Also: http://docs.python.org/library/urlparse.html
-  # pylint: disable=E1101
-  if parsed.scheme == 'https':
-    raise ConfigError('Sorry, GOMA do not support proxy with HTTPS.')
-
-  if parsed.username or parsed.password:
-    raise ConfigError('Sorry, GOMA do not support proxy with user/password.')
-
-  if not parsed.hostname:
-    raise ConfigError('You should set HTTP proxy host.')
-
-  if not parsed.port:
-    raise ConfigError('You cannot omit HTTP proxy port to use GOMA.')
-
-  return {'host': parsed.hostname, 'port': str(parsed.port)}
 
 
 def _ParseSpaceSeparatedValues(data):
