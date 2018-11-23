@@ -204,9 +204,6 @@ string HttpClient::Options::RequestURL(absl::string_view path) const {
 }
 
 string HttpClient::Options::Host() const {
-  if (!http_host_name.empty()) {
-    return http_host_name;
-  }
   if ((dest_host_name != SocketHost()
        || dest_port != SocketPort())
       && use_ssl) {
@@ -218,8 +215,6 @@ string HttpClient::Options::Host() const {
 string HttpClient::Options::DebugString() const {
   std::ostringstream ss;
   ss << "dest=" << dest_host_name << ":" << dest_port;
-  if (!http_host_name.empty())
-    ss << " http_host=" << http_host_name;
   if (!url_path_prefix.empty())
     ss << " url_path_prefix=" << url_path_prefix;
   if (!proxy_host_name.empty())
@@ -1128,8 +1123,6 @@ string HttpClient::DebugString() const {
   ss << std::endl;
   ss << "User-Agent: " << kUserAgentString << std::endl;
   ss << "SocketPool: " << socket_pool_->DebugString() << std::endl;
-  if (!options_.http_host_name.empty())
-    ss << "Host: " << options_.http_host_name << std::endl;
   if (!options_.authorization.empty())
     ss << "Authorization: enabled" << std::endl;
   if (!options_.cookie.empty())
@@ -1208,9 +1201,6 @@ string HttpClient::DebugString() const {
 void HttpClient::DumpToJson(Json::Value* json) const {
   AUTOLOCK(lock, &mu_);
   (*json)["health_status"] = health_status_;
-  if (!options_.http_host_name.empty()) {
-    (*json)["http_host_name"] = options_.http_host_name;
-  }
   if (!options_.url_path_prefix.empty()) {
     (*json)["url_path_prefix"] = options_.url_path_prefix;
   }

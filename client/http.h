@@ -71,7 +71,6 @@ class HttpClient {
     string cookie;
     bool capture_response_header;
     string url_path_prefix;
-    string http_host_name;
     bool use_ssl;
     string ssl_extra_cert;
     string ssl_extra_cert_data;
