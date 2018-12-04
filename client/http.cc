@@ -204,9 +204,7 @@ string HttpClient::Options::RequestURL(absl::string_view path) const {
 }
 
 string HttpClient::Options::Host() const {
-  if ((dest_host_name != SocketHost()
-       || dest_port != SocketPort())
-      && use_ssl) {
+  if (dest_host_name != SocketHost() || dest_port != SocketPort()) {
     return dest_host_name;
   }
   return SocketHost();

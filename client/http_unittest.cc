@@ -113,6 +113,28 @@ TEST(HttpClientOptions, InitFromURLWithExplicitPort) {
   EXPECT_EQ("/foo/bar", options.url_path_prefix);
 }
 
+TEST(HttpClientOptions, ProxyOptionsWitHTTP) {
+  HttpClient::Options options;
+  options.proxy_host_name = "proxy-example.com";
+  options.proxy_port = 1234;
+  EXPECT_TRUE(options.InitFromURL("http://example.com"));
+  EXPECT_EQ("proxy-example.com", options.SocketHost());
+  EXPECT_EQ(1234, options.SocketPort());
+  EXPECT_EQ("example.com", options.Host());
+  EXPECT_EQ("http://example.com:80/foo", options.RequestURL("foo"));
+}
+
+TEST(HttpClientOptions, ProxyOptionsWitHTTPS) {
+  HttpClient::Options options;
+  options.proxy_host_name = "proxy-example.com";
+  options.proxy_port = 1234;
+  EXPECT_TRUE(options.InitFromURL("https://example.com"));
+  EXPECT_EQ("proxy-example.com", options.SocketHost());
+  EXPECT_EQ(1234, options.SocketPort());
+  EXPECT_EQ("example.com", options.Host());
+  EXPECT_EQ("/foo", options.RequestURL("foo"));
+}
+
 class HttpClientTest : public ::testing::Test {
  protected:
   class TestContext {
