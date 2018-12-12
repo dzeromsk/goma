@@ -72,6 +72,7 @@ class GCCFlags : public CxxFlags {
   const std::pair<string, string>& clang_module_file() const {
     return clang_module_file_;
   }
+  bool has_emit_module() const { return has_emit_module_; }
 
   CompilerFlagType type() const override { return CompilerFlagType::Gcc; }
 
@@ -93,12 +94,18 @@ class GCCFlags : public CxxFlags {
   static bool IsGCCCommand(absl::string_view arg);
   static bool IsClangCommand(absl::string_view arg);
   static bool IsNaClGCCCommand(absl::string_view arg);
+  static bool IsNaClClangCommand(absl::string_view arg);
   static bool IsPNaClClangCommand(absl::string_view arg);
 
  private:
   friend class GCCFlagsTest;
   static string GetLanguage(const string& compiler_name,
                             const string& input_filename);
+
+  // Process -Xclang flags.
+  // It's OK just to add most -Xclang flags into compiler_info_flags.
+  // However, there is a few exceptions (See implementations).
+  void ProcessXclangFlags(const std::vector<string>& xclang_flags);
 
   std::vector<string> remote_flags_;
   std::vector<string> non_system_include_dirs_;
@@ -130,6 +137,7 @@ class GCCFlags : public CxxFlags {
   // clang-modules related variables
   bool has_fmodules_;
   bool has_fimplicit_module_maps_;
+  bool has_emit_module_;
   // explicit module-map-file (specified by -fmodule-map-file)
   string clang_module_map_file_;
   // explicit module-file (specified by -fmodule-file=[<name>=]<file>)

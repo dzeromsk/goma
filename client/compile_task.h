@@ -105,7 +105,8 @@ class CompileTask {
   void DumpToJson(bool need_detail, Json::Value* root) const;
 
   // DumpRequest is called on finished task.
-  void DumpRequest() const;
+  // A return value contains a message to show on a browser.
+  string DumpRequest() const;
 
   void SetFrozenTimestamp(absl::Time frozen_timestamp) {
     frozen_timestamp_ = frozen_timestamp;
@@ -124,6 +125,7 @@ class CompileTask {
   FRIEND_TEST(CompileTaskTest, UpdateStatsFinishedCacheHit);
   FRIEND_TEST(CompileTaskTest, UpdateStatsLocalFinished);
   FRIEND_TEST(CompileTaskTest, UpdateStatsAborted);
+  FRIEND_TEST(CompileTask, OmitDurationFromUserError);
 
   enum ErrDest {
     // To log: write in log file, and show on status page.
@@ -315,6 +317,16 @@ class CompileTask {
   // Add error message to response and sets error exit status.
   void AddErrorToResponse(
       ErrDest dest, const string& error_message, bool set_error);
+
+  // Convert a log line with duration to without duration.
+  //
+  // Note that this function returns the string as-is, if unexpected format
+  // string is given.
+  //
+  // e.g.
+  // input: compiler_proxy [173.736822ms]: this is error
+  // output: compiler_proxy: this is error
+  static string OmitDurationFromUserError(absl::string_view str);
 
   static void InitializeStaticOnce();
 

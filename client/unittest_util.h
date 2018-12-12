@@ -8,6 +8,8 @@
 
 #include <string>
 
+#include "absl/time/time.h"
+
 using std::string;
 
 namespace devtools_goma {
@@ -35,6 +37,8 @@ class TmpdirUtil {
 };
 
 string GetTestFilePath(const string& test_name);
+
+bool UpdateMtime(const string& path, absl::Time mtime);
 
 // Takes clang path.
 // If GOMATEST_CLANG_PATH is specified, it's preferred.

@@ -13,6 +13,10 @@
 #include "path.h"
 #include "path_resolver.h"
 
+#ifdef _WIN32
+#include "posix_helper_win.h"
+#endif
+
 namespace devtools_goma {
 
 /* static */
@@ -158,6 +162,7 @@ bool CompilerInfoBuilder::ResourceInfoFromPath(
   r->set_type(type);
   r->set_hash(std::move(hash));
   SetFileStatToData(file_stat, r->mutable_file_stat());
+  r->set_is_executable(access(abs_path.c_str(), X_OK) == 0);
   return true;
 }
 

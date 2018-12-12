@@ -32,7 +32,7 @@ struct FileStat {
   explicit FileStat(const string& filename);
 
   bool IsValid() const;
-  bool CanBeNewerThan(const FileStat& old, absl::Time last_checked) const;
+  bool CanBeNewerThan(const FileStat& old) const;
 
   std::string DebugString() const;
 
@@ -42,6 +42,16 @@ struct FileStat {
   }
 
   bool operator!=(const FileStat& other) const { return !(*this == other); }
+
+  // Check whether filestat can be stale or not.
+  // If a file is modified just after FileStat is taken, there is a case that
+  // mtime is the same even though a file is changed (especially if mtime
+  // resolution is coarse).
+  // We say a filestat can be stale if mtime and the time when we take FileStat
+  // are close enough.
+  // It can be OK to use a stale FileStat in a compile unit (since it means a
+  // file is changed during a compile), however, don't cache it.
+  bool CanBeStale() const;
 
   // For output during testing.
   friend std::ostream& operator<<(std::ostream& os, const FileStat& stat);
@@ -54,6 +64,10 @@ struct FileStat {
 #ifndef _WIN32
   void InitFromStat(const struct stat& stat_buf);
 #endif
+
+  // This is member to detect stale file stat.
+  // This should be earlier than actual time when timestat is taken.
+  absl::Time taken_at;
 };
 
 }  // namespace devtools_goma

@@ -401,7 +401,7 @@ class CompileService {
   void Wait();
 
   bool DumpTask(int task_id, string* out);
-  bool DumpTaskRequest(int task_id);
+  bool DumpTaskRequest(int task_id, string* message);
   // Dump the tasks whose state is active or frozen time stamp is after |after|.
   void DumpToJson(Json::Value* json, absl::Time after);
   void DumpStats(std::ostringstream* ss);

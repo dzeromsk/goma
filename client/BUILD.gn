@@ -1146,6 +1146,7 @@ static_library("goma_test_lib") {
   ]
   public_deps = [
     "//third_party:gtest",
+    "//third_party/abseil",
   ]
 }
 
@@ -1230,6 +1231,21 @@ executable("compile_task_unittest") {
     "//client/cxx/include_processor:cpp_include_processor_lib",
     "//client/java:jar_parser_lib",
     "//lib:compiler_flag_type_specific",
+  ]
+}
+
+executable("compiler_type_specific_unittest") {
+  testonly = true
+  sources = [
+    "compiler_type_specific_unittest.cc",
+  ]
+  deps = [
+    ":compiler_proxy_lib",
+    ":compiler_type_specific_lib",
+    ":goma_test_lib",
+    "//build/config:exe_and_shlib_deps",
+    "//lib:gcc_specific",
+    "//lib:vc_specific",
   ]
 }
 
@@ -1679,6 +1695,7 @@ executable("sha256_hash_cache_unittest") {
     ":goma_test_lib",
     ":sha256_hash_cache_lib",
     "//build/config:exe_and_shlib_deps",
+    "//third_party/abseil",
   ]
 }
 

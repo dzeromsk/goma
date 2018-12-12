@@ -20,6 +20,8 @@ class ClangTidyCompilerTypeSpecific : public CxxCompilerTypeSpecific {
       const string& local_compiler_path,
       const std::vector<string>& compiler_info_envs) override;
 
+  bool SupportsDepsCache(const CompilerFlags&) const override { return false; }
+
  private:
   ClangTidyCompilerTypeSpecific() = default;
 

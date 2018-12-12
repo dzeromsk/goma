@@ -57,6 +57,19 @@ static_library("clang_compiler_info_builder_helper_lib") {
   ]
 }
 
+static_library("nacl_compiler_info_builder_helper_lib") {
+  sources = [
+    "nacl_compiler_info_builder_helper.cc",
+    "nacl_compiler_info_builder_helper.h",
+  ]
+
+  deps = [
+    "//base",
+    "//lib",
+    "//third_party/abseil",
+  ]
+}
+
 static_library("cxx_compiler_info_builder_lib") {
   sources = [
     "cxx_compiler_info_builder.cc",
@@ -88,6 +101,7 @@ static_library("gcc_compiler_info_builder_lib") {
   deps = [
     ":clang_compiler_info_builder_helper_lib",
     ":cxx_compiler_info_builder_lib",
+    ":nacl_compiler_info_builder_helper_lib",
     "//client:common",
     "//client:ioutil_lib",
     "//lib",
@@ -177,6 +191,7 @@ executable("gcc_compiler_info_builder_unittest") {
     "//build/config:exe_and_shlib_deps",
     "//client:common",
     "//client:goma_test_lib",
+    "//client:subprocess_lib",
     "//lib",
   ]
 }

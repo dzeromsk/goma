@@ -136,5 +136,6 @@ executable("modulemap_cache_unittest") {
     "//build/config:exe_and_shlib_deps",
     "//client:file_stat_cache_lib",
     "//client:goma_test_lib",
+    "//third_party/abseil",
   ]
 }

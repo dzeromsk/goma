@@ -22,21 +22,16 @@ namespace devtools_goma {
 namespace modulemap {
 
 struct CollectedModuleMapFile {
-  CollectedModuleMapFile(string rel_path,
-                         string abs_path,
-                         FileStat file_stat,
-                         absl::Time checked_at)
+  CollectedModuleMapFile(string rel_path, string abs_path, FileStat file_stat)
       : rel_path(std::move(rel_path)),
         abs_path(std::move(abs_path)),
-        file_stat(std::move(file_stat)),
-        checked_at(std::move(checked_at)) {}
+        file_stat(std::move(file_stat)) {}
 
   // An relative path from cwd.
   // Possible absolute if an absolute path is specified as a module map file.
   string rel_path;
   string abs_path;
   FileStat file_stat;
-  absl::Time checked_at;
 };
 
 // Processor parses a modulemap file, and lists all extern modulemap files.

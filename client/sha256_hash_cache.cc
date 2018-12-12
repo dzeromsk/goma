@@ -20,8 +20,7 @@ bool SHA256HashCache::GetHashFromCacheOrFile(const string& path, string* hash) {
   {
     AUTO_SHARED_LOCK(lock, &mu_);
     const auto& it = cache_.find(path);
-    if (it != cache_.end() &&
-        !filestat.CanBeNewerThan(it->second.first, now_fn_())) {
+    if (it != cache_.end() && !filestat.CanBeNewerThan(it->second.first)) {
       *hash = it->second.second;
       hit_.Add(1);
       return true;
@@ -30,6 +29,10 @@ bool SHA256HashCache::GetHashFromCacheOrFile(const string& path, string* hash) {
 
   if (!GomaSha256FromFile(path, hash)) {
     return false;
+  }
+
+  if (filestat.CanBeStale()) {
+    return true;
   }
 
   AUTO_EXCLUSIVE_LOCK(lock, &mu_);

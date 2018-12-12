@@ -123,12 +123,6 @@ class ClangCompilerInfoBuilderHelper {
   static void UpdateIncludePaths(
       const std::vector<string>& paths,
       google::protobuf::RepeatedPtrField<string>* include_paths);
-
-#ifdef _WIN32
-  // GetNaClToolchainRoot is a part of hack needed for
-  // the (build: Windows, target: NaCl) compile.
-  static string GetNaClToolchainRoot(const string& normal_nacl_gcc_path);
-#endif
 };
 
 }  // namespace devtools_goma

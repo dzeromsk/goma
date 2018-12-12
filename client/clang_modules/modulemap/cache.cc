@@ -60,7 +60,7 @@ bool Cache::AddModuleMapFileAndDependents(const string& module_map_file,
     // If cache_hit, check FileStat.
     for (const auto& cf : cached_item) {
       FileStat fs = file_stat_cache->Get(cf.abs_path);
-      if (!fs.IsValid() || fs.CanBeNewerThan(cf.file_stat, cf.checked_at)) {
+      if (!fs.IsValid() || fs.CanBeNewerThan(cf.file_stat)) {
         // a file is deleted or changed.
         ok = false;
         break;
@@ -77,6 +77,8 @@ bool Cache::AddModuleMapFileAndDependents(const string& module_map_file,
     }
   }
 
+  cache_miss_.Add(1);
+
   // If cache is not found or invalidated, we just run the processor, and keep
   // the result.
   Processor processor(cwd, file_stat_cache);
@@ -86,6 +88,13 @@ bool Cache::AddModuleMapFileAndDependents(const string& module_map_file,
 
   for (const auto& cf : processor.collected_module_map_files()) {
     include_files->insert(cf.rel_path);
+  }
+
+  for (const auto& cf : processor.collected_module_map_files()) {
+    if (cf.file_stat.CanBeStale()) {
+      // Do not cache if stat can be stale.
+      return true;
+    }
   }
 
   {
@@ -101,7 +110,6 @@ bool Cache::AddModuleMapFileAndDependents(const string& module_map_file,
     }
   }
 
-  cache_miss_.Add(1);
   return true;
 }
 

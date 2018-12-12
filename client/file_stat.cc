@@ -15,6 +15,7 @@
 #include "filetime_win.h"
 #endif
 
+#include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "counterz.h"
 #include "glog/logging.h"
@@ -47,7 +48,7 @@ namespace devtools_goma {
 const off_t FileStat::kInvalidFileSize = -1;
 
 FileStat::FileStat(const string& filename)
-    : size(kInvalidFileSize), is_directory(false) {
+    : size(kInvalidFileSize), is_directory(false), taken_at(absl::Now()) {
   GOMA_COUNTERZ("FileStat");
 #ifndef _WIN32
   struct stat stat_buf;
@@ -68,7 +69,12 @@ FileStat::FileStat(const string& filename)
 
 #ifndef _WIN32
 void FileStat::InitFromStat(const struct stat& stat_buf) {
-  mtime = absl::FromTimeT(stat_buf.st_mtime);
+#ifdef __MACH__
+  mtime = absl::TimeFromTimespec(stat_buf.st_mtimespec);
+#else
+  mtime = absl::TimeFromTimespec(stat_buf.st_mtim);
+#endif
+
   size = stat_buf.st_size;
   is_directory = S_ISDIR(stat_buf.st_mode);
 }
@@ -78,13 +84,8 @@ bool FileStat::IsValid() const {
   return size != kInvalidFileSize && mtime.has_value();
 }
 
-bool FileStat::CanBeNewerThan(const FileStat& old,
-                              absl::Time last_checked) const {
-  // If mtime >= last_checked - 1, the file might be updated within
-  // the same second. We need to re-check the file for this case, too.
-  // The minus one is for VMs, where mtime can delay 1 second.
-  return (mtime.has_value() && *mtime >= last_checked - absl::Seconds(1)) ||
-         *this != old;
+bool FileStat::CanBeNewerThan(const FileStat& old) const {
+  return old.CanBeStale() || *this != old;
 }
 
 std::string FileStat::DebugString() const {
@@ -95,6 +96,16 @@ std::string FileStat::DebugString() const {
   ss << " is_directory=" << is_directory;
   ss << "}";
   return ss.str();
+}
+
+bool FileStat::CanBeStale() const {
+  DCHECK(mtime.has_value());
+
+  // If mtime + 1 >= taken_at, the file might be updated within
+  // the same second. We need to re-check the file for this case, too.
+  // The plus one is for VMs, where mtime can delay 1 second or Apple's HFS.
+  // TODO: make time resolution configurable.
+  return *mtime + absl::Seconds(1) >= taken_at;
 }
 
 std::ostream& operator<<(std::ostream& os, const FileStat& stat) {

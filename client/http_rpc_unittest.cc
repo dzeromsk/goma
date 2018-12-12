@@ -443,7 +443,7 @@ TEST_F(HttpRPCTest, PingFail) {
   HttpRPC::Status status;
   int r = http_rpc.Ping(wm_.get(), "/pingz", &status);
   EXPECT_EQ(0, r);
-  EXPECT_EQ("error: failed to connect to backend servers",
+  EXPECT_EQ("running: failed to connect to backend servers",
             http_client.GetHealthStatusMessage());
   http_client.WaitNoActive();
 }
@@ -488,7 +488,7 @@ TEST_F(HttpRPCTest, PingRejected) {
   int r = http_rpc.Ping(wm_.get(), "/pingz", &status);
   EXPECT_EQ(req_expected, req_buf);
   EXPECT_EQ(401, r);
-  EXPECT_EQ("running: access to backend servers was rejected.",
+  EXPECT_EQ("error: access to backend servers was rejected.",
             http_client.GetHealthStatusMessage());
   http_client.WaitNoActive();
   EXPECT_FALSE(socket_status.is_owned());
@@ -710,7 +710,7 @@ TEST_F(HttpRPCTest, TLSEnginePingFail) {
   HttpRPC::Status status;
   int r = http_rpc.Ping(wm_.get(), "/pingz", &status);
   EXPECT_EQ(0, r);
-  EXPECT_EQ("error: failed to connect to backend servers",
+  EXPECT_EQ("running: failed to connect to backend servers",
             http_client.GetHealthStatusMessage());
   http_client.WaitNoActive();
 }
@@ -760,7 +760,7 @@ TEST_F(HttpRPCTest, TLSEnginePingRejected) {
   int r = http_rpc.Ping(wm_.get(), "/pingz", &status);
   EXPECT_EQ(req_expected, req_buf);
   EXPECT_EQ(401, r);
-  EXPECT_EQ("running: access to backend servers was rejected.",
+  EXPECT_EQ("error: access to backend servers was rejected.",
             http_client.GetHealthStatusMessage());
   http_client.WaitNoActive();
   EXPECT_FALSE(socket_status.is_owned());

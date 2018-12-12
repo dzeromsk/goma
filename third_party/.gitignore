@@ -8,13 +8,12 @@ glog
 gtest
 jinja2
 jsoncpp/source
-libc++abi/trunk
-libc++/trunk
 libFuzzer/src
 llvm-build
 lss
 markupsafe
 protobuf/protobuf
+subprocess32
 xz
 yasm/source/patched-yasm
 zlib

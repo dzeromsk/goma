@@ -72,7 +72,7 @@ group("deps_no_options") {
     #  deps += [ "//third_party/instrumented_libraries:deps" ]
     #}
     if (use_custom_libcxx) {
-      public_deps += [ "//third_party/libc++:libcxx_proxy" ]
+      public_deps += [ "//buildtools/third_party/libc++" ]
       data += [ "$root_out_dir/libc++.so" ]
     }
 
@@ -255,7 +255,7 @@ config("common_sanitizer_flags") {
   }
 
   if (use_custom_libcxx) {
-    prefix = "//third_party"
+    prefix = "//buildtools/third_party"
     include = "trunk/include"
     cflags_cc += [
       "-nostdinc++",

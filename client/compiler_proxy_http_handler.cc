@@ -164,8 +164,6 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
     }
   }
   HttpClient::Options http_options;
-  http_options.proxy_host_name = FLAGS_PROXY_HOST;
-  http_options.proxy_port = FLAGS_PROXY_PORT;
   InitHttpClientOptions(&http_options);
   http_options.network_error_margin = network_error_margin;
   if (FLAGS_NETWORK_ERROR_THRESHOLD_PERCENT >= 0 &&
@@ -879,13 +877,14 @@ int CompilerProxyHttpHandler::HandleTaskRequest(
     int task_id = atoi(task_id_str.c_str());
 
     if (params["dump"] == "req") {
-      if (!service_.DumpTaskRequest(task_id)) {
+      string message;
+      if (!service_.DumpTaskRequest(task_id, &message)) {
         ss << "HTTP/1.1 404 Not found\r\n";
         ss << "\r\n";
         *response = ss.str();
         return 404;
       }
-      OutputOkHeader("text/plain", &ss);
+      OutputOkHeaderAndBody("text/plain", message, &ss);
       *response = ss.str();
       return 200;
     }

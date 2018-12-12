@@ -37,7 +37,7 @@ deps = {
 
      # chrome's deps/third_party/boringssl
      "client/third_party/boringssl/src":
-     "https://boringssl.googlesource.com/boringssl@46e12b03f97b367344bbd6d360cb36b7669eda95",
+     "https://boringssl.googlesource.com/boringssl@bf5021a6b8a4859d04966998e84fcbff16bffd78",
 
      # google-breakpad
      "client/third_party/breakpad/breakpad":
@@ -54,15 +54,10 @@ deps = {
      Var("chromium_git") + "/chromium/deps/yasm/patched-yasm.git@" +
          "b98114e18d8b9b84586b10d24353ab8616d4c5fc",
 
-     # libc++ r323563
-     "client/third_party/libc++/trunk":
-     Var("chromium_git") + "/chromium/llvm-project/libcxx.git@" +
-         "27c341db41bc9df5c6f19cde65f002d6f1c2eb3c",
-
-     # libc++abi r323495
-     "client/third_party/libc++abi/trunk":
-     Var("chromium_git") + "/chromium/llvm-project/libcxxabi.git@" +
-         "e1601db2504857d44db88a5d4e2ca50b32bbb7d9",
+     # chromium's buildtools containing libc++, libc++abi, clang_format and gn.
+     "client/buildtools":
+     Var("chromium_git") + "/chromium/buildtools@" +
+         "24ebce4578745db15274e180da1938ebc1358243",
 
      # libFuzzer
      "client/third_party/libFuzzer/src":
@@ -76,11 +71,6 @@ deps = {
      # google benchmark v1.4.1
      "client/third_party/benchmark/src":
      "https://github.com/google/benchmark.git@e776aa0275e293707b6a0901e0e8d8a8a3679508",
-
-     # clang format scripts
-     "client/buildtools/clang_format/script":
-     Var("chromium_git") + "/chromium/llvm-project/cfe/tools/" +
-     "clang-format.git@0653eee0c81ea04715c635dd0885e8096ff6ba6d",
 
      # Jinja2 template engine v2.10
      "client/third_party/jinja2":
@@ -97,6 +87,11 @@ deps = {
      # gflags 2.2.1
      "client/third_party/gflags/src":
      "https://github.com/gflags/gflags.git@46f73f88b18aee341538c0dfc22b1710a6abedef",
+
+     # subprocess32 3.5.3
+     "client/third_party/subprocess32":
+     "https://github.com/google/python-subprocess32@" +
+     "0a814da4a033875880534fd488770e2d97febe2f",
 }
 
 hooks = [
@@ -209,4 +204,9 @@ hooks = [
          '--disable',
        ],
      },
+]
+
+recursedeps = [
+  # buildtools provides clang_format, libc++, and libc++abi
+  'client/buildtools',
 ]

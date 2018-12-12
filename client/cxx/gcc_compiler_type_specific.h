@@ -27,6 +27,8 @@ class GCCCompilerTypeSpecific : public CxxCompilerTypeSpecific {
       const CommandSpec& command_spec,
       FileStatCache* file_stat_cache) override;
 
+  bool SupportsDepsCache(const CompilerFlags& flags) const override;
+
  private:
   GCCCompilerTypeSpecific() = default;
 

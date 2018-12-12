@@ -42,12 +42,14 @@ CompilerInfo::ResourceInfo CompilerInfo::ResourceInfo::FromData(
   info.type = info_data.type();
   info.hash = info_data.hash();
   GetFileStatFromData(info_data.file_stat(), &info.file_stat);
+  info.is_executable = info_data.is_executable();
   return info;
 }
 
 string CompilerInfo::ResourceInfo::DebugString() const {
-  return absl::StrCat(
-      "name: ", name, ", valid:", file_stat.IsValid(), ", hash: ", hash);
+  return absl::StrCat("name: ", name, ", type: ", type,
+                      ", valid:", file_stat.IsValid(), ", hash: ", hash,
+                      ", is_executable: ", is_executable);
 }
 
 string CompilerInfo::DebugString() const {

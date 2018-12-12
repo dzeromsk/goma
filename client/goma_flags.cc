@@ -388,10 +388,6 @@ GOMA_DEFINE_string(SERVICE_ACCOUNT_JSON_FILE, "",
                    "google cloud console."
                    "It will be read everytime when access token need to be "
                    "refreshed. It should be absolute path.");
-GOMA_DEFINE_string(HTTP_HOST, "",
-                   "Alternative host name shown in HTTP Host field. "
-                   "If you use SSL tunnel, compiler proxy connects localhost "
-                   "but the expected Host field might not be localhost.");
 GOMA_DEFINE_bool(USE_SSL, true,
                  "Communicate server with SSL.");
 GOMA_DEFINE_string(SSL_EXTRA_CERT, "",
@@ -508,19 +504,22 @@ GOMA_DEFINE_bool(COMPILER_PROXY_ENABLE_CRASH_DUMP, false,
 // jam@ confirmed the recent MacOSX does not affected by this bug.
 // https://code.google.com/p/chromium/issues/detail?id=387934
 // TODO: enable this again. (b/80404226, b/111241394#comment6)
+#ifdef _WIN32
+#define DEFAULT_DONT_KILL_SUBPROCESS false
+#else
+// TODO:
+// subprocess handling in posix seems not working correctly.
+// obj file seems to be updated even after subprocess killing.
+#define DEFAULT_DONT_KILL_SUBPROCESS true
+#endif
+
 GOMA_DEFINE_bool(DONT_KILL_SUBPROCESS,
-                 true,
+                 DEFAULT_DONT_KILL_SUBPROCESS,
                  "Don't kill subprocess.");
 
-#ifdef _WIN32
-# define DEFAULT_DONT_KILL_COMMANDS \
-    "x86_64-nacl-gcc,x86_64-nacl-g++,i686-nacl-gcc,i686-nacl-g++," \
-    "pnacl-clang,pnacl-clang++"
-#else
-# define DEFAULT_DONT_KILL_COMMANDS ""
-#endif
+// TODO: Remove this.
 GOMA_DEFINE_string(DONT_KILL_COMMANDS,
-                   DEFAULT_DONT_KILL_COMMANDS,
+                   "",
                    "Don't kill commands. "
                    "On Windows, nacl-gcc sometimes remains its child process "
                    "with suspended state.  In that situation, \"goma_ctl.bat "

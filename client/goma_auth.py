@@ -337,7 +337,7 @@ def CheckSettings():
   Returns:
     true if user is ready to use Goma.
   """
-  cmd = [GOMA_FETCH, GOMA_SETTINGS_URI]
+  cmd = [GOMA_FETCH, '--auth', GOMA_SETTINGS_URI]
   try:
     subprocess.check_output(cmd, stderr=subprocess.STDOUT)  # discard outputs.
     print 'Ready to use Goma'

@@ -90,8 +90,8 @@ class CompilerInfo {
       return file_stat.IsValid() && !hash.empty() && !name.empty();
     }
     bool operator==(const ResourceInfo& rhs) const {
-      return name == rhs.name && type == rhs.type &&
-          hash == rhs.hash && file_stat == rhs.file_stat;
+      return name == rhs.name && type == rhs.type && hash == rhs.hash &&
+             file_stat == rhs.file_stat && is_executable == rhs.is_executable;
     }
     string DebugString() const;
 
@@ -99,6 +99,7 @@ class CompilerInfo {
     CompilerInfoData::ResourceType type;
     string hash;
     FileStat file_stat;
+    bool is_executable = false;
   };
 
   virtual ~CompilerInfo() = default;

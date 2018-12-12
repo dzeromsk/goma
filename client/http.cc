@@ -192,10 +192,11 @@ int HttpClient::Options::SocketPort() const {
 
 string HttpClient::Options::RequestURL(absl::string_view path) const {
   std::ostringstream url;
-  if ((dest_host_name != SocketHost()
-       || dest_port != SocketPort())
-      && !use_ssl) {
-    // without SSL and with proxy, send request with absolute-form.
+  if (!use_ssl && UseProxy()) {
+    // Without SSL (i.e. without CONNECT) and with proxy, we must send request
+    // with absolute-form.
+    // See: RFC 7230 5.3.2. absolute-form.
+    //      https://tools.ietf.org/html/rfc7230#section-5.3.2
     url << "http://" << dest_host_name << ':' << dest_port;
   }
   url << url_path_prefix << path;
@@ -204,10 +205,9 @@ string HttpClient::Options::RequestURL(absl::string_view path) const {
 }
 
 string HttpClient::Options::Host() const {
-  if (dest_host_name != SocketHost() || dest_port != SocketPort()) {
-    return dest_host_name;
-  }
-  return SocketHost();
+  // See: RFC 7230 5.4 Host.
+  //      https://tools.ietf.org/html/rfc7230#section-5.4
+  return dest_host_name;
 }
 
 string HttpClient::Options::DebugString() const {
@@ -1300,6 +1300,7 @@ void HttpClient::DumpStatsToProto(HttpRPCStats* stats) const {
 
 int HttpClient::UpdateHealthStatusMessageForPing(
     const Status& status, absl::optional<absl::Duration> round_trip_time) {
+  const string running = options_.fail_fast ? "error:" : "running:";
   LOG(INFO) << "Ping status:"
             << " http_return_code=" << status.http_return_code
             << " throttle_time=" << status.throttle_time
@@ -1329,23 +1330,24 @@ int HttpClient::UpdateHealthStatusMessageForPing(
     return ping_http_return_code_;
   }
   if (!status.finished) {
-    health_status_ = "error: ping no response";
+    health_status_ = absl::StrCat(running, " ping no response");
     ping_http_return_code_ = 408; // status timeout.
     return ping_http_return_code_;
   }
   if (!status.connect_success) {
-    health_status_ = "error: failed to connect to backend servers";
+    health_status_ = absl::StrCat(running,
+                                  " failed to connect to backend servers");
     ping_http_return_code_ = 0;
     return ping_http_return_code_;
   }
   if (status.err == ERR_TIMEOUT) {
-    health_status_ = "error: timed out to send request to backend servers";
+    health_status_ = absl::StrCat(
+        running, " timed out to send request to backend servers");
     ping_http_return_code_ = 408;
     return ping_http_return_code_;
   }
   ping_http_return_code_ = status.http_return_code;
   ping_round_trip_time_ = round_trip_time;
-  const string running = options_.fail_fast ? "error:" : "running:";
   if (status.http_return_code != 200) {
     int status_code = status.http_return_code;
     enabled_from_ =
@@ -1354,22 +1356,24 @@ int HttpClient::UpdateHealthStatusMessageForPing(
       NetworkErrorDetectedUnlocked();
     }
     if (status.http_return_code == 401) {
-      // TODO: make it error, so goma_ctl abort "start"?
-      health_status_ = running + " access to backend servers was rejected.";
+      // No chance of recovery for 401.  Encourage users to authenticate
+      // instead.
+      health_status_ = "error: access to backend servers was rejected.";
     } else if (status.http_return_code == 302
                || status.http_return_code == 403) {
       std::ostringstream ss;
-      ss << running << " access to backend servers was blocked:"
-         << status.http_return_code;
-      health_status_ = ss.str();
+      health_status_ = absl::StrCat(
+          running,
+          " access to backend servers was blocked:", status.http_return_code);
     } else if (status.http_return_code == 0 && status.err < 0) {
-      health_status_ = running + " failed to send request to backend servers";
+      health_status_ = absl::StrCat(
+          running, " failed to send request to backend servers");
       status_code = 500;
     } else {
       std::ostringstream ss;
-      ss << running << " access to backend servers was failed:"
-         << status.http_return_code;
-      health_status_ = ss.str();
+      health_status_ = absl::StrCat(
+          running,
+          " access to backend servers was failed:", status.http_return_code);
     }
     return status_code;
   }

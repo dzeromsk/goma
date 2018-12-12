@@ -57,6 +57,12 @@ GCCCompilerTypeSpecific::RunIncludeProcessor(
       trace_id, compiler_flags, compiler_info, command_spec, file_stat_cache);
 }
 
+bool GCCCompilerTypeSpecific::SupportsDepsCache(
+    const CompilerFlags& flags) const {
+  const GCCFlags& gcc_flags = static_cast<const GCCFlags&>(flags);
+  return gcc_flags.mode() == GCCFlags::COMPILE;
+}
+
 CompilerTypeSpecific::IncludeProcessorResult
 GCCCompilerTypeSpecific::RunThinLTOImports(const string& trace_id,
                                            const GCCFlags& flags) {

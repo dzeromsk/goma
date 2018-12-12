@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "autolock_timer.h"
 #include "unittest_util.h"
@@ -14,25 +15,19 @@ namespace devtools_goma {
 
 class SHA256HashCacheTest : public testing::Test {
  public:
-  SHA256HashCacheTest() {
-    dummy_time_ = absl::Time();
-    cache_.now_fn_ = GetDummyTime;
-  }
 
  protected:
-  static absl::Time GetDummyTime() { return dummy_time_; }
-
-  static absl::Time dummy_time_;
   SHA256HashCache cache_;
 };
-
-absl::Time SHA256HashCacheTest::dummy_time_;
 
 TEST_F(SHA256HashCacheTest, BasicTest) {
   TmpdirUtil tmpdir("sha256_hash_cache");
 
   tmpdir.CreateEmptyFile("empty");
   const std::string& empty = tmpdir.FullPath("empty");
+
+  // Set old timestamp.
+  UpdateMtime(empty, absl::Now() - absl::Seconds(2));
 
   std::string hash;
 
@@ -52,7 +47,6 @@ TEST_F(SHA256HashCacheTest, BasicTest) {
   // Set future time.
   auto empty_file_stat = FileStat(empty);
   ASSERT_TRUE(empty_file_stat.mtime.has_value());
-  dummy_time_ = *empty_file_stat.mtime + absl::Seconds(2);
 
   // cache hit
   EXPECT_TRUE(cache_.GetHashFromCacheOrFile(empty, &hash));

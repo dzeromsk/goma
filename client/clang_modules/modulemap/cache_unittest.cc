@@ -7,6 +7,8 @@
 #include <set>
 #include <string>
 
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "autolock_timer.h"
 #include "client/unittest_util.h"
 #include "gtest/gtest.h"
@@ -27,37 +29,31 @@ class ModuleMapCacheTest : public testing::Test {
   ~ModuleMapCacheTest() { modulemap::Cache::Quit(); }
 
  protected:
-  string CreateTmpFile(const string& content, const string& name) {
+  string CreateTmpFileWithOldMtime(const string& content, const string& name) {
     tmpdir_util_->CreateTmpFile(name, content);
-    return tmpdir_util_->FullPath(name);
-  }
 
-  // Change All FileStat in cache so that the current time is newer than
-  // the cached time.
-  void EnsureNowIsNotNewerThanCachedFileStat() {
-    AUTO_EXCLUSIVE_LOCK(lock, &modulemap::Cache::instance()->mu_);
+    string path = tmpdir_util_->FullPath(name);
 
-    for (auto& entry : modulemap::Cache::instance()->cache_) {
-      for (auto& mf : entry.second) {
-        mf.checked_at += absl::Seconds(2);
-      }
-    }
+    // Set old timestamp.
+    UpdateMtime(path.c_str(), absl::Now() - absl::Seconds(2));
+
+    return path;
   }
 
   std::unique_ptr<TmpdirUtil> tmpdir_util_;
 };
 
 TEST_F(ModuleMapCacheTest, Basic) {
-  CreateTmpFile(R"(
+  CreateTmpFileWithOldMtime(R"(
 module foo {
   extern module bar "bar.modulemap"
 })",
-                "foo.modulemap");
-  CreateTmpFile(R"(
+                            "foo.modulemap");
+  CreateTmpFileWithOldMtime(R"(
 module bar {
   header "a.h"
 })",
-                "bar.modulemap");
+                            "bar.modulemap");
 
   EXPECT_EQ(0U, modulemap::Cache::instance()->cache_hit());
   EXPECT_EQ(0U, modulemap::Cache::instance()->cache_miss());
@@ -75,8 +71,6 @@ module bar {
   EXPECT_EQ(0U, modulemap::Cache::instance()->cache_hit());
   EXPECT_EQ(1U, modulemap::Cache::instance()->cache_miss());
 
-  EnsureNowIsNotNewerThanCachedFileStat();
-
   {
     std::set<string> include_files;
     FileStatCache file_stat_cache;
@@ -89,14 +83,12 @@ module bar {
   EXPECT_EQ(1U, modulemap::Cache::instance()->cache_hit());
   EXPECT_EQ(1U, modulemap::Cache::instance()->cache_miss());
 
-  EnsureNowIsNotNewerThanCachedFileStat();
-
   // Update bar.modulemap
-  CreateTmpFile(R"(
+  CreateTmpFileWithOldMtime(R"(
 module bar {
   header "ab.h"
 })",
-                "bar.modulemap");
+                            "bar.modulemap");
 
   {
     std::set<string> include_files;
@@ -116,21 +108,21 @@ TEST_F(ModuleMapCacheTest, Spill) {
   modulemap::Cache::Quit();
   modulemap::Cache::Init(2);
 
-  CreateTmpFile(R"(
+  CreateTmpFileWithOldMtime(R"(
 module foo {
   header "a.h"
 })",
-                "foo.modulemap");
-  CreateTmpFile(R"(
+                            "foo.modulemap");
+  CreateTmpFileWithOldMtime(R"(
 module bar {
   header "a.h"
 })",
-                "bar.modulemap");
-  CreateTmpFile(R"(
+                            "bar.modulemap");
+  CreateTmpFileWithOldMtime(R"(
 module baz {
   header "a.h"
 })",
-                "baz.modulemap");
+                            "baz.modulemap");
 
   EXPECT_EQ(0U, modulemap::Cache::instance()->cache_hit());
   EXPECT_EQ(0U, modulemap::Cache::instance()->cache_miss());
@@ -153,7 +145,6 @@ module baz {
   EXPECT_EQ(2U, modulemap::Cache::instance()->cache_miss());
   EXPECT_EQ(0U, modulemap::Cache::instance()->cache_evicted());
 
-  EnsureNowIsNotNewerThanCachedFileStat();
   // Process "baz".
   {
     std::set<string> include_files;
@@ -168,7 +159,6 @@ module baz {
   EXPECT_EQ(3U, modulemap::Cache::instance()->cache_miss());
   EXPECT_EQ(1U, modulemap::Cache::instance()->cache_evicted());
 
-  EnsureNowIsNotNewerThanCachedFileStat();
   // Process "bar" again. It's not evicted.
   {
     std::set<string> include_files;
@@ -183,7 +173,6 @@ module baz {
   EXPECT_EQ(3U, modulemap::Cache::instance()->cache_miss());
   EXPECT_EQ(1U, modulemap::Cache::instance()->cache_evicted());
 
-  EnsureNowIsNotNewerThanCachedFileStat();
   // Process "foo" again. It's evicted.
   {
     std::set<string> include_files;

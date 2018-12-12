@@ -33,6 +33,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib
 import urllib2
 import zipfile
 
@@ -57,6 +58,8 @@ _CHECKSUM_FILE = 'sha256.json'
 _TIMESTAMP_PATTERN = re.compile('(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})')
 _TIMESTAMP_FORMAT = '%Y/%m/%d %H:%M:%S'
 
+_CRASH_SERVER = 'https://clients2.google.com/cr/report'
+_STAGING_CRASH_SERVER = 'https://clients2.google.com/cr/staging_report'
 
 def _IsGomaFlagTrue(flag_name, default=False):
   """Return true when the given flag is true.
@@ -1040,6 +1043,64 @@ class GomaDriver(object):
     print 'All files verified.'
     return True
 
+  def _UploadCrashDump(self):
+    """Upload crash dump if exists.
+
+    Important Notice:
+    You should not too much trust version number shown in the crash report.
+    A version number shown in the crash report may different from what actually
+    created a crash dump. Since the version to be sent is collected when
+    goma_ctl.py starts up, it may pick the wrong version number if
+    compiler_proxy was silently changed without using goma_ctl.py.
+    """
+    if self._env.IsProductionBinary():
+      server_url = _CRASH_SERVER
+    else:
+      # Set this for testing crash dump upload feature.
+      server_url = os.environ.get('GOMACTL_CRASH_SERVER')
+      if server_url == 'staging':
+        server_url = _STAGING_CRASH_SERVER
+
+    if not server_url:
+      # We do not upload crash dump made by the developer's binary.
+      return
+
+    try:
+      (hash_value, timestamp) = self._GetDiskCompilerProxyVersion().split('@')
+      version = '%s.%s' % (hash_value[:8], timestamp)
+    except OSError:  # means file not exist and we can ignore it.
+      version = ''
+
+    if self._version and version:
+      version = 'ver %d %s' % (self._version, version)
+
+    if _IsGomaFlagTrue('SEND_USER_INFO', default=True):
+      guid = '%s@%s' % (self._env.GetUsername(), _GetHostname())
+    else:
+      guid = None
+
+    for dump_file in self._env.GetCrashDumps():
+      uploaded = False
+      # Upload crash dumps only when we know its version number.
+      if version:
+        sys.stderr.write(
+            'Uploading crash dump: %s to %s\n' % (dump_file, server_url))
+        try:
+          report_id = self._env.UploadCrashDump(server_url, _PRODUCT_NAME,
+                                                version, dump_file, guid=guid)
+          report_id_file = os.environ.get('GOMACTL_CRASH_REPORT_ID_FILE')
+          if report_id_file:
+            with open(report_id_file, 'w') as f:
+              f.write(report_id)
+          sys.stderr.write('Report Id: %s\n' % report_id)
+          uploaded = True
+        except Error as inst:
+          sys.stderr.write('Failed to upload crash dump: %s\n' % inst)
+      if uploaded or self._env.IsOldFile(dump_file):
+        try:
+          self._env.RemoveFile(dump_file)
+        except OSError as e:
+          print 'failed to remove %s: %s.' % (dump_file, e)
 
   def _CreateDirectory(self, dir_name, purpose, suppress_message=False):
     info = {
@@ -1098,7 +1159,10 @@ class GomaDriver(object):
       # when audit, we don't want to run gomacc to detect temp directory,
       # since gomacc might be binary for different platform.
       self._CreateGomaTmpDirectory()
-      self._CreateCrashDumpDirectory()
+      upload_crash_dump = False
+      if upload_crash_dump:
+        self._UploadCrashDump()
+        self._CreateCrashDumpDirectory()
       self._CreateCacheDirectory()
     self._args = args
     if not args:
@@ -1315,13 +1379,18 @@ class GomaEnv(object):
     try:
       url_prefix = 'http://127.0.0.1:%s' % self._GetCompilerProxyPort()
       url = '%s%s' % (url_prefix, command)
-      resp = urllib2.urlopen(url)
+      # When a user set HTTP proxy environment variables (e.g. http_proxy),
+      # urllib.urlopen uses them even for communicating with compiler_proxy
+      # running in 127.0.0.1, and trying to make the proxy connect to
+      # 127.0.0.1 (i.e. the proxy itself), which should not work.
+      # We should make urllib.urlopen ignore the proxy environment variables.
+      resp = urllib.urlopen(url, proxies={})
       reply = resp.read()
       if need_pids:
         pids = ','.join(self._GetStakeholderPids())
       return {'status': True, 'message': reply, 'url': url_prefix, 'pid': pids}
-    except (urllib2.URLError, Error, socket.error) as ex:
-      # urllib2.urlopen(url) may raise socket.error, such as [Errno 10054]
+    except (Error, socket.error) as ex:
+      # urllib.urlopen(url) may raise socket.error, such as [Errno 10054]
       # An existing connection was forcibly closed by the remote host.
       # socket.error uses IOError as base class in python 2.6.
       # note: socket.error changed to an alias of OSError in python 3.3.
@@ -1357,13 +1426,13 @@ class GomaEnv(object):
       if destination_file:
         destination_file = os.path.join(self._dir, destination_file)
         with open(destination_file, 'wb') as f:
-          retcode = subprocess.call([self._goma_fetch, source_url],
+          retcode = subprocess.call([self._goma_fetch, '--auth', source_url],
                                     env=env,
                                     stdout=f)
           if retcode:
             raise Error('failed to fetch %s: %d' % (source_url, retcode))
         return
-      return PopenWithCheck([self._goma_fetch, source_url],
+      return PopenWithCheck([self._goma_fetch, '--auth', source_url],
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
                             env=env).communicate()[0]
@@ -1460,6 +1529,163 @@ class GomaEnv(object):
       return sorted(candidates, reverse=True)[0]
     return None
 
+  @classmethod
+  def _GetCompressedLatestLog(cls, command_name, log_type):
+    """Returns compressed log file if exist.
+
+    Args:
+      command_name: command name of *.|log_type|.* file. e.g. compiler_proxy.
+
+    Returns:
+      compressed *.|log_type|.* file name.
+      Note: caller should remove the file by themselves.
+    """
+    logfile = cls.FindLatestLogFile(command_name, log_type)
+    if not logfile:
+      return None
+
+    tf = tempfile.NamedTemporaryFile(delete=False)
+    with tf as f_out:
+      with gzip.GzipFile(fileobj=f_out) as gzipf_out:
+        with open(logfile) as f_in:
+          shutil.copyfileobj(f_in, gzipf_out)
+    return tf.name
+
+  @staticmethod
+  def _BuildFormData(form, boundary, out_fh):
+    """Build multipart/form-data from given input.
+
+    Since we cannot always expect existent of requests module,
+    we need to have the way to build form data by ourselves.
+    Please see also:
+    https://tools.ietf.org/html/rfc2046#section-5.1.1
+
+    Args:
+      form: a list of list or tuple that represents form input.
+            first element of each tuple or list would be treated as a name
+            of a form data.
+            If a value starts from '@', it is treated as a file like curl.
+            e.g. [['prod', 'goma'], ['ver', '160']]
+      bondary: a string to represent what value should be used as a boundary.
+      out_fh: file handle to output.  Note that you can use StringIO.
+    """
+    out_fh.write('--%s\r\n' % boundary)
+    if isinstance(form, dict):
+      form = form.items()
+    for i in range(len(form)):
+      name, value = form[i]
+      filename = None
+      content_type = None
+      content = value
+      if isinstance(value, str) and value.startswith('@'):  # means file.
+        filename = value[1:]
+        content_type = 'application/octet-stream'
+        with open(filename, 'rb') as f:
+          content = f.read()
+      if filename:
+        out_fh.write('content-disposition: form-data; '
+                     'name="%s"; '
+                     'filename="%s"\r\n' % (name, filename))
+      else:
+        out_fh.write('content-disposition: form-data; name="%s"\r\n' % name)
+      if content_type:
+        out_fh.write('content-type: %s\r\n' % content_type)
+      out_fh.write('\r\n')
+      out_fh.write(content)
+      if i == len(form) - 1:
+        out_fh.write('\r\n--%s--\r\n' % boundary)
+      else:
+        out_fh.write('\r\n--%s\r\n' % boundary)
+
+  def UploadCrashDump(self, destination_url, product, version, dump_file,
+                      guid=None):
+    """Upload crash dump.
+
+    Args:
+      destination_url: URL to post data.
+      product: a product name string.
+      version: a version number string.
+      dump_file: a dump file name.
+      guid: a unique identifier for this client.
+
+    Returns:
+      any messages returned by a server.
+    """
+    form = {
+        'prod': product,
+        'ver': version,
+        'upload_file_minidump': '@%s' % dump_file,
+    }
+
+    dump_size = -1
+    try:
+      dump_size = os.path.getsize(dump_file)
+      sys.stderr.write('Crash dump size: %d\n' % dump_size)
+      form['comments'] = 'dump_size:%x' % dump_size
+    except OSError:
+      pass
+
+    if guid:
+      form['guid'] = guid
+
+    cp_logfile = None
+    subproc_logfile = None
+    form_body_file = None
+    try:
+      # Since we test goma client with ASan, if we see a goma client crash,
+      # it is usually a crash caused by abort.
+      # In such a case, ERROR logs should be left.
+      # Also, INFO logs are huge, let us avoid to upload them.
+      cp_logfile = self._GetCompressedLatestLog(
+          'compiler_proxy', 'ERROR')
+      subproc_logfile = self._GetCompressedLatestLog(
+          'compiler_proxy-subproc', 'ERROR')
+      if cp_logfile:
+        form['compiler_proxy_logfile'] = '@%s' % cp_logfile
+      if subproc_logfile:
+        form['subproc_logfile'] = '@%s' % subproc_logfile
+
+      boundary = ''.join(
+          random.choice(string.ascii_letters + string.digits)
+          for _ in range(32))
+      if self._goma_fetch:
+        tf = None
+        try:
+          tf = tempfile.NamedTemporaryFile(delete=False)
+          with tf as f:
+            self._BuildFormData(form, boundary, f)
+          return subprocess.check_output(
+              [self._goma_fetch,
+               '--noauth',
+               '--content_type',
+               'multipart/form-data; boundary=%s' % boundary,
+               '--data_file', tf.name,
+               '--post', destination_url])
+        finally:
+          if tf:
+            os.remove(tf.name)
+
+      if sys.hexversion < 0x2070900:
+        raise Error('Please use python version >= 2.7.9')
+
+      body = StringIO.StringIO()
+      self._BuildFormData(form, boundary, body)
+
+      headers = {
+          'content-type': 'multipart/form-data; boundary=%s' % boundary,
+      }
+      http_req = urllib2.Request(destination_url, data=body.getvalue(),
+                                 headers=headers)
+      r = urllib2.urlopen(http_req)
+      out = r.read()
+    finally:
+      if cp_logfile:
+        os.remove(cp_logfile)
+      if subproc_logfile:
+        os.remove(subproc_logfile)
+      if form_body_file:
+        os.remove(form_body_file)
+    return out
 
   def WriteFile(self, filename, content):
     with open(filename, 'wb') as f:

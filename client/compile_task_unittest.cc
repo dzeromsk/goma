@@ -328,4 +328,20 @@ TEST_F(CompileTaskTest, UpdateStatsAborted) {
   ManuallyCleanUpCompileTask();
 }
 
+TEST(CompileTask, OmitDurationFromUserError) {
+  // input, expected.
+  std::vector<std::pair<string, string>> testcases = {
+    {
+      "compiler_proxy [173.736822ms]: reached max number of active fail "
+          "fallbacks",
+      "compiler_proxy <duration omitted>: reached max number of active fail "
+          "fallbacks"
+    },
+  };
+
+  for (const auto& tc : testcases) {
+    EXPECT_EQ(tc.second, CompileTask::OmitDurationFromUserError(tc.first));
+  }
+}
+
 }  // namespace devtools_goma

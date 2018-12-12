@@ -38,7 +38,7 @@ class CompilerTypeSpecific {
       const std::vector<string>& compiler_info_envs) = 0;
 
   // Returns true if DepsCache is supported.
-  virtual bool SupportsDepsCache() const = 0;
+  virtual bool SupportsDepsCache(const CompilerFlags& flags) const = 0;
 
   // Runs include processor.
   // |trace_id| is used only for logging purpose.

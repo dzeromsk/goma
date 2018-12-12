@@ -1000,15 +1000,6 @@ bool ClangCompilerInfoBuilderHelper::GetSystemIncludePaths(
     return false;
   }
 
-#ifdef _WIN32
-  // In the (build: Windows, target: NaCl (not PNaCl)) compile,
-  // include paths under toolchain root are shown as relative path from it.
-  if (GCCFlags::IsNaClGCCCommand(normal_compiler_path)) {
-    compiler_info->mutable_cxx()->set_toolchain_root(
-        GetNaClToolchainRoot(normal_compiler_path));
-  }
-#endif
-
   return true;
 }
 
@@ -1078,14 +1069,5 @@ void ClangCompilerInfoBuilderHelper::UpdateIncludePaths(
   std::copy(paths.cbegin(), paths.cend(),
             google::protobuf::RepeatedFieldBackInserter(include_paths));
 }
-
-#ifdef _WIN32
-// static
-string ClangCompilerInfoBuilderHelper::GetNaClToolchainRoot(
-    const string& normal_nacl_gcc_path) {
-  return PathResolver::ResolvePath(
-      file::JoinPath(file::Dirname(normal_nacl_gcc_path), ".."));
-}
-#endif
 
 }  // namespace devtools_goma

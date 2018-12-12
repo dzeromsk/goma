@@ -95,10 +95,19 @@ class HttpClient {
 
     bool InitFromURL(absl::string_view url);
 
+    // Socket{Host,Port} represents where HttpClient connects.
+    // If an HTTP proxy is used, the value should be the proxy's host and port.
     string SocketHost() const;
     int SocketPort() const;
+
+    // Returns HTTP request-target.
     string RequestURL(absl::string_view path) const;
+
+    // Returns "Host" header field.
     string Host() const;
+
+    // Returns true if HttpClient is configure to use an HTTP proxy.
+    bool UseProxy() const { return !proxy_host_name.empty(); }
 
     string DebugString() const;
     void ClearAuthConfig();

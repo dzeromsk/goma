@@ -8,8 +8,6 @@
 #include <string>
 #include <unordered_map>
 
-#include "absl/time/clock.h"
-#include "absl/time/time.h"
 #include "atomic_stats_counter.h"
 #include "file_stat.h"
 #include "lockhelper.h"
@@ -18,7 +16,6 @@ namespace devtools_goma {
 
 class SHA256HashCache {
  public:
-  SHA256HashCache() : now_fn_(&absl::Now) {}
 
   // If |path| exsts in |sha256_cache| and filestat is not updated,
   // the value is returned.
@@ -41,9 +38,6 @@ class SHA256HashCache {
   // counter for test.
   StatsCounter total_;
   StatsCounter hit_;
-
-  // injectable time function for test.
-  absl::Time (*now_fn_)();
 };
 
 }  // namespace devtools_goma

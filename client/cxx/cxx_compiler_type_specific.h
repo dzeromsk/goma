@@ -14,8 +14,6 @@ class CxxCompilerTypeSpecific : public CompilerTypeSpecific {
   CxxCompilerTypeSpecific(const CxxCompilerTypeSpecific&) = delete;
   void operator=(const CxxCompilerTypeSpecific&) = delete;
 
-  bool SupportsDepsCache() const override { return true; }
-
   IncludeProcessorResult RunIncludeProcessor(
       const string& trace_id,
       const CompilerFlags& compiler_flags,

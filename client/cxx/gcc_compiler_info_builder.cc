@@ -11,6 +11,7 @@
 #include "gcc_flags.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
+#include "nacl_compiler_info_builder_helper.h"
 #include "path.h"
 #include "path_resolver.h"
 #include "util.h"
@@ -233,6 +234,16 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     return;
   }
 
+#ifdef _WIN32
+  // In the (build: Windows, target: NaCl (not PNaCl)) compile,
+  // include paths under toolchain root are shown as relative path from it.
+  if (GCCFlags::IsNaClGCCCommand(local_compiler_path)) {
+    data->mutable_cxx()->set_toolchain_root(
+        NaClCompilerInfoBuilderHelper::GetNaClToolchainRoot(
+            local_compiler_path));
+  }
+#endif
+
   if (!has_version) {
     AddErrorMessage("Failed to get version for " + data->real_compiler_path(),
                     data);
@@ -305,21 +316,49 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     }
   }
 
-  // Experimental. Add compiler resource.
-  // TODO: We also need *.so, too.
-  // For chromium clang, we need *.so if sanitizer is used.
-  // If sanitizer is not used, clang works in normal case.
-  // TODO: Support the case local compiler and real compiler are
-  // different.
-  CompilerInfoData::ResourceInfo r;
-  if (!CompilerInfoBuilder::ResourceInfoFromPath(
-          flags.cwd(), local_compiler_path, CompilerInfoData::EXECUTABLE_BINARY,
-          &r)) {
-    AddErrorMessage("failed to get resource info for " + local_compiler_path,
-                    data);
-    return;
+  // --- Experimental. Add compiler resource.
+  std::vector<string> resource_paths_to_collect;
+
+  // local compiler.
+  resource_paths_to_collect.push_back(local_compiler_path);
+  // real compiler if it differs from local compiler.
+  // When clang++ is local compiler, the real compiler is usually clang, and
+  // clang++ is just a symlink to clang. In that case, we don't need to collect
+  // real compiler. We think the files are the same if hash is the same.
+  if (local_compiler_path != data->real_compiler_path() &&
+      data->local_compiler_hash() != data->hash()) {
+    resource_paths_to_collect.push_back(data->real_compiler_path());
   }
-  *data->add_resource() = std::move(r);
+  // subprograms.
+  for (const auto& subprogram : data->subprograms()) {
+    resource_paths_to_collect.push_back(subprogram.user_specified_path());
+  }
+  // TODO: Currently GCCCompilerInfoBuilder covers all
+  // gcc/clang/nacl-clang/pnacl-clang compilers. However, it's better to have
+  // a subclass for each type of compiler to support type specific procedures.
+  if (GCCFlags::IsPNaClClangCommand(local_compiler_path)) {
+    NaClCompilerInfoBuilderHelper::CollectPNaClClangResources(
+        local_compiler_path, flags.cwd(), &resource_paths_to_collect);
+  }
+  if (GCCFlags::IsNaClGCCCommand(local_compiler_path)) {
+    NaClCompilerInfoBuilderHelper::CollectNaClGccResources(
+        local_compiler_path, flags.cwd(), &resource_paths_to_collect);
+  }
+  if (GCCFlags::IsNaClClangCommand(local_compiler_path)) {
+    NaClCompilerInfoBuilderHelper::CollectNaClClangResources(
+        local_compiler_path, flags.cwd(), &resource_paths_to_collect);
+  }
+
+  for (const auto& resource_path : resource_paths_to_collect) {
+    CompilerInfoData::ResourceInfo r;
+    if (!CompilerInfoBuilder::ResourceInfoFromPath(
+            flags.cwd(), resource_path, CompilerInfoData::EXECUTABLE_BINARY,
+            &r)) {
+      AddErrorMessage("failed to get resource info for " + resource_path, data);
+      return;
+    }
+    *data->add_resource() = std::move(r);
+  }
 }
 
 void GCCCompilerInfoBuilder::SetCompilerPath(
@@ -587,7 +626,7 @@ string GCCCompilerInfoBuilder::GetRealCompilerPath(
   // the bin directory are just wrappers to them.
   if (GCCFlags::IsNaClGCCCommand(normal_gcc_path)) {
     const string& candidate_path = file::JoinPath(
-        ClangCompilerInfoBuilderHelper::GetNaClToolchainRoot(normal_gcc_path),
+        NaClCompilerInfoBuilderHelper::GetNaClToolchainRoot(normal_gcc_path),
         file::JoinPath("libexec", file::Basename(normal_gcc_path)));
     if (IsExecutable(cwd, candidate_path)) {
       return candidate_path;

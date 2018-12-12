@@ -715,7 +715,7 @@ bool CompileService::DumpTask(int task_id, string* out) {
   return true;
 }
 
-bool CompileService::DumpTaskRequest(int task_id) {
+bool CompileService::DumpTaskRequest(int task_id, string* message) {
   const CompileTask* task = nullptr;
   {
     AUTOLOCK(lock, &mu_);
@@ -724,7 +724,7 @@ bool CompileService::DumpTaskRequest(int task_id) {
       return false;
     const_cast<CompileTask*>(task)->Ref();
   }
-  task->DumpRequest();
+  *message = task->DumpRequest();
   {
     AUTOLOCK(lock, &mu_);
     const_cast<CompileTask*>(task)->Deref();

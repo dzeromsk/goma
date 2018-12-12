@@ -51,6 +51,8 @@ to our data usage policy.
 $ ${HOME}/goma/goma_auth.py login
 ```
 
+Note: `goma_auth.py` understands `https_proxy` environment variable.
+
 # How to build Chromium with Goma?
 
 This section explains the typical workflow for using Goma.
@@ -60,6 +62,8 @@ This section explains the typical workflow for using Goma.
 ```shell
 $ ${HOME}/goma/goma_ctl.py ensure_start
 ```
+
+Note: `goma_ctl.py` understands `https_proxy` environment variable.
 
 ## Build chromium using Goma
 

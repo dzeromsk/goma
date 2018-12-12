@@ -169,7 +169,7 @@ class OpenSSLSessionCache {
     SSL_SESSION* sess = SSL_get1_session(ssl);
     SSL_CTX* ctx = SSL_get_SSL_CTX(ssl);
     LOG(INFO) << "Storing SSL session."
-              << " ctx=" << ctx
+              << " ssl_ctx=" << ctx
               << " session_info=" << GetHumanReadableSessionInfo(sess)
               << " secure_renegotiation_support="
               << SSL_get_secure_renegotiation_support(ssl);
@@ -235,7 +235,7 @@ class OpenSSLSessionCache {
       return false;
 
     VLOG(3) << "Reused session."
-            << " ctx=" << ctx
+            << " ssl_ctx=" << ctx
             << " session_info=" << GetHumanReadableSessionInfo(sess);
     SSL_set_session(ssl, sess);
     return true;
@@ -449,8 +449,13 @@ class OpenSSLCertificateStore {
         break;
 
       const string readable_cert = GetHumanReadableCert(x509.get());
-      LOG(INFO) << "Certificate loaded from " << source << ": "
+      if (source == "system") {  // system certificate should be trivial.
+        VLOG(2) << "Certificate loaded from " << source << ": "
                 << readable_cert;
+      } else {
+        LOG(INFO) << "Certificate loaded from " << source << ": "
+                  << readable_cert;
+      }
       trusted_certificates_.append(readable_cert);
       it.first->second->emplace_back(std::move(x509));
     }
@@ -916,7 +921,7 @@ OpenSSLContext::~OpenSSLContext() {
 
 ScopedX509CRL OpenSSLContext::GetX509CrlsFromUrl(
     const string& url, string* crl_str) {
-  LOG(INFO) << "DownloadCrl:" << url;
+  LOG(INFO) << "ctx:" << this << ": DownloadCrl:" << url;
 
   HttpClient::Options options;
   if (!proxy_host_.empty()) {
@@ -935,7 +940,7 @@ ScopedX509CRL OpenSSLContext::GetX509CrlsFromUrl(
   SocketPool* socket_pool(OpenSSLSocketPoolCache::GetSocketPool(
       options.SocketHost(), options.SocketPort()));
   if (socket_pool == nullptr) {
-    LOG(ERROR) << "Socket Pool is nullptr:"
+    LOG(ERROR) << "ctx:" << this << ": Socket Pool is nullptr:"
                << " host=" << options.SocketHost()
                << " port=" << options.SocketPort();
     return nullptr;
@@ -948,15 +953,16 @@ ScopedX509CRL OpenSSLContext::GetX509CrlsFromUrl(
     if (!sock.valid()) {
       // We might have used up all candidate addresses in the pool.
       // It might be better to wait a while.
-      LOG(WARNING) << "It seems to fail to connect to all available addresses."
-                   << " Going to wait for a while."
+      LOG(WARNING) << "ctx:" << this
+                   << ": It seems to fail to connect to all available "
+                   << "addresses. Going to wait for a while."
                    << " kWaitForThingsGetsBetter=" << kWaitForThingsGetsBetter;
       absl::SleepFor(kWaitForThingsGetsBetter);
       continue;
     }
     DownloadCrl(&sock, req, &resp);
     if (resp.status_code() != 200) {
-      LOG(WARNING) << "download CRL retrying:"
+      LOG(WARNING) << "ctx:" << this << ": download CRL retrying:"
                    << " retry=" << retry
                    << " url=" << url
                    << " http=" << resp.status_code();
@@ -966,7 +972,7 @@ ScopedX509CRL OpenSSLContext::GetX509CrlsFromUrl(
     crl_str->assign(resp.parsed_body());
     ScopedX509CRL x509_crl(ParseCrl(*crl_str));
     if (x509_crl == nullptr) {
-      LOG(WARNING) << "failed to parse CRL data:"
+      LOG(WARNING) << "ctx:" << this << ": failed to parse CRL data:"
                    << " url=" << url
                    << " contents length=" << crl_str->length()
                    << " resp header=" << resp.Header();
@@ -978,7 +984,7 @@ ScopedX509CRL OpenSSLContext::GetX509CrlsFromUrl(
     return x509_crl;
   }
 
-  LOG(ERROR) << "failed to download CRL from " << url;
+  LOG(ERROR) << "ctx:" << this << ": failed to download CRL from " << url;
   return nullptr;
 }
 
@@ -1013,7 +1019,8 @@ bool OpenSSLContext::SetupCrlsUnlocked(STACK_OF(X509)* x509s) {
       }
       // Is the CRL valid?
       if (crl.get() && !VerifyCrl(crl.get(), store_ctx.get())) {
-        LOG(WARNING) << "Failed to verify memory cached CRL."
+        LOG(WARNING) << "ctx:" << this
+                     << ": Failed to verify memory cached CRL."
                      << " url=" << url;
         OpenSSLCRLCache::DeleteCRL(url);
         crl.reset();
@@ -1037,7 +1044,8 @@ bool OpenSSLContext::SetupCrlsUnlocked(STACK_OF(X509)* x509s) {
 
       // Is the CRL valid?
       if (crl.get() && !VerifyCrl(crl.get(), store_ctx.get())) {
-        LOG(WARNING) << "Failed to verify disk cached CRL: " << cache_file;
+        LOG(WARNING) << "ctx:" << this
+                     << ": Failed to verify disk cached CRL: " << cache_file;
         remove(cache_file.c_str());
         crl.reset();
       }
@@ -1055,7 +1063,7 @@ bool OpenSSLContext::SetupCrlsUnlocked(STACK_OF(X509)* x509s) {
 
       // Is the CRL valid?
       if (crl.get() && !VerifyCrl(crl.get(), store_ctx.get())) {
-        LOG(WARNING) << "Failed to verify CRL: " << url;
+        LOG(WARNING) << "ctx:" << this << ": Failed to verify CRL: " << url;
         crl.reset();
       }
     }
@@ -1074,14 +1082,15 @@ bool OpenSSLContext::SetupCrlsUnlocked(STACK_OF(X509)* x509s) {
       // usually difficult for users to understand what is bad.
       // Decision: die at start-time, won't die after that, but it seems
       // too late to die here.
-      LOG(ERROR) << ss.str();
+      LOG(ERROR) << "ctx:" << this << ": " << ss.str();
       return false;
     }
 
     X509_STORE_add_crl(SSL_CTX_get_cert_store(ctx_), crl.get());
     certs_info_.append(GetHumanReadableCRL(crl.get()));
     if (!is_mem_cache_used && !is_disk_cache_used) {
-      LOG(INFO) << "CRL loaded from: " << url;
+      LOG(INFO) << "ctx:" << this
+                << ": CRL loaded from: " << url;
       const string& cache_dir = string(file::Dirname(cache_file));
       if (!EnsureDirectory(cache_dir, 0700)) {
         LOG(WARNING) << "Failed to create cache dir: " << cache_dir;
@@ -1093,33 +1102,38 @@ bool OpenSSLContext::SetupCrlsUnlocked(STACK_OF(X509)* x509s) {
       }
     }
     if (is_disk_cache_used) {
-      LOG(INFO) << "Read CRL from cache:"
+      LOG(INFO) << "ctx:" << this
+                << ": Read CRL from cache:"
                 << " url=" << url
                 << " cache_file=" << cache_file;
     }
     if (is_mem_cache_used) {
-      LOG(INFO) << "loaded CRL in memory: " << url;
+      LOG(INFO) << "ctx:" << this
+                << ": loaded CRL in memory: " << url;
     } else {
       OpenSSLCRLCache::SetCRL(url, crl.get());
       // If loaded from memory, we can assume we have already shown CRL info
       // to log, and we do not show it again.
-      LOG(INFO) << GetHumanReadableCRL(crl.get());
+      LOG(INFO) << "ctx:" << this << ": " << GetHumanReadableCRL(crl.get());
     }
     crls_.emplace_back(std::move(crl));
   }
 
   LOG_IF(WARNING, crls_.empty())
-      << "A certificate should usually have its CRL."
+      << "ctx:" << this
+      << ": A certificate should usually have its CRL."
       << " If we cannot not load any CRLs, something should be broken."
       << " certificates=" << GetHumanReadableCerts(x509s);
 
   if (!crls_.empty()) {
-    VLOG(1) << "CRL is loaded.  We will check it during verification.";
+    VLOG(1) << "ctx:" << this
+            << ": CRL is loaded.  We will check it during verification.";
     X509_VERIFY_PARAM *verify_param = X509_VERIFY_PARAM_new();
     X509_VERIFY_PARAM_set_flags(verify_param, X509_V_FLAG_CRL_CHECK);
     SSL_CTX_set1_param(ctx_, verify_param);
     X509_VERIFY_PARAM_free(verify_param);
-    LOG(INFO) << "We may reject if the domain is not listed in loaded CRLs.";
+    LOG(INFO) << "ctx:" << this
+              << ": We may reject if the domain is not listed in loaded CRLs.";
   }
 
   is_crl_ready_ = true;
@@ -1130,12 +1144,14 @@ bool OpenSSLContext::IsRevoked(STACK_OF(X509)* x509s) {
   AUTOLOCK(lock, &mu_);
   if (!last_error_.empty() && last_error_time_ &&
       absl::Now() < *last_error_time_ + kErrorTimeout) {
-    LOG(ERROR) << "Preventing using SSL because of:" << last_error_
+    LOG(ERROR) << "ctx:" << this
+               << ": Preventing using SSL because of:" << last_error_
                << " last_error_time_=" << *last_error_time_;
     return true;
   }
   if (!is_crl_ready_ && !SetupCrlsUnlocked(x509s)) {
-    LOG(ERROR) << "Failed to load CRLs:"
+    LOG(ERROR) << "ctx:" << this
+               << ": Failed to load CRLs:"
                << GetHumanReadableCerts(x509s);
     return true;
   }
@@ -1145,7 +1161,8 @@ bool OpenSSLContext::IsRevoked(STACK_OF(X509)* x509s) {
     for (size_t j = 0; j < crls_.size(); j++) {
       X509_REVOKED* rev;
       if (X509_CRL_get0_by_cert(crls_[j].get(), &rev, x509)) {
-        LOG(ERROR) << "Certificate is already revoked:"
+        LOG(ERROR) << "ctx:" << this
+                   << ": Certificate is already revoked:"
                    << GetHumanReadableCert(x509);
         return true;
       }
@@ -1187,11 +1204,12 @@ bool OpenSSLContext::IsValidServerIdentity(X509* cert) {
   if (inet_pton(AF_INET, hostname_.c_str(), &in4) == 1) {
     // hostname is IPv4 addr.
     if (MatchAltIPAddress(cert, AF_INET, &in4)) {
-      LOG(INFO) << "Hostname matches with IPv4 address:"
+      LOG(INFO) << "ctx:" << this << ": Hostname matches with IPv4 address:"
                 << " hostname=" << hostname_;
       return true;
     }
-    LOG(INFO) << "Hostname(IPv4) didn't match with certificate:"
+    LOG(INFO) << "ctx:" << this
+              <<  ": Hostname(IPv4) didn't match with certificate:"
               << " hostname=" << hostname_;
     return false;
   }
@@ -1200,11 +1218,13 @@ bool OpenSSLContext::IsValidServerIdentity(X509* cert) {
   if (inet_pton(AF_INET6, hostname_.c_str(), &in6) == 1) {
     // hostname is IPv6 addr.
     if (MatchAltIPAddress(cert, AF_INET6, &in6)) {
-      LOG(INFO) << "Hostname matches with IPv6 address:"
+      LOG(INFO) << "ctx:" << this
+                << ": Hostname matches with IPv6 address:"
                 << " hostname=" << hostname_;
       return true;
     }
-    LOG(INFO) << "Hostname(IPv6) didn't match with certificate:"
+    LOG(INFO) << "ctx:" << this
+              << ": Hostname(IPv6) didn't match with certificate:"
               << " hostname=" << hostname_;
     return false;
   }
@@ -1219,25 +1239,29 @@ bool OpenSSLContext::IsValidServerIdentity(X509* cert) {
     // > field in the Subject field of the certificate MUST be used.
     const string& cn = GetSubjectCommonName(cert);
     if (OpenSSLContext::IsHostnameMatched(hostname_, cn)) {
-      LOG(INFO) << "Hostname matches with common name:"
+      LOG(INFO) << "ctx:" << this
+                << ": Hostname matches with common name:"
                 << " hostname=" << hostname_
                 << " cn=" << cn;
       return true;
     }
-    LOG(INFO) << "Hostname didn't match with common name:"
+    LOG(INFO) << "ctx:" << this
+              << ": Hostname didn't match with common name:"
               << " hostname=" << hostname_
               << " cn=" << cn;
     return false;
   }
   for (const auto& san : sans) {
     if (OpenSSLContext::IsHostnameMatched(hostname_, san)) {
-      LOG(INFO) << "Hostname matches with subject alternative names:"
+      LOG(INFO) << "ctx:" << this
+                << ": Hostname matches with subject alternative names:"
                 << " hostname=" << hostname_
                 << " san=" << san;
       return true;
     }
   }
-  LOG(ERROR) << "Hostname did not match with certificate:"
+  LOG(ERROR) << "ctx:" << this
+             << ": Hostname did not match with certificate:"
              << " hostname=" << hostname_;
   return false;
 }
@@ -1273,8 +1297,9 @@ SSL* OpenSSLContext::NewSSL(bool* session_reused) {
       << "TLS Server Name Indication (SNI) failed:" << hostname_;
   *session_reused = true;
   if (!OpenSSLSessionCache::SetCachedSession(ctx_, ssl)) {
-    LOG(INFO) << "No session is cached. We need to start from handshake."
-              << " ctx=" << ctx_
+    LOG(INFO) << "ctx:" << this
+              << ": No session is cached. We need to start from handshake."
+              << " key=" << ctx_
               << " hostname=" << hostname_;
     *session_reused = false;
   }
@@ -1327,7 +1352,8 @@ void OpenSSLEngine::Init(OpenSSLContext* ctx) {
   ssl_ = ctx->NewSSL(&session_reused);
   DCHECK(ssl_);
   if (!session_reused) {
-    LOG(INFO) << "Need to register session by myself."
+    LOG(INFO) << "ctx:" << ctx
+              << ": Need to register session by myself."
               << " hostname=" << ctx->hostname();
     need_to_store_session_ = true;
   }
@@ -1423,14 +1449,15 @@ int OpenSSLEngine::UpdateStatus(int return_value) {
     case SSL_ERROR_SSL:
       if (SSL_get_verify_result(ssl_) != X509_V_OK) {
         // Renew CRLs in the next connection but fails for this time.
-        LOG(WARNING) << "Resetting CRLs because of verify error."
+        LOG(WARNING) << "ctx:" << ctx_
+                     << ": Resetting CRLs because of verify error."
                      << " details=" << X509_verify_cert_error_string(
                          SSL_get_verify_result(ssl_));
         ctx_->Invalidate();
       }
       FALLTHROUGH_INTENDED;
     default:
-      LOG(ERROR) << "OpenSSL error"
+      LOG(ERROR) << "ctx:" << ctx_ << ": OpenSSL error"
                  << " ret=" << return_value
                  << " ssl_err=" << ssl_err
                  << " err_msg=" << GetLastErrorMessage();
@@ -1441,17 +1468,20 @@ int OpenSSLEngine::UpdateStatus(int return_value) {
 int OpenSSLEngine::Connect() {
   int ret = SSL_connect(ssl_);
   if (ret > 0) {
-    VLOG(3) << "session reused=" << SSL_session_reused(ssl_);
+    VLOG(3) << "ctx:" << ctx_
+            << ": session reused=" << SSL_session_reused(ssl_);
     state_ = READY;
     if (need_self_verify_) {
       LOG(INFO) << GetHumanReadableSSLInfo(ssl_);
 
       STACK_OF(X509)* x509s = SSL_get_peer_cert_chain(ssl_);
       if (!x509s) {
-        LOG(ERROR) << "No x509 stored in SSL structure.";
+        LOG(ERROR) << "ctx:" << ctx_
+                   << ": No x509 stored in SSL structure.";
         return TLSEngine::TLS_VERIFY_ERROR;
       }
-      LOG(INFO) << GetHumanReadableCerts(x509s)
+      LOG(INFO) << "ctx:" << ctx_ << ": "
+                << GetHumanReadableCerts(x509s)
                 << " session_info="
                 << GetHumanReadableSessionInfo(SSL_get_session(ssl_));
 
@@ -1461,11 +1491,12 @@ int OpenSSLEngine::Connect() {
       std::unique_ptr<X509, ScopedX509Free> cert(
           SSL_get_peer_certificate(ssl_));
       if (cert.get() == nullptr) {
-        LOG(ERROR) << "Cannot obtain the server's certificate";
+        LOG(ERROR) << "ctx:" << ctx_
+                   << ": Cannot obtain the server's certificate";
         return TLSEngine::TLS_VERIFY_ERROR;
       }
 
-      LOG(INFO) << "Checking server's identity.";
+      LOG(INFO) << "ctx:" << ctx_ << ": Checking server's identity.";
       // OpenSSL library does not check a name written in certificate
       // matches what we are connecting now.
       // We MUST do it by ourselves. Or, we allow spoofing.
@@ -1475,7 +1506,8 @@ int OpenSSLEngine::Connect() {
 
       // Since CRL did not set when SSL started, CRL verification should be
       // done by myself. Note that this is usually treated by OpenSSL library.
-      LOG(INFO) << "need to verify revoked certificate by myself.";
+      LOG(INFO) << "ctx:" << ctx_
+                << ": need to verify revoked certificate by myself.";
       if (ctx_->IsRevoked(x509s)) {
         return TLSEngine::TLS_VERIFY_ERROR;
       }
@@ -1594,8 +1626,8 @@ void OpenSSLEngineCache::InvalidateContext() {
   LOG_IF(ERROR, ctx_->hostname() != hostname_)
       << "OpenSSLContext hostname is different from OpenSSLEngineFactory one. "
       << " It might be changed after ctx_ is created?"
-      << " ctx=" << ctx_->hostname()
-      << " factory=" << hostname_;
+      << " ctx_hostname=" << ctx_->hostname()
+      << " factory_hostname=" << hostname_;
   contexts_to_delete_.emplace_back(std::move(ctx_));
 }
 

@@ -73,9 +73,16 @@ message CompilerInfoData {
     // A type of the file.
     optional ResourceType type = 2;
     // SHA256 of the file.  It is used for detecting update.
+    // If arbitrary toolchain support is enabled, this is also used for
+    // ToolchainSpec.
     optional string hash = 3;
     // FileStat of the file.  It is used for detecting update.
+    // If arbitrary toolchain support is enabled, this is also used for
+    // ToolchainSpec.
     optional FileStat file_stat = 4;
+    // If arbitrary toolchain support is enabled, this will be used for
+    // ToolchainSpec.
+    optional bool is_executable = 5;
   }
 
   // compiler name.

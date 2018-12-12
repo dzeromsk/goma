@@ -60,7 +60,8 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
       is_precompiling_header_(false),
       is_stdin_input_(false),
       has_fmodules_(false),
-      has_fimplicit_module_maps_(false) {
+      has_fimplicit_module_maps_(false),
+      has_emit_module_(false) {
   if (!CompilerFlags::ExpandPosixArgs(cwd, args, &expanded_args_,
                                       &optional_input_filenames_)) {
     Fail("Unable to expand args", args);
@@ -76,6 +77,7 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
 
   bool fmodules = false;
   bool fno_implicit_module_maps = false;
+  std::vector<string> xclang_flags;
 
   FlagParser parser;
   DefineFlags(&parser);
@@ -175,7 +177,7 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
         ->SetOutput(&compiler_info_flags_);
   }
   parser.AddBoolFlag("no-canonical-prefixes")->SetOutput(&compiler_info_flags_);
-  parser.AddFlag("Xclang")->SetOutput(&compiler_info_flags_);
+  parser.AddFlag("Xclang")->SetOutput(&xclang_flags);
   parser.AddFlag("I")->SetValueOutputWithCallback(nullptr,
                                                   &non_system_include_dirs_);
 
@@ -188,6 +190,10 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
   FlagParser::Flag* flag_fmodule_file = parser.AddPrefixFlag("fmodule-file=");
   FlagParser::Flag* flag_fmodule_map_file =
       parser.AddPrefixFlag("fmodule-map-file=");
+  // -fmodule-name should not be added to compiler_info_flags_, since
+  // -fmodule-name is considered as an input for clang modules, especially for
+  // `-Xclang -emit-module`.
+  parser.AddPrefixFlag("-fmodule-name=");
 
   // We should allow both -imacro and --imacro, -include and --include.
   // See: b/10020850.
@@ -221,6 +227,9 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
 
   parser.Parse(expanded_args_);
   unknown_flags_ = parser.unknown_flag_args();
+
+  // We need to handle -Xclang specially.
+  ProcessXclangFlags(xclang_flags);
 
   // -Wa, is a flag for assembler.
   // -Wa,--noexecstack is often used.
@@ -641,6 +650,11 @@ bool GCCFlags::IsClientImportantEnv(const char* env) const {
     return true;
   }
 
+  // Allow DEVELOPER_DIR only in client.
+  if (absl::StartsWith(env, "DEVELOPER_DIR=")) {
+    return true;
+  }
+
   return false;
 }
 
@@ -652,6 +666,10 @@ bool GCCFlags::IsServerImportantEnv(const char* env) const {
   // gold (linker used by chromium) seems not use them.
   // - LD_RUN_PATH
   // - LD_LIBRARY_PATH
+  //
+  // - MACOSX_DEPLOYMENT_TARGET and SDKROOT are used for Darwin targets.
+  // https://clang.llvm.org/docs/CommandGuide/clang.html#envvar-MACOSX_DEPLOYMENT_TARGET
+  // https://llvm.org/viewvc/llvm-project/cfe/trunk/lib/Driver/ToolChains/Darwin.cpp?revision=346276&view=markup
   //
   // PWD is used for current working directory. b/27487704
 
@@ -666,7 +684,6 @@ bool GCCFlags::IsServerImportantEnv(const char* env) const {
       "MACOSX_DEPLOYMENT_TARGET=",
       "SDKROOT=",
       "PWD=",
-      "DEVELOPER_DIR=",
   };
 
   for (const char* check_env : kCheckEnvs) {
@@ -964,6 +981,63 @@ string GCCFlags::GetLanguage(const string& compiler_name,
   return lang;
 }
 
+void GCCFlags::ProcessXclangFlags(const std::vector<string>& xclang_flags) {
+  // xclang_flags should be like:
+  // ["-Xclang", "something", "-Xclang", "foo"]
+  // The odd element must be always "-Xclang".
+  // However, the current flag parser might accept -Xclang=foo.
+  // So, evil input like
+  // ["-Xclang=foo", "-Xclang", "bar"]
+  // might come.
+
+  for (size_t i = 0; i < xclang_flags.size();) {
+    // Not just "-Xclang". Keep as-is.
+    if (xclang_flags[i] != "-Xclang") {
+      compiler_info_flags_.push_back(xclang_flags[i]);
+      ++i;
+      continue;
+    }
+
+    DCHECK_EQ("-Xclang", xclang_flags[i]) << xclang_flags;
+
+    // Last orphan -Xclang? Keep as-is anyway.
+    if (i + 1 >= xclang_flags.size()) {
+      compiler_info_flags_.push_back(xclang_flags[i]);
+      ++i;
+      continue;
+    }
+
+    // There are several -Xclang flags to cause CompilerInfoBuilder to fail.
+    // These flags usually won't change CompilerInfo, so it is OK if it's not
+    // included in compiler_info_flags_.
+
+    // -Xclang -emit-module needs special handle for include processor.
+    if (xclang_flags[i + 1] == "-emit-module") {
+      has_emit_module_ = true;
+      i += 2;
+      continue;
+    }
+
+    // -Xclang -emit-ast prints AST to stdout, so it makes CompilerInfoBuilder
+    // be confused. This flag doesn't change CompilerInfo.
+    // -Xclang -emit-pch prints pch object to stdout, so it will fail to take
+    // macro values.
+    if (xclang_flags[i + 1] == "-emit-ast" ||
+        xclang_flags[i + 1] == "-emit-pch") {
+      i += 2;
+      continue;
+    }
+
+    // TODO: There might be more flags to cause CompilerInfoBuilder
+    // to fail.
+
+    // everything else
+    compiler_info_flags_.push_back(xclang_flags[i]);
+    compiler_info_flags_.push_back(xclang_flags[i + 1]);
+    i += 2;
+  }
+}
+
 string GetCxxCompilerVersionFromCommandOutputs(const string& /* command */,
                                                const string& dumpversion,
                                                const string& version) {
@@ -1052,6 +1126,17 @@ bool GCCFlags::IsNaClGCCCommand(absl::string_view arg) {
   const absl::string_view basename = GetBasename(arg);
   return basename.find("nacl-gcc") != absl::string_view::npos ||
          basename.find("nacl-g++") != absl::string_view::npos;
+}
+
+/* static */
+bool GCCFlags::IsNaClClangCommand(absl::string_view arg) {
+  // pnacl-clang and pnalc-clang++ are not nacl-clang.
+  if (IsPNaClClangCommand(arg)) {
+    return false;
+  }
+  const absl::string_view basename = GetBasename(arg);
+  return basename.find("nacl-clang") != absl::string_view::npos ||
+         basename.find("nacl-clang++") != absl::string_view::npos;
 }
 
 /* static */

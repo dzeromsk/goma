@@ -88,6 +88,10 @@ default_compiler_configs = [
   "//build/config/compiler:compiler",
   "//build/config/compiler:default_include_dirs",
   "//build/config/compiler:goma_code",
+
+  # libc++/libc++abi requires a config whose name is 'chromium_code'.
+  "//build/config/compiler:chromium_code",
+
   "//build/config/compiler:no_rtti",
   "//build/config/coverage:default_coverage",
   "//build/config:default_libs",
@@ -202,4 +206,59 @@ set_defaults("shared_library") {
 
 set_defaults("source_set") {
   configs = default_compiler_configs
+}
+
+# Below code is copied from chromium/src/build/config/BUILDCONFIG.gn
+# ==============================================================================
+# COMPONENT SETUP
+# ==============================================================================
+
+# Defines a component, which equates to a shared_library when
+# is_component_build == true and a static_library otherwise.
+#
+# Use static libraries for the static build rather than source sets because
+# many of of our test binaries link many large dependencies but often don't
+# use large portions of them. The static libraries are much more efficient to
+# link in this situation since only the necessary object files are linked.
+#
+# The invoker can override the type of the target in the non-component-build
+# case by setting static_component_type to either "source_set" or
+# "static_library". If unset, the default will be used.
+template("component") {
+  if (is_component_build) {
+    _component_mode = "shared_library"
+  } else if (defined(invoker.static_component_type)) {
+    assert(invoker.static_component_type == "static_library" ||
+           invoker.static_component_type == "source_set")
+    _component_mode = invoker.static_component_type
+  } else if (!defined(invoker.sources)) {
+    # When there are no sources defined, use a source set to avoid creating
+    # an empty static library (which generally don't work).
+    _component_mode = "source_set"
+  } else {
+    _component_mode = "static_library"
+  }
+  target(_component_mode, target_name) {
+    # Explicitly forward visibility, implicitly forward everything else.
+    # Forwarding "*" doesn't recurse into nested scopes (to avoid copying all
+    # globals into each template invocation), so won't pick up file-scoped
+    # variables. Normally this isn't too bad, but visibility is commonly
+    # defined at the file scope. Explicitly forwarding visibility and then
+    # excluding it from the "*" set works around this problem.
+    # See http://crbug.com/594610
+    forward_variables_from(invoker, [ "visibility" ])
+    forward_variables_from(invoker, "*", [ "visibility" ])
+  }
+}
+
+# Component defaults
+set_defaults("component") {
+  if (is_component_build) {
+    configs = default_shared_library_configs
+    if (is_android) {
+      configs -= [ "//build/config/android:hide_all_but_jni_onload" ]
+    }
+  } else {
+    configs = default_compiler_configs
+  }
 }

@@ -4,21 +4,11 @@
 
 #include "list_dir_cache.h"
 
-#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "autolock_timer.h"
 #include "counterz.h"
 
 namespace devtools_goma {
-
-namespace {
-
-// Rounds |time| down to a whole number of seconds since the Unix Epoch.
-absl::Time TruncateTimeToSeconds(absl::Time time) {
-  const absl::Duration duration_from_epoch = time - absl::UnixEpoch();
-  return absl::UnixEpoch() + absl::Trunc(duration_from_epoch, absl::Seconds(1));
-}
-
-}  // namespace
 
 ListDirCache* ListDirCache::instance_;
 
@@ -39,20 +29,11 @@ bool ListDirCache::GetDirEntries(const std::string& path,
   entries->clear();
   GOMA_COUNTERZ("total");
 
-  // TODO: There is some weird behavior when converting FileStat from
-  // time_t (integers with seconds resolution) to absl::Time (could have
-  // subsecond resolution, depending on the platform). For now, simply replicate
-  // the previous behavior by rounding down to whole seconds.
-  FileStat filestat_rounded = filestat;
-  if (filestat.mtime.has_value()) {
-    filestat_rounded.mtime = TruncateTimeToSeconds(*filestat.mtime);
-  }
   {
     AUTO_SHARED_LOCK(lock, &rwlock_);
-    const absl::Time now_truncated = TruncateTimeToSeconds(absl::Now());
     auto iter = dir_entries_cache_.find(path);
     if (iter != dir_entries_cache_.end() &&
-        !filestat_rounded.CanBeNewerThan(iter->second.first, now_truncated)) {
+        !filestat.CanBeNewerThan(iter->second.first)) {
       GOMA_COUNTERZ("hit");
       hit_.Add(1);
       *entries = iter->second.second;
@@ -66,14 +47,17 @@ bool ListDirCache::GetDirEntries(const std::string& path,
     return false;
   }
 
+  if (filestat.CanBeStale()) {
+    return true;
+  }
+
   AUTO_EXCLUSIVE_LOCK(lock, &rwlock_);
   auto exist_entry = dir_entries_cache_.find(path);
   if (exist_entry != dir_entries_cache_.end()) {
     current_entries_ -= exist_entry->second.second.size();
   }
 
-  dir_entries_cache_.emplace_back(path,
-                                  std::make_pair(filestat_rounded, *entries));
+  dir_entries_cache_.emplace_back(path, std::make_pair(filestat, *entries));
   current_entries_ += entries->size();
 
   while (current_entries_ > max_entries_) {

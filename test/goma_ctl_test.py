@@ -283,6 +283,8 @@ def _ClearGomaEnv():
   for e in os.environ:
     if e.startswith('GOMA_'):
       to_delete.append(e)
+    if e.startswith('GOMACTL_'):
+      to_delete.append(e)
   for e in to_delete:
     del os.environ[e]
   if os.environ.has_key('GOMAMODE'):

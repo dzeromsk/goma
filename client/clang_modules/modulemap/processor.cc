@@ -23,9 +23,6 @@ bool Processor::AddModuleMapFile(const absl::string_view module_map_file) {
     return true;
   }
 
-  // Implementation Note: `now` should be taken before file_stat_cache_->Get()
-  // to prevent race condition.
-  absl::Time now = absl::Now();
   FileStat stat = file_stat_cache_->Get(abs_module_map_file);
   if (!stat.IsValid() || stat.is_directory) {
     LOG(WARNING) << "failed to read " << abs_module_map_file;
@@ -33,7 +30,7 @@ bool Processor::AddModuleMapFile(const absl::string_view module_map_file) {
   }
 
   collected_module_map_files_.emplace_back(string(module_map_file),
-                                           abs_module_map_file, stat, now);
+                                           abs_module_map_file, stat);
   visited_abs_paths_.emplace(abs_module_map_file);
 
   // Parse modulemap.

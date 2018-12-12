@@ -105,7 +105,7 @@ class Fetcher {
   DISALLOW_COPY_AND_ASSIGN(Fetcher);
 };
 
-DEFINE_bool(auth, true, "Enable Authentication.");
+DEFINE_bool(auth, false, "Enable Authentication.");
 DEFINE_string(output, "", "Output filename.");
 DEFINE_bool(head, false, "Do a request with HEAD method.");
 DEFINE_bool(post, false, "Do a request with POST method.");

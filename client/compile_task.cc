@@ -63,8 +63,6 @@
 #include "ioutil.h"
 #include "java/jar_parser.h"
 #include "java_flags.h"
-#include "linker/linker_input_processor/linker_input_processor.h"
-#include "linker/linker_input_processor/thinlto_import_processor.h"
 #include "local_output_cache.h"
 #include "lockhelper.h"
 #include "multi_http_rpc.h"
@@ -2496,7 +2494,9 @@ void CompileTask::CommitOutput(bool use_remote) {
     const string& tmp_filename = info.tmp_filename;
     // TODO: fix to support cas digest.
     const string& hash_key = info.hash_key;
-    DCHECK(!hash_key.empty()) << filename;
+    DCHECK(!use_remote || !hash_key.empty())
+        << trace_id_ << " if remote is used, hash_key must be set."
+        << " filename=" << filename;
     const bool use_content = tmp_filename.empty();
     bool need_rename = !tmp_filename.empty() && tmp_filename != filename;
     if (!use_remote) {
@@ -2620,6 +2620,17 @@ void CompileTask::CommitOutput(bool use_remote) {
   }
 }
 
+// static
+string CompileTask::OmitDurationFromUserError(absl::string_view str) {
+  absl::string_view::size_type colon_pos = str.find(':');
+  if (colon_pos == absl::string_view::npos) {
+    return string(str);
+  }
+
+  return absl::StrCat("compiler_proxy <duration omitted>",
+                      str.substr(colon_pos));
+}
+
 void CompileTask::ReplyResponse(const string& msg) {
   LOG(INFO) << trace_id_ << " ReplyResponse: " << msg;
   DCHECK(BelongsToCurrentThread());
@@ -2657,6 +2668,8 @@ void CompileTask::ReplyResponse(const string& msg) {
     LOG_IF(ERROR, resp_->result().exit_status() == 0)
         << trace_id_ << " should not have error message on exit_status=0."
         << " errs=" << errs;
+    std::transform(errs.begin(), errs.end(), errs.begin(),
+                   OmitDurationFromUserError);
     service_->RecordErrorsToUser(errs);
   }
   UpdateStats();
@@ -3659,9 +3672,16 @@ void CompileTask::ModifyRequestArgs() {
       if (r.type != CompilerInfoData::EXECUTABLE_BINARY) {
         continue;
       }
-      const string& path = r.name;
-      req_->add_input()->set_filename(path);
-      LOG(INFO) << trace_id_ << " input automatically added: " << path;
+
+      // Also set toolchains
+      ToolchainSpec* toolchain_spec = req_->add_toolchain_specs();
+      toolchain_spec->set_path(r.name);
+      toolchain_spec->set_hash(r.hash);
+      toolchain_spec->set_size(r.file_stat.size);
+      toolchain_spec->set_is_executable(true);
+
+      req_->add_input()->set_filename(r.name);
+      LOG(INFO) << trace_id_ << " input automatically added: " << r.name;
     }
   }
 
@@ -3778,7 +3798,8 @@ void CompileTask::StartIncludeProcessor() {
   // TODO: DepsCache should be able to support multiple input files,
   // however currently we have to pass |abs_input_filename|, so DeosCache
   // supports a compile task that has one input file.
-  if (DepsCache::IsEnabled() && compiler_type_specific_->SupportsDepsCache() &&
+  if (DepsCache::IsEnabled() &&
+      compiler_type_specific_->SupportsDepsCache(*flags_) &&
       flags_->input_filenames().size() == 1U) {
     const string& input_filename = flags_->input_filenames()[0];
     const string& abs_input_filename =
@@ -3908,7 +3929,8 @@ void CompileTask::RunIncludeProcessorDone(
 
   // When deps_identifier_.has_value() is true, the condition to use DepsCache
   // should be satisfied. However, several checks are done for the safe.
-  if (DepsCache::IsEnabled() && compiler_type_specific_->SupportsDepsCache() &&
+  if (DepsCache::IsEnabled() &&
+      compiler_type_specific_->SupportsDepsCache(*flags_) &&
       response_param->result.ok && deps_identifier_.has_value() &&
       flags_->input_filenames().size() == 1U) {
     const string& input_filename = flags_->input_filenames()[0];
@@ -5000,6 +5022,7 @@ void CompileTask::AddErrorToResponse(
       LOG(ERROR) << trace_id_ << " " << error_message;
     else
       LOG(WARNING) << trace_id_ << " " << error_message;
+    // Update OmitDurationFromUserError when you change the following code.
     std::ostringstream msg;
     msg << "compiler_proxy ";
     msg << "[" << handler_timer_.GetDuration() << "]: ";
@@ -5020,11 +5043,12 @@ void CompileTask::AddErrorToResponse(
   }
 }
 
-void CompileTask::DumpRequest() const {
+string CompileTask::DumpRequest() const {
   if (!frozen_timestamp_.has_value()) {
-    LOG(ERROR) << trace_id_ << " DumpRequest called on active task";
-    return;
+    LOG(ERROR) << trace_id_ << " cannot dump an active task request";
+    return "cannot dump an active task request\n";
   }
+  string message;
   LOG(INFO) << trace_id_ << " DumpRequest";
   string filename = "exec_req.data";
   ExecReq req;
@@ -5079,12 +5103,17 @@ void CompileTask::DumpRequest() const {
                            input->mutable_content())) {
       LOG(ERROR) << trace_id_ << " DumpRequest failed to create fileblob:"
                  << input_filename;
+      message += absl::StrCat(
+          "DumpRequest failed to create fileblob: ", input_filename, "\n");
     } else {
       input->set_hash_key(FileServiceClient::ComputeHashKey(input->content()));
       if (!fs.Dump(file::JoinPath(task_request_dir, input->hash_key()))) {
         LOG(ERROR) << trace_id_ << " DumpRequest failed to store fileblob:"
                    << input_filename
                    << " hash:" << input->hash_key();
+        message += absl::StrCat("DumpRequest failed to store fileblob:",
+                                " input_filename=", input_filename,
+                                " hash=", input->hash_key());
       }
     }
   }
@@ -5092,10 +5121,15 @@ void CompileTask::DumpRequest() const {
   req.SerializeToString(&r);
   filename = file::JoinPath(task_request_dir, filename);
   if (!WriteStringToFile(r, filename)) {
-    LOG(ERROR) << trace_id_ << " DumpRequest failed to write: " << filename;
+    LOG(ERROR) << trace_id_
+               << " failed to write serialized proto: " << filename;
+    message +=
+        absl::StrCat("failed to write serialized proto: ", filename, "\n");
   } else {
     LOG(INFO) << trace_id_ << " DumpRequest wrote serialized proto: "
               << filename;
+    message +=
+        absl::StrCat("DumpRequest wrote serialized proto: ", filename, "\n");
   }
 
   // Only show file hash for text_format.
@@ -5107,12 +5141,15 @@ void CompileTask::DumpRequest() const {
   google::protobuf::TextFormat::PrintToString(req, &text_req);
   filename += ".txt";
   if (!WriteStringToFile(text_req, filename)) {
-    LOG(ERROR) << trace_id_ << " DumpRequest failed to write: " << filename;
+    LOG(ERROR) << trace_id_ << " failed to write text proto: " << filename;
+    message += absl::StrCat("failed to write text proto: ", filename, "\n");
   } else {
     LOG(INFO) << trace_id_ << " DumpRequest wrote text proto: " << filename;
+    message += absl::StrCat("DumpRequest wrote text proto: ", filename, "\n");
   }
 
   LOG(INFO) << trace_id_ << " DumpRequest done";
+  return message;
 }
 
 }  // namespace devtools_goma

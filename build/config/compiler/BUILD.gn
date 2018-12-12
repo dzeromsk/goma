@@ -365,8 +365,9 @@ config("no_exceptions") {
 #
 # Toggles between higher and lower warnings for code that is part of goma.
 config("goma_code") {
+  cflags = []
   if (os == "win") {
-    cflags = [
+    cflags += [
       "/W4",  # Warning level 4.
       "/wd4127",  # (for abseil) conditional expression is constant
       "/wd4244",  # (for abseil) any conversion that may cause loss of data
@@ -377,23 +378,29 @@ config("goma_code") {
       cflags += [ "-Wno-sign-compare" ]
     }
   } else {
-    cflags = [
+    cflags += [
       "-Wall",
       "-Wextra",
       "-Wsign-compare",
     ]
   }
   if (is_clang) {
-    cflags_cc = [
+    cflags += [
       "-Wimplicit-fallthrough",
       "-Wthread-safety",
+
+      # This is for buildtools/third_party/libc++abi/cxa_demangle_stub.cc
+      "-Wno-unused-parameter",
     ]
   }
 }
 
+config("chromium_code") {
+  # This is empty config used by libc++/libc++abi.
+}
+
 config("no_goma_code") {
   cflags = []
-  cflags_cc = []
   defines = []
 
   if (os == "win") {
@@ -445,8 +452,13 @@ config("no_goma_code") {
       "-Wno-unused-result",
       "-Wno-format",
     ]
+  }
+}
 
-    cflags_cc += [ "-Wno-deprecated" ]
+config("no_chromium_code") {
+  # This is warning suppression config used by libc++/libc++abi.
+  if (is_clang) {
+    cflags_cc = [ "-Wno-implicit-fallthrough" ]
   }
 }
 

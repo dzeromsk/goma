@@ -113,16 +113,17 @@ def CheckChangeOnUpload(input_api, output_api):
       input_api, output_api)
   results += input_api.canned_checks.RunPylint(
       input_api, output_api,
-      black_list=(r'third_party[\\/].*',
-                  r'build[\\/]tools[\\/].*',
-                  r'build[\\/]vs_toolchain.py',
-                  r'build[\\/]mac_toolchain.py',
-                  r'build[\\/]config[\\/]mac[\\/].*',
-                  r'build[\\/]mac[\\/].*',
-                  r'buildtools[\\/]clang_format[\\/]script[\\/].*',
-                  r'tools[\\/].*',
-                  r'out[\\/].*',
-                  r'build[\\/](Debug|Release).*'))
+      black_list=(
+          r'build[\\/]config[\\/]mac[\\/].*',
+          r'build[\\/]mac[\\/].*',
+          r'build[\\/]mac_toolchain.py',
+          r'build[\\/]tools[\\/].*',
+          r'build[\\/]vs_toolchain.py',
+          r'buildtools[\\/].*',
+          r'out[\\/].*',
+          r'third_party[\\/].*',
+          r'tools[\\/].*',
+      ))
   results += input_api.canned_checks.CheckGNFormatted(input_api, output_api)
   results += CheckGNGenChecked(input_api, output_api)
   return results

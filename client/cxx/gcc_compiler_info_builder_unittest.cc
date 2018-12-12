@@ -7,7 +7,9 @@
 #include "gtest/gtest.h"
 #include "mypath.h"
 #include "path.h"
+#include "subprocess.h"
 #include "unittest_util.h"
+#include "util.h"
 
 namespace devtools_goma {
 
@@ -161,5 +163,53 @@ TEST_F(GCCCompilerInfoBuilderTest, GetCompilerNameUnsupportedCase) {
   data.set_real_compiler_path("clang++");
   EXPECT_EQ("", builder.GetCompilerName(data));
 }
+
+#ifndef _WIN32
+// Since we use real clang and subprogram, use non-Win env only.
+TEST_F(GCCCompilerInfoBuilderTest, BuildWithRealClang) {
+  InstallReadCommandOutputFunc(ReadCommandOutputByPopen);
+
+  TmpdirUtil tmpdir("build_with_real_clang");
+  tmpdir.SetCwd("");
+
+  // Needs to use real .so otherwise clang fails to read the file.
+  // Linux has .so, and mac has .dylib.
+#ifdef __MACH__
+  const string lib_find_bad_constructs_so = file::JoinPath(
+      file::Dirname(GetClangPath()), "..", "lib", "libFindBadConstructs.dylib");
+#else
+  const string lib_find_bad_constructs_so = file::JoinPath(
+      file::Dirname(GetClangPath()), "..", "lib", "libFindBadConstructs.so");
+#endif
+
+  const std::vector<string> args{
+      GetClangPath(), "-Xclang", "-load", "-Xclang", lib_find_bad_constructs_so,
+      "-c",           "hello.c",
+  };
+  const std::vector<string> envs;
+  GCCFlags flags(args, tmpdir.realcwd());
+
+  GCCCompilerInfoBuilder builder;
+  std::unique_ptr<CompilerInfoData> data =
+      builder.FillFromCompilerOutputs(flags, GetClangPath(), envs);
+
+  std::vector<string> actual_executable_binaries;
+  ASSERT_NE(data.get(), nullptr);
+  for (const auto& resource : data->resource()) {
+    if (resource.type() == CompilerInfoData_ResourceType_EXECUTABLE_BINARY) {
+      actual_executable_binaries.push_back(resource.name());
+    }
+  }
+
+  std::vector<string> expected_executable_binaries{
+      GetClangPath(), lib_find_bad_constructs_so,
+  };
+  std::sort(expected_executable_binaries.begin(),
+            expected_executable_binaries.end());
+  std::sort(actual_executable_binaries.begin(),
+            actual_executable_binaries.end());
+  EXPECT_EQ(expected_executable_binaries, actual_executable_binaries);
+}
+#endif
 
 }  // namespace devtools_goma

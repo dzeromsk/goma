@@ -106,6 +106,20 @@ TEST_F(GCCFlagsTest, GetLanguage) {
   EXPECT_EQ("c++-header", GetLanguage("clang++", "foo.h"));
 }
 
+TEST_F(GCCFlagsTest, IsNaClClangCommand) {
+  EXPECT_TRUE(GCCFlags::IsNaClClangCommand("nacl-clang"));
+  EXPECT_TRUE(GCCFlags::IsNaClClangCommand("nacl-clang++"));
+  EXPECT_TRUE(GCCFlags::IsNaClClangCommand("/usr/bin/nacl-clang"));
+  EXPECT_TRUE(GCCFlags::IsNaClClangCommand("/usr/bin/nacl-clang++"));
+
+  EXPECT_FALSE(GCCFlags::IsNaClClangCommand("gcc"));
+  EXPECT_FALSE(GCCFlags::IsNaClClangCommand("g++"));
+  EXPECT_FALSE(GCCFlags::IsNaClClangCommand("clang"));
+  EXPECT_FALSE(GCCFlags::IsNaClClangCommand("clang++"));
+  EXPECT_FALSE(GCCFlags::IsNaClClangCommand("pnacl-clang"));
+  EXPECT_FALSE(GCCFlags::IsNaClClangCommand("pnacl-clang++"));
+}
+
 TEST_F(GCCFlagsTest, Basic) {
   std::vector<string> args;
   args.push_back("/usr/bin/x86_64-pc-linux-gnu-gcc-4.3");
@@ -1450,12 +1464,13 @@ TEST_F(GCCFlagsTest, IsImportantEnvGCC) {
     { "MACOSX_DEPLOYMENT_TARGET=/tmp/to", true, true },
     { "SDKROOT=/tmp/to", true, true },
     { "PWD=/tmp/to", true, true },
-    { "DEVELOPER_DIR=/tmp/to", true, true },
 
     { "PATHEXT=.EXE", true, false },
     { "pathext=.EXE", true, false },
     { "SystemRoot=C:\\Windows", true, false },
     { "systemroot=C:\\Windows", true, false },
+
+    { "DEVELOPER_DIR=/tmp/to", true, false },
 
     { "SystemDrive=C:", false, false },
     { "systemdrive=C:", false, false },
@@ -2439,6 +2454,7 @@ TEST_F(GCCFlagsTest, FModules) {
       static_cast<devtools_goma::GCCFlags*>(flags.get());
   EXPECT_TRUE(gcc_flags->has_fmodules());
   EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_FALSE(gcc_flags->has_emit_module());
   EXPECT_EQ("", gcc_flags->clang_module_map_file());
   EXPECT_EQ("", gcc_flags->clang_module_file().first);
   EXPECT_EQ("", gcc_flags->clang_module_file().second);
@@ -2468,6 +2484,7 @@ TEST_F(GCCFlagsTest, FNoImplicitModuleMaps) {
       static_cast<devtools_goma::GCCFlags*>(flags.get());
   EXPECT_TRUE(gcc_flags->has_fmodules());
   EXPECT_FALSE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_FALSE(gcc_flags->has_emit_module());
   EXPECT_EQ("", gcc_flags->clang_module_map_file());
   EXPECT_EQ("", gcc_flags->clang_module_file().first);
   EXPECT_EQ("", gcc_flags->clang_module_file().second);
@@ -2497,6 +2514,7 @@ TEST_F(GCCFlagsTest, FModulesCachePath) {
       static_cast<devtools_goma::GCCFlags*>(flags.get());
   EXPECT_TRUE(gcc_flags->has_fmodules());
   EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_FALSE(gcc_flags->has_emit_module());
   EXPECT_EQ("foo.modulemap", gcc_flags->clang_module_map_file());
   EXPECT_EQ("", gcc_flags->clang_module_file().first);
   EXPECT_EQ("", gcc_flags->clang_module_file().second);
@@ -2527,6 +2545,7 @@ TEST_F(GCCFlagsTest, FModuleFileWithName) {
       static_cast<devtools_goma::GCCFlags*>(flags.get());
   EXPECT_TRUE(gcc_flags->has_fmodules());
   EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_FALSE(gcc_flags->has_emit_module());
   EXPECT_EQ("", gcc_flags->clang_module_map_file());
   EXPECT_EQ("foo", gcc_flags->clang_module_file().first);
   EXPECT_EQ("foo.pcm", gcc_flags->clang_module_file().second);
@@ -2557,6 +2576,7 @@ TEST_F(GCCFlagsTest, FModuleFileWithoutName) {
       static_cast<devtools_goma::GCCFlags*>(flags.get());
   EXPECT_TRUE(gcc_flags->has_fmodules());
   EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_FALSE(gcc_flags->has_emit_module());
   EXPECT_EQ("", gcc_flags->clang_module_map_file());
   EXPECT_EQ("", gcc_flags->clang_module_file().first);
   EXPECT_EQ("foo.pcm", gcc_flags->clang_module_file().second);
@@ -2591,6 +2611,7 @@ TEST_F(GCCFlagsTest, FModuleFileFModuleMapFile) {
       static_cast<devtools_goma::GCCFlags*>(flags.get());
   EXPECT_TRUE(gcc_flags->has_fmodules());
   EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_FALSE(gcc_flags->has_emit_module());
   EXPECT_EQ("foo.modulemap", gcc_flags->clang_module_map_file());
   EXPECT_EQ("foo", gcc_flags->clang_module_file().first);
   EXPECT_EQ("foo.pcm", gcc_flags->clang_module_file().second);
@@ -2620,8 +2641,74 @@ TEST_F(GCCFlagsTest, FModuleFileCornerCase) {
       static_cast<devtools_goma::GCCFlags*>(flags.get());
   EXPECT_TRUE(gcc_flags->has_fmodules());
   EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_FALSE(gcc_flags->has_emit_module());
   EXPECT_EQ("", gcc_flags->clang_module_map_file());
   EXPECT_EQ("foo", gcc_flags->clang_module_file().first);
+  EXPECT_EQ("", gcc_flags->clang_module_file().second);
+}
+
+// b/24956317
+TEST_F(GCCFlagsTest, XClangEmitModule) {
+  const std::vector<string> args{
+      "clang++",      "-x", "c++",           "-fmodules", "-Xclang",
+      "-emit-module", "-c", "foo.modulemap", "-o",        "foo.pcm",
+  };
+
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
+  EXPECT_EQ(args, flags->args());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
+
+  EXPECT_TRUE(flags->is_successful());
+  EXPECT_EQ("", flags->fail_message());
+  EXPECT_EQ("clang++", flags->compiler_base_name());
+  EXPECT_EQ("clang++", flags->compiler_name());
+
+  ASSERT_EQ(1U, flags->input_filenames().size());
+  EXPECT_EQ("foo.modulemap", flags->input_filenames()[0]);
+
+  EXPECT_EQ(0U, flags->optional_input_filenames().size());
+
+  devtools_goma::GCCFlags* gcc_flags =
+      static_cast<devtools_goma::GCCFlags*>(flags.get());
+  EXPECT_TRUE(gcc_flags->has_fmodules());
+  EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_TRUE(gcc_flags->has_emit_module());
+  EXPECT_EQ("", gcc_flags->clang_module_map_file());
+  EXPECT_EQ("", gcc_flags->clang_module_file().first);
+  EXPECT_EQ("", gcc_flags->clang_module_file().second);
+}
+
+// Don't crash if -Xclang is wrongly used.
+TEST_F(GCCFlagsTest, XClangEmitModuleEvil) {
+  const std::vector<string> args{
+      "clang++", "-x",           "c++",          "-fmodules",
+      "-Xclang", "-emit-module", "-c",           "foo.modulemap",
+      "-o",      "foo.pcm",      "-Xclang=hoge", "-Xclang",
+  };
+
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "/tmp"));
+  EXPECT_EQ(args, flags->args());
+  EXPECT_EQ(CompilerFlagType::Gcc, flags->type());
+
+  EXPECT_TRUE(flags->is_successful());
+  EXPECT_EQ("", flags->fail_message());
+  EXPECT_EQ("clang++", flags->compiler_base_name());
+  EXPECT_EQ("clang++", flags->compiler_name());
+
+  ASSERT_EQ(1U, flags->input_filenames().size());
+  EXPECT_EQ("foo.modulemap", flags->input_filenames()[0]);
+
+  EXPECT_EQ(0U, flags->optional_input_filenames().size());
+
+  devtools_goma::GCCFlags* gcc_flags =
+      static_cast<devtools_goma::GCCFlags*>(flags.get());
+  EXPECT_TRUE(gcc_flags->has_fmodules());
+  EXPECT_TRUE(gcc_flags->has_fimplicit_module_maps());
+  EXPECT_TRUE(gcc_flags->has_emit_module());
+  EXPECT_EQ("", gcc_flags->clang_module_map_file());
+  EXPECT_EQ("", gcc_flags->clang_module_file().first);
   EXPECT_EQ("", gcc_flags->clang_module_file().second);
 }
 

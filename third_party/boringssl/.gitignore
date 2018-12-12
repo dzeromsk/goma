@@ -1,5 +1,9 @@
+BUILD.generated_tests.gni
+ios-aarch64
+ios-arm
 linux-aarch64
 linux-arm
+linux-ppc64le
+linux-x86
 mac-x86
 win-x86
-BUILD.generated_tests.gni

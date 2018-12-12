@@ -56,6 +56,7 @@ message CommandSpec {
 
   // Binary size of the command.
   // Necessary if toolchain is sent to the server.
+  // TODO: Now that we have ToolchainSpec, this is not necessary.
   optional int64 size = 13;
 
   // The followings will be used to request more specific version of
@@ -93,6 +94,20 @@ message SubprogramSpec {
   optional string binary_hash = 2;
   // Binary size of the subprogram.
   optional int64 size = 3;
+}
+
+// Experimental.
+// Specifies toolchain specification.
+// This spec is necessary only if toolchain is also uploaded.
+message ToolchainSpec {
+  // path to toolchain. Relative path from ExecReq::cwd or Absolute path.
+  optional string path = 1;
+  // SHA256 hash of the toolchain.
+  optional string hash = 2;
+  // file size of toolchain (in bytes).
+  optional int64 size = 3;
+  // true if the toolchain has 'x' bit.
+  optional bool is_executable = 4;
 }
 
 message ExecResult {
@@ -259,6 +274,19 @@ message ExecReq {
   // EXPERIMENTAL.
   // True if ExecReq contains toolchains as input.
   optional bool toolchain_included = 37;
+  // If ExecReq contains toolchains as input, set toolchain spec.
+  // toolchain spec should contain all compiler related files except system
+  // shared objects which are expected to exist in the server side. For
+  // example, in `clang` case, recent `clang` binary usually contains
+  // everything, so it is OK to have just `clang`. In `pnacl-clang` case, it
+  // needs libLLVM.so, and since it is a compiler wrapper, it needs related
+  // python scripts etc.
+  // Currently, if `dimensions` is set correctly, we don't need to add
+  // shared objects in /lib or /usr/lib.
+  //
+  // toolchain_specs should contain compiler-driver (which is set in
+  // command_spec) and subprograms, too.
+  repeated ToolchainSpec toolchain_specs = 38;
 
   reserved 99;
 }

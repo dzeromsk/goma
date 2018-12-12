@@ -491,6 +491,13 @@ bool CppIncludeProcessor::GetIncludeFiles(const string& filename,
     root_includes = flags.root_includes();
     user_framework_dirs = flags.framework_dirs();
     commandline_macros = flags.commandline_macros();
+
+    // -Xclang -emit-module is not supported yet. Do fallback.
+    // b/24956317
+    if (flags.has_emit_module()) {
+      LOG(INFO) << "-Xclang -emit-module is not supported yet; force fallback";
+      return false;
+    }
   } else if (compiler_flags.type() == CompilerFlagType::Clexe) {
     const VCFlags& flags = static_cast<const VCFlags&>(compiler_flags);
     non_system_include_dirs = flags.include_dirs();

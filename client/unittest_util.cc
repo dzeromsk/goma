@@ -6,11 +6,13 @@
 #include "unittest_util.h"
 
 #ifdef _WIN32
-# include "config_win.h"
-# include <shlobj.h>
+#include <shlobj.h>
+#include <sys/utime.h>
+#include "config_win.h"
 #else
 # include <sys/stat.h>
 # include <sys/types.h>
+#include <utime.h>
 #endif
 #include <cstdio>
 #include <limits.h>
@@ -136,6 +138,20 @@ string GetTestFilePath(const string& test_name) {
     << "Cannot read test file:"
     << " filename=" << fullpath;
   return fullpath;
+}
+
+bool UpdateMtime(const string& path, absl::Time mtime) {
+#ifdef _WIN32
+  using utimbuf = _utimbuf;
+  const auto utime = _utime;
+#endif
+
+  utimbuf new_stat{
+      /* actime */ 0,
+      /* modtime */ absl::ToTimeT(mtime),
+  };
+
+  return utime(path.c_str(), &new_stat) == 0;
 }
 
 string GetClangPath() {
