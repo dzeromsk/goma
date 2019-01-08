@@ -826,6 +826,10 @@ expect_success "gomacc_should succeed_with_write_log_flag" \
 expect_success "gomacc_should_create_log_file" \
   "[ \"$(echo ${tmpdir}/gomacc_test/gomacc.* | wc -w)\" -eq "2" ]"
 
+expect_success "dont_verify_or_abort_when_supposed_to_fallback" \
+    "GOMA_VERIFY_OUTPUT=true ${GOMA_CC} test/empty_assembler.s -c \
+    -o empty_assembler.o"
+
 if [ "${#FAIL[@]}" -ne 0 ]; then
   echo_fail "Failed tests: ${FAIL[@]}"
 fi

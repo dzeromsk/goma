@@ -4923,10 +4923,15 @@ void CompileTask::FinishSubProcess() {
   result->set_stderr_buffer(stderr_buffer);
 
   if (verify_output_) {
-    CHECK_EQ(INIT, state_);
-    // local runs done, start remote.
-    ProcessSetup();
-    return;
+    if (should_fallback_) {
+      LOG(WARNING) << trace_id_
+                   << " handled locally, no remote results to verify";
+    } else {
+      CHECK_EQ(INIT, state_);
+      // local runs done, start remote.
+      ProcessSetup();
+      return;
+    }
   }
 
   if (precompiling_ && service_->enable_gch_hack()) {
