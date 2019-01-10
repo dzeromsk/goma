@@ -285,17 +285,31 @@ TEST(FilePathUtilTest, RemoveDuplicateFiles) {
   }
 
   {
-    // different filepath if case is not same.
     std::set<std::string> filenames{
+        file::JoinPath(kRootDir, "fOO"),
         file::JoinPath(kRootDir, "Foo"),
-        file::JoinPath(absl::AsciiStrToLower(kRootDir), "fOO"),
+        file::JoinPath(kRootDir, "fOo"),
+        file::JoinPath(absl::AsciiStrToLower(kRootDir), "FOO"),
+        file::JoinPath(absl::AsciiStrToLower(kRootDir), "foO"),
     };
     RemoveDuplicateFiles("", &filenames);
-
+#ifdef _WIN32
+    // Windows: case-insensitive, use the case variation of the first non-unique
+    // Windows path that was encountered, based on case-sensitive ordering of
+    // strings within std::set.
     std::set<std::string> expected{
         file::JoinPath(kRootDir, "Foo"),
-        file::JoinPath(absl::AsciiStrToLower(kRootDir), "fOO"),
     };
+#else
+    // non-Windows: different filepath if case is not same.
+    std::set<std::string> expected{
+        file::JoinPath(kRootDir, "fOO"),
+        file::JoinPath(kRootDir, "Foo"),
+        file::JoinPath(kRootDir, "fOo"),
+        file::JoinPath(absl::AsciiStrToLower(kRootDir), "FOO"),
+        file::JoinPath(absl::AsciiStrToLower(kRootDir), "foO"),
+    };
+#endif  // _WIN32
     EXPECT_EQ(filenames, expected);
   }
 

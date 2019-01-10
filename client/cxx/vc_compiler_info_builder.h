@@ -10,6 +10,7 @@
 
 #include "compiler_specific.h"
 #include "cxx_compiler_info_builder.h"
+#include "vc_flags.h"
 
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/compiler_info_data.pb.h"
@@ -59,6 +60,22 @@ class VCCompilerInfoBuilder : public CxxCompilerInfoBuilder {
                                  const string& cwd,
                                  const string& lang,
                                  CompilerInfoData* compiler_info);
+
+ private:
+  // SetTypeSpecificCompilerInfo for cl.exe
+  void SetClexeSpecificCompilerInfo(
+      const VCFlags& flags,
+      const string& local_compiler_path,
+      const string& abs_local_compiler_path,
+      const std::vector<string>& compiler_info_envs,
+      CompilerInfoData* data) const;
+  // SetTypeSpecificCompilerInfo for clang-cl.exe
+  void SetClangClSpecificCompilerInfo(
+      const VCFlags& flags,
+      const string& local_compiler_path,
+      const string& abs_local_compiler_path,
+      const std::vector<string>& compiler_info_envs,
+      CompilerInfoData* data) const;
 };
 
 }  // namespace devtools_goma

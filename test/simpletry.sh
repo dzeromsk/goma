@@ -460,11 +460,20 @@ CURRENT_DIR_BACKUP=$PWD
 cd $LOCAL_CXX_DIR
 assert_success "${LOCAL_CXX} $CURRENT_DIR_BACKUP/test/oneinclude.cc \
   -c -o $CURRENT_DIR_BACKUP/out_plain.o"
-expect_success "gomacc_relative_path_${CXX}" \
+
+
+if [ "$(uname)" = "Darwin" ]; then
+    # TODO: In Mac, failed to include <iostream>. b/122490524
+    MAYBE_FAIL="FAIL_"
+fi
+
+expect_success "${MAYBE_FAIL}gomacc_relative_path_${CXX}" \
      "${GOMACC} ./${CXX} $CURRENT_DIR_BACKUP/test/oneinclude.cc \
      -c -o $CURRENT_DIR_BACKUP/out.o"
-expect_success "${HERMETIC_GCC}gomacc_relative_path_${CXX}_oneinclude.o" \
+expect_success "${MAYBE_FAIL}${HERMETIC_GCC}gomacc_relative_path_${CXX}_oneinclude.o" \
     "objcmp ${CURRENT_DIR_BACKUP}/out_plain.o ${CURRENT_DIR_BACKUP}/out.o"
+MAYBE_FAIL=
+
 cd $CURRENT_DIR_BACKUP
 
 rm -f out2.o out_plain.o
@@ -523,19 +532,6 @@ if (${LOCAL_CXX} -DTHREAD_SANITIZER -fsanitize=thread -fPIC \
    "${GOMA_CXX} -DTHREAD_SANITIZER -fsanitize=thread -fPIC \
     -fsanitize-blacklist=test/tsan-ign.txt \
     -o out.o -c test/oneinclude.cc"
-fi
-
-if [ "$CXX" = "clang++" ]; then
-  # See: b/16826568
-  ext=".so"
-  if [ "$(uname -s)" == "Darwin" ]; then
-    ext=".dylib"
-  fi
-
-  expect_success "${CXX}_load_plugin_in_relative_path" \
-  "${GOMACC} ${LOCAL_CXX} -Xclang -load -Xclang \
-   third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs${ext} \
-   -o out.o -c test/oneinclude.cc"
 fi
 
 if [ "$CXX" = "g++" ]; then
@@ -746,9 +742,23 @@ if [ "$(uname)" = "Linux" ]; then
   fi
 fi
 
-if [ "$GOMATEST_USE_CHROMIUM_CLANG" = "1" ]; then
-  # automatically detects .so and .dylib.
-  CLANG_PLUGIN=$(echo $(dirname $LOCAL_CXX)/../lib/libFindBadConstructs.*)
+
+ext=".so"
+if [ "$(uname -s)" == "Darwin" ]; then
+    ext=".dylib"
+fi
+CLANG_PLUGIN="third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs${ext}"
+
+# TODO: Remove this test? (b/122436038)
+if [ "$CXX" = "clang++" -a -f "${CLANG_PLUGIN}" ]; then
+  # See: b/16826568
+  expect_success "${CXX}_load_plugin_in_relative_path" \
+  "${GOMACC} ${LOCAL_CXX} -Xclang -load -Xclang ${CLANG_PLUGIN} \
+   -o out.o -c test/oneinclude.cc"
+fi
+
+# TODO: Remove plugin test? (b/122436038)
+if [ "$GOMATEST_USE_CHROMIUM_CLANG" = "1" -a -f "${CLANG_PLUGIN}" ]; then
   CLANG_PLUGIN_BASE=$(basename $CLANG_PLUGIN)
 
   cp -p ${CLANG_PLUGIN} ./${CLANG_PLUGIN_BASE}

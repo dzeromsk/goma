@@ -18,7 +18,6 @@
 #include <unistd.h>
 #endif
 
-#include "absl/strings/ascii.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "compiler_specific.h"
@@ -36,19 +35,6 @@ MSVC_POP_WARNING()
 #ifdef _WIN32
 #include "spawner_win.h"
 #endif
-
-namespace {
-
-static bool CanKillCommand(absl::string_view command,
-                           const std::set<string>& dont_kill_commands) {
-  string prog = string(file::Stem(command));
-#ifdef _WIN32
-  absl::AsciiStrToLower(&prog);
-#endif
-  return dont_kill_commands.find(prog) == dont_kill_commands.end();
-}
-
-}  // namespace
 
 namespace devtools_goma {
 
@@ -208,11 +194,7 @@ void SubProcessControllerServer::Register(std::unique_ptr<SubProcessReq> req) {
     SendNotify(SubProcessController::TERMINATED, terminated);
     return;
   }
-  bool dont_kill = false;
-  if (options_.dont_kill_subprocess ||
-      !CanKillCommand(req->prog(), options_.dont_kill_commands)) {
-    dont_kill = true;
-  }
+  bool dont_kill = options_.dont_kill_subprocess;
   VLOG(1) << "id=" << req->id() << " Kill? " << req->trace_id()
           << " prog=" << req->prog()
           << " dont_kill=" << dont_kill;

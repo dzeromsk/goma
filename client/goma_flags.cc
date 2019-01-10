@@ -517,15 +517,6 @@ GOMA_DEFINE_bool(DONT_KILL_SUBPROCESS,
                  DEFAULT_DONT_KILL_SUBPROCESS,
                  "Don't kill subprocess.");
 
-// TODO: Remove this.
-GOMA_DEFINE_string(DONT_KILL_COMMANDS,
-                   "",
-                   "Don't kill commands. "
-                   "On Windows, nacl-gcc sometimes remains its child process "
-                   "with suspended state.  In that situation, \"goma_ctl.bat "
-                   "start\" cannot start compiler_proxy. "
-                   "b/13198323 b/12533849");
-
 #ifndef _WIN32
 GOMA_DEFINE_bool(COMPILER_PROXY_DAEMON_MODE, false,
                  "True to run as a daemon process.");

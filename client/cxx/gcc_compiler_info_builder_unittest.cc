@@ -174,6 +174,7 @@ TEST_F(GCCCompilerInfoBuilderTest, BuildWithRealClang) {
 
   // Needs to use real .so otherwise clang fails to read the file.
   // Linux has .so, and mac has .dylib.
+  // TODO: Remove plugin use? (b/122436038)
 #ifdef __MACH__
   const string lib_find_bad_constructs_so = file::JoinPath(
       file::Dirname(GetClangPath()), "..", "lib", "libFindBadConstructs.dylib");
@@ -182,10 +183,18 @@ TEST_F(GCCCompilerInfoBuilderTest, BuildWithRealClang) {
       file::Dirname(GetClangPath()), "..", "lib", "libFindBadConstructs.so");
 #endif
 
-  const std::vector<string> args{
-      GetClangPath(), "-Xclang", "-load", "-Xclang", lib_find_bad_constructs_so,
-      "-c",           "hello.c",
+  std::vector<string> args{
+      GetClangPath(),
+      "-c",
+      "hello.c",
   };
+
+  if (access(lib_find_bad_constructs_so.c_str(), R_OK) == 0) {
+    const std::vector<string> plugin_args = {"-Xclang", "-load", "-Xclang",
+                                             lib_find_bad_constructs_so};
+    args.insert(args.end(), plugin_args.begin(), plugin_args.end());
+  }
+
   const std::vector<string> envs;
   GCCFlags flags(args, tmpdir.realcwd());
 
@@ -202,8 +211,13 @@ TEST_F(GCCCompilerInfoBuilderTest, BuildWithRealClang) {
   }
 
   std::vector<string> expected_executable_binaries{
-      GetClangPath(), lib_find_bad_constructs_so,
+      GetClangPath(),
   };
+
+  if (access(lib_find_bad_constructs_so.c_str(), R_OK) == 0) {
+    expected_executable_binaries.push_back(lib_find_bad_constructs_so);
+  }
+
   std::sort(expected_executable_binaries.begin(),
             expected_executable_binaries.end());
   std::sort(actual_executable_binaries.begin(),

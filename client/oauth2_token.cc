@@ -276,6 +276,7 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
         cond_.Wait(&mu_);
       }
     }
+    client_->WaitNoActive();
     client_.reset();
   }
 
@@ -331,6 +332,17 @@ class GoogleOAuth2AccessTokenRefreshTask : public OAuth2AccessTokenRefreshTask {
   void Done() LOCKS_EXCLUDED(mu_) {
     AUTOLOCK(lock, &mu_);
     DCHECK(THREAD_ID_IS_SELF(refresh_task_thread_id_));
+    if (shutting_down_) {
+      std::vector<std::pair<WorkerThread::ThreadId,
+          OneshotClosure*>> callbacks;
+      callbacks.swap(pending_tasks_);
+      for (const auto& callback : callbacks) {
+        wm_->RunClosureInThread(FROM_HERE,
+                                callback.first, callback.second,
+                                WorkerThread::PRIORITY_MED);
+      }
+      return;
+    }
     bool http_ok = true;
     if (status_->err != OK &&
         (status_->http_return_code == 0 ||

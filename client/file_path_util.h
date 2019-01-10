@@ -46,6 +46,12 @@ bool GetRealExecutablePath(const FileStat* gomacc_filestat,
                            string* no_goma_path_env,
                            bool* is_in_relative_path);
 
+// Remove duplicate filepath from |filenames|
+// for files normalized by JoinPathRepectAbsolute with |cwd|.
+// Relative path is taken in high priority.
+void RemoveDuplicateFiles(const std::string& cwd,
+                          std::set<std::string>* filenames);
+
 #ifdef _WIN32
 // Resolves path extension of |cmd| using PATHEXT environment given with
 // |pathext_env|.  If |cmd| is not an absolute path, it is automatically
@@ -60,12 +66,6 @@ string ResolveExtension(const string& cmd,
 bool IsLocalCompilerPathValid(const string& trace_id,
                               const ExecReq& req,
                               const string& compiler_name);
-
-// Remove duplicate filepath from |filenames|
-// for files normalized by JoinPathRepectAbsolute with |cwd|.
-// Relative path is taken in high priority.
-void RemoveDuplicateFiles(const std::string& cwd,
-                          std::set<std::string>* filenames);
 
 }  // namespace devtools_goma
 

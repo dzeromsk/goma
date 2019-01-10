@@ -184,6 +184,33 @@ const char kExecReqToNormalizeWin[] =
     "expected_output_files: "
     "\"C:\\\\src\\\\goma\\\\client\\\\build\\\\Debug\\\\vc\\\\stdafx.obj\"\n";
 
+const char kExecReqToNormalizeWinRelativeInputNoDebug[] =
+    "command_spec {\n"
+    "  name: \"cl.exe\"\n"
+    "  version: \"15.00.30729.01\"\n"
+    "  target: \"80x86\"\n"
+    "  local_compiler_path: \"c:\\\\Program Files (x86)"
+    "\\\\Microsoft Visual Studio 9.0\\\\VC\\\\BIN\\\\cl.exe\"\n"
+    "  system_include_path: \"c:\\\\Program Files (x86)"
+    "\\\\Microsoft Visual Studio 9.0\\\\VC\\\\INCLUDE\"\n"
+    "  cxx_system_include_path: \"c:\\\\Program Files (x86)"
+    "\\\\Microsoft Visual Studio 9.0\\\\VC\\\\INCLUDE\"\n"
+    "}\n"
+    "arg: \"cl\"\n"
+    "arg: \"/c\"\n"
+    "arg: \"/TP\"\n"
+    "arg: \"/showIncludes\"\n"
+    "arg: \"/Fovc\\\\stdafx.obj\"\n"
+    "arg: \"stdafx.cpp\"\n"
+    "cwd: \"C:\\\\src\\\\goma\\\\client\\\\test\\\\vc\"\n"
+    "Input {\n"
+    "  filename: \"..\\\\..\\\\test\\\\vc\\\\stdafx.cpp\"\n"
+    "  hash_key: \"152d72ea117deff2af0cf0ca3aaa46a20a5f0c0e4ccb8b6d"
+    "559d507401ae81e9\"\n"
+    "}\n"
+    "expected_output_files: "
+    "\"vc\\\\stdafx.obj\"\n";
+
 const char kExecReqToNormalizeWinClang[] =
     "command_spec {\n"
     "  name: \"clang-cl\"\n"
@@ -297,6 +324,35 @@ TEST(VCExecReqNormalizerTest, NormalizeExecReqForCacheKeyForClExe) {
   EXPECT_EQ(1, req.expected_output_files_size());
   EXPECT_EQ("C:\\src\\goma\\client\\build\\Debug\\vc\\stdafx.obj",
             req.expected_output_files(0));
+  EXPECT_TRUE(req.expected_output_dirs().empty());
+}
+
+// cl.exe with showIncludes should keep cwd.
+TEST(VCExecReqNormalizerTest, NormalizeExecReqForCacheKeyForClExeRelative) {
+  devtools_goma::ExecReq req;
+  const std::vector<string> kTestOptions{
+      "Xclang", "B", "I", "gcc-toolchain", "-sysroot", "resource-dir"};
+
+  ASSERT_TRUE(TextFormat::ParseFromString(
+      kExecReqToNormalizeWinRelativeInputNoDebug, &req));
+  ASSERT_TRUE(devtools_goma::VerifyExecReq(req));
+  ASSERT_TRUE(ValidateOutputFilesAndDirs(req));
+  devtools_goma::NormalizeExecReqForCacheKey(0, true, false, kTestOptions,
+                                             std::map<string, string>(), &req);
+  EXPECT_EQ(1, req.command_spec().system_include_path_size());
+  const string expected_include_path(
+      "c:\\Program Files (x86)\\Microsoft Visual Studio 9.0\\VC\\INCLUDE");
+  EXPECT_EQ(expected_include_path, req.command_spec().system_include_path(0));
+  EXPECT_EQ(1, req.command_spec().cxx_system_include_path_size());
+  EXPECT_EQ(expected_include_path,
+            req.command_spec().cxx_system_include_path(0));
+  EXPECT_FALSE(req.cwd().empty());
+  EXPECT_EQ(1, req.input_size());
+  EXPECT_EQ("..\\..\\test\\vc\\stdafx.cpp", req.input(0).filename());
+  EXPECT_TRUE(req.input(0).has_hash_key());
+
+  EXPECT_EQ(1, req.expected_output_files_size());
+  EXPECT_EQ("vc\\stdafx.obj", req.expected_output_files(0));
   EXPECT_TRUE(req.expected_output_dirs().empty());
 }
 

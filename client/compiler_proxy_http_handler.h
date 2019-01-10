@@ -89,6 +89,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
 
   int HandleLegendHelp(const HttpServerRequest& request, string* response);
 
+  int HandleStatusLogo(const HttpServerRequest& request, string* response);
 
   int HandleStatusJavaScript(const HttpServerRequest& request,
                              string* response);

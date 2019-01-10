@@ -59,6 +59,15 @@ ConfigurableExecReqNormalizer::Config VCExecReqNormalizer::Configure(
   if (flag_show_include->seen()) {
     // /showInclude outputs path as-is. So we need to preserve input path.
     keep_pathnames_in_input |= kAsIs;
+
+    if (!is_clang_cl) {
+      // cl.exe seems to output pathname in absolute path even if include dir is
+      // given in relative form, but a file is included from the same directory
+      // of including file.
+      // We don't know a file is included from the same directory or include
+      // directory. So always set keep_cwd for cl.exe here.
+      keep_cwd |= kAsIs;
+    }
   }
 
   if (flag_fc->seen() || flag_fdiagnostics_absolute_paths->seen()) {

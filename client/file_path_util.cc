@@ -7,6 +7,7 @@
 #include <deque>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_split.h"
 #include "compiler_flag_type_specific.h"
 #include "compiler_specific.h"
@@ -281,6 +282,10 @@ void RemoveDuplicateFiles(const std::string& cwd,
   std::set<std::string> unique_files;
   for (const auto& filename : *filenames) {
     std::string abs_filename = file::JoinPathRespectAbsolute(cwd, filename);
+#ifdef _WIN32
+    // On Windows, convert to lowercase for uniqueness comparison.
+    absl::AsciiStrToLower(&abs_filename);
+#endif  // _WIN32
     auto p = path_map.emplace(std::move(abs_filename), filename);
     if (p.second) {
       unique_files.insert(filename);

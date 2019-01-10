@@ -10,6 +10,7 @@
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "mypath.h"
+#include "path.h"
 #include "util.h"
 #include "vc_flags.h"
 
@@ -84,53 +85,100 @@ void VCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     CompilerInfoData* data) const {
   const VCFlags& vc_flags = static_cast<const VCFlags&>(flags);
   if (VCFlags::IsClangClCommand(local_compiler_path)) {
-    const VCFlags& vc_flags = static_cast<const VCFlags&>(flags);
-    const string& lang_flag = vc_flags.is_cplusplus() ? "/TP" : "/TC";
-    if (!ClangCompilerInfoBuilderHelper::SetBasicCompilerInfo(
-            local_compiler_path, vc_flags.compiler_info_flags(),
-            compiler_info_envs, vc_flags.cwd(), lang_flag,
-            vc_flags.resource_dir(), vc_flags.is_cplusplus(), false, data)) {
-      DCHECK(data->has_error_message());
-      // If error occurred in SetBasicCompilerInfo, we do not need to
-      // continue.
-      return;
-    }
-
-    const string& sharp_output = GetClangClSharpOutput(
-        local_compiler_path, vc_flags.compiler_info_flags(), compiler_info_envs,
-        vc_flags.cwd());
-    if (sharp_output.empty() ||
-        !ClangCompilerInfoBuilderHelper::ParseClangVersionTarget(
-            sharp_output, data->mutable_version(), data->mutable_target())) {
-      AddErrorMessage(
-          "Failed to get version string for " + abs_local_compiler_path, data);
-      LOG(ERROR) << data->error_message();
-      return;
-    }
+    SetClangClSpecificCompilerInfo(vc_flags, local_compiler_path,
+                                   abs_local_compiler_path, compiler_info_envs,
+                                   data);
   } else {
-    // cl.exe.
-    string vcflags_path = GetMyDirectory();
-    vcflags_path += "\\vcflags.exe";
-    data->mutable_cxx()->set_predefined_macros(data->cxx().predefined_macros() +
-                                               vc_flags.implicit_macros());
-    if (!VCCompilerInfoBuilder::GetVCVersion(
-            abs_local_compiler_path, compiler_info_envs, flags.cwd(),
-            data->mutable_version(), data->mutable_target())) {
-      AddErrorMessage(
-          "Failed to get cl.exe version for " + abs_local_compiler_path, data);
-      LOG(ERROR) << data->error_message();
-      return;
-    }
-    if (!GetVCDefaultValues(abs_local_compiler_path, vcflags_path,
-                            flags.compiler_info_flags(), compiler_info_envs,
-                            flags.cwd(), data->lang(), data)) {
-      AddErrorMessage(
-          "Failed to get cl.exe system include path "
-          " or predifined macros for " +
-              abs_local_compiler_path,
-          data);
-      LOG(ERROR) << data->error_message();
-      return;
+    SetClexeSpecificCompilerInfo(vc_flags, local_compiler_path,
+                                 abs_local_compiler_path, compiler_info_envs,
+                                 data);
+  }
+}
+
+void VCCompilerInfoBuilder::SetClexeSpecificCompilerInfo(
+    const VCFlags& vc_flags,
+    const string& local_compiler_path,
+    const string& abs_local_compiler_path,
+    const std::vector<string>& compiler_info_envs,
+    CompilerInfoData* data) const {
+  string vcflags_path = GetMyDirectory();
+  vcflags_path += "\\vcflags.exe";
+  data->mutable_cxx()->set_predefined_macros(data->cxx().predefined_macros() +
+                                             vc_flags.implicit_macros());
+  if (!VCCompilerInfoBuilder::GetVCVersion(
+          abs_local_compiler_path, compiler_info_envs, vc_flags.cwd(),
+          data->mutable_version(), data->mutable_target())) {
+    AddErrorMessage(
+        "Failed to get cl.exe version for " + abs_local_compiler_path, data);
+    LOG(ERROR) << data->error_message();
+    return;
+  }
+  if (!GetVCDefaultValues(abs_local_compiler_path, vcflags_path,
+                          vc_flags.compiler_info_flags(), compiler_info_envs,
+                          vc_flags.cwd(), data->lang(), data)) {
+    AddErrorMessage(
+        "Failed to get cl.exe system include path "
+        " or predifined macros for " +
+            abs_local_compiler_path,
+        data);
+    LOG(ERROR) << data->error_message();
+    return;
+  }
+
+  // TODO: collect executable resources?
+}
+
+void VCCompilerInfoBuilder::SetClangClSpecificCompilerInfo(
+    const VCFlags& vc_flags,
+    const string& local_compiler_path,
+    const string& abs_local_compiler_path,
+    const std::vector<string>& compiler_info_envs,
+    CompilerInfoData* data) const {
+  const string& lang_flag = vc_flags.is_cplusplus() ? "/TP" : "/TC";
+  if (!ClangCompilerInfoBuilderHelper::SetBasicCompilerInfo(
+          local_compiler_path, vc_flags.compiler_info_flags(),
+          compiler_info_envs, vc_flags.cwd(), lang_flag,
+          vc_flags.resource_dir(), vc_flags.is_cplusplus(), false, data)) {
+    DCHECK(data->has_error_message());
+    // If error occurred in SetBasicCompilerInfo, we do not need to
+    // continue.
+    return;
+  }
+
+  const string& sharp_output =
+      GetClangClSharpOutput(local_compiler_path, vc_flags.compiler_info_flags(),
+                            compiler_info_envs, vc_flags.cwd());
+  if (sharp_output.empty() ||
+      !ClangCompilerInfoBuilderHelper::ParseClangVersionTarget(
+          sharp_output, data->mutable_version(), data->mutable_target())) {
+    AddErrorMessage(
+        "Failed to get version string for " + abs_local_compiler_path, data);
+    LOG(ERROR) << data->error_message();
+    return;
+  }
+
+  // --- Experimental. Add compiler resource.
+  {
+    std::vector<string> resource_paths_to_collect;
+
+    // local compiler.
+    resource_paths_to_collect.push_back(local_compiler_path);
+
+    // TODO: Not sure the whole list of dlls to run clang-cl.exe
+    // correctly. However, `dumpbin /DEPENDENTS clang-cl.exe` prints nothing
+    // special, so currently I don't collect dlls. Some dlls might be necessary
+    // to use some feature.
+
+    for (const auto& resource_path : resource_paths_to_collect) {
+      CompilerInfoData::ResourceInfo r;
+      if (!CompilerInfoBuilder::ResourceInfoFromPath(
+              vc_flags.cwd(), resource_path,
+              CompilerInfoData::EXECUTABLE_BINARY, &r)) {
+        AddErrorMessage("failed to get resource info for " + resource_path,
+                        data);
+        return;
+      }
+      *data->add_resource() = std::move(r);
     }
   }
 }

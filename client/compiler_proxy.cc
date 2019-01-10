@@ -299,17 +299,7 @@ int main(int argc, char* argv[], const char* envp[]) {
   subproc_options.max_subprocs_low_priority = FLAGS_MAX_SUBPROCS_LOW;
   subproc_options.max_subprocs_heavy_weight = FLAGS_MAX_SUBPROCS_HEAVY;
   subproc_options.dont_kill_subprocess = FLAGS_DONT_KILL_SUBPROCESS;
-  if (!FLAGS_DONT_KILL_COMMANDS.empty()) {
-    for (auto&& cmd_view : absl::StrSplit(FLAGS_DONT_KILL_COMMANDS,
-                                          ',',
-                                          absl::SkipEmpty())) {
-      string cmd(cmd_view);
-#ifdef _WIN32
-      absl::AsciiStrToLower(&cmd);
-#endif
-      subproc_options.dont_kill_commands.insert(cmd);
-    }
-  }
+
   devtools_goma::SubProcessController::Initialize(argv[0], subproc_options);
 
   devtools_goma::InitLogging(argv[0]);

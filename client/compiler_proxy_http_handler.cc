@@ -17,6 +17,7 @@
 #include "compiler_proxy_histogram.h"
 #include "compiler_proxy_info.h"
 #include "compiler_proxy_status_html5.h"
+#include "compiler_proxy_status_logo.h"
 #include "compiler_proxy_status_script.h"
 #include "compiler_proxy_status_style.h"
 #include "compilerz_html.h"
@@ -36,8 +37,8 @@
 #include "ioutil.h"
 #include "java/jarfile_reader.h"
 #include "jquery.min.h"
-#include "linker/linker_input_processor/arfile_reader.h"
 #include "legend_help.h"
+#include "linker/linker_input_processor/arfile_reader.h"
 #include "log_cleaner.h"
 #include "log_service_client.h"
 #include "multi_http_rpc.h"
@@ -319,6 +320,9 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
       std::make_pair("/", &CompilerProxyHttpHandler::HandleStatusRequest));
   internal_http_handlers_.insert(std::make_pair(
       "/static/jquery.min.js", &CompilerProxyHttpHandler::HandleJQuery));
+  internal_http_handlers_.insert(
+      std::make_pair("/static/compiler_proxy_status_logo.png",
+                     &CompilerProxyHttpHandler::HandleStatusLogo));
   internal_http_handlers_.insert(
       std::make_pair("/static/compiler_proxy_status_script.js",
                      &CompilerProxyHttpHandler::HandleStatusJavaScript));
@@ -702,6 +706,16 @@ int CompilerProxyHttpHandler::HandleLegendHelp(
   return 200;
 }
 
+int CompilerProxyHttpHandler::HandleStatusLogo(const HttpServerRequest& request,
+                                               string* response) {
+  std::ostringstream ss;
+  OutputOkHeaderAndBody("image/png; charset=utf-8",
+                        absl::string_view(compiler_proxy_status_logo_png_start,
+                                          compiler_proxy_status_logo_png_size),
+                        &ss);
+  *response = ss.str();
+  return 200;
+}
 
 int CompilerProxyHttpHandler::HandleStatusJavaScript(
     const HttpServerRequest& request,

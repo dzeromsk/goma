@@ -60,8 +60,6 @@ class SubProcessController {
     int max_subprocs_low_priority;
     int max_subprocs_heavy_weight;
     bool dont_kill_subprocess;
-    // dont_kill_commands should be normalized to lower case on Windows.
-    std::set<std::string> dont_kill_commands;
 
     std::string DebugString() const;
   };

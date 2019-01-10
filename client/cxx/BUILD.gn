@@ -138,6 +138,7 @@ static_library("vc_compiler_info_builder_lib") {
   public_deps = [
     "//base",
     "//client:compiler_info_lib",
+    "//lib:vc_specific",
   ]
   deps = [
     ":clang_compiler_info_builder_helper_lib",
@@ -146,7 +147,6 @@ static_library("vc_compiler_info_builder_lib") {
     "//client:common",
     "//client:ioutil_lib",
     "//lib",
-    "//lib:vc_specific",
     "//third_party:glog",
     "//third_party/abseil",
   ]

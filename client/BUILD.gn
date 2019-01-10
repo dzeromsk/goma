@@ -407,6 +407,8 @@ static_library("compiler_proxy_lib") {
     "$target_gen_dir/resources/compiler_proxy_contentionz_script.h",
     "$target_gen_dir/resources/compiler_proxy_status_html5.c",
     "$target_gen_dir/resources/compiler_proxy_status_html5.h",
+    "$target_gen_dir/resources/compiler_proxy_status_logo.c",
+    "$target_gen_dir/resources/compiler_proxy_status_logo.h",
     "$target_gen_dir/resources/compiler_proxy_status_script.c",
     "$target_gen_dir/resources/compiler_proxy_status_script.h",
     "$target_gen_dir/resources/compiler_proxy_status_style.c",
@@ -419,7 +421,6 @@ static_library("compiler_proxy_lib") {
     "$target_gen_dir/resources/compilerz_style.h",
     "$target_gen_dir/resources/legend_help.c",
     "$target_gen_dir/resources/legend_help.h",
-
   ]
   include_dirs = [ "." ]
   deps = [
@@ -482,6 +483,7 @@ static_library("compiler_proxy_lib") {
     "//client/java:jarfile_reader_lib",
     "//client/resources:gen_compiler_proxy_contentionz_script",
     "//client/resources:gen_compiler_proxy_status_html5",
+    "//client/resources:gen_compiler_proxy_status_logo",
     "//client/resources:gen_compiler_proxy_status_script",
     "//client/resources:gen_compiler_proxy_status_style",
     "//client/resources:gen_compilerz_html",
@@ -497,7 +499,6 @@ static_library("compiler_proxy_lib") {
     "//third_party:gtest_prod",
     "//third_party/jquery:jquery",
     "//third_party/jsoncpp",
-
   ]
 
   if (os == "mac") {
