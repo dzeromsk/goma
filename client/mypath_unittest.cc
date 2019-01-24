@@ -7,6 +7,7 @@
 #include <stdlib.h>
 
 #include "absl/strings/str_cat.h"
+#include "absl/time/clock.h"
 #include "env_flags.h"
 #include "file_dir.h"
 #include "file_helper.h"
@@ -185,9 +186,34 @@ TEST(MyPath, GetCurrentDirNameOrDie) {
     ASSERT_EQ(unlink(newpath.c_str()), 0);
   }
 
+  // Don't confused with different dir with same mtime. http://b/122976726
+  {
+    devtools_goma::TmpdirUtil tmpdir("curdir_tmpdir");
+    tmpdir.SetCwd("/dir/subdir");
+    tmpdir.MkdirForPath(tmpdir.cwd(), true);
+
+    absl::Time now = absl::Now();
+    const std::string subdir = tmpdir.realcwd();
+    ASSERT_TRUE(devtools_goma::UpdateMtime(subdir, now));
+    tmpdir.SetCwd("/dir");
+    const std::string dir = tmpdir.realcwd();
+    setenv("PWD", dir.c_str(), 1);
+    ASSERT_TRUE(devtools_goma::UpdateMtime(dir, now));
+    ASSERT_EQ(chdir(subdir.c_str()), 0);
+    std::string cwd = GetCurrentDirNameOrDie();
+    // if we can't believe PWD, it uses getcwd.
+    // if subdir contains symlink, subdir won't match with cwd
+    // (happens on macosx. /tmp -> /private/tmp).
+    std::unique_ptr<char, decltype(&free)> real_subdir(nullptr, free);
+    real_subdir.reset(realpath(subdir.c_str(), nullptr));
+    EXPECT_EQ(cwd, real_subdir.get());
+
+    ASSERT_EQ(chdir(original_cwd.get()), 0);
+  }
+
   // ----- tear down the test for the safe.
   if (original_env_pwd) {
-    setenv("PWD", original_cwd.get(), 1);
+    setenv("PWD", original_env_pwd.get(), 1);
   } else {
     unsetenv("PWD");
   }

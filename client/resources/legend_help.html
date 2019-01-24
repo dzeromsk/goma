@@ -28,20 +28,24 @@
       don't have some of these files actually, due to cache expiration.
       You should be able to consider this state as success unless you see many
       (like >30%).
-    <li><span class="task-status-gomaerror">Goma Error</span>
+    <li>
+      <span class="task-status-client-error">Client Error</span>*:
+      There was an error in the part of the build execution on the Goma client
+      (compiler_proxy). This could be due to a failure in a local build.
+    <li>
+      <span class="task-status-http-error">HTTP Error</span>*:
+      There was an error trying to communicate with the Goma backend server over
+      HTTPS. This could be due to an unhealthy or otherwise unresponsive backend
+      server.
+    <li>
+      <span class="task-status-backend-error">Backend Error</span>*:
       Something wrong has happened in Goma's backends. Several reasons can
       cause this:
       <ol>
         <li>this type of request isn't supported by Goma yet
-        <li>backends are unhealthy
         <li>Goma's bug
         <li>cache expiration, etc.
       </ol>
-      Anyway, compiler_proxy will run local fallback whenever this happens
-      and your compilation should succeed. You may be able to ignore these
-      failures unless a lot of tasks are going to this state. When many tasks
-      fail due to this reason, Goma's performance can be significantly
-      worse than usual.
     <li><span class="task-status-failure">Failed</span>
       Local task failed. Usually, this means your source code has some errors.
       If you are sure your source code is OK, this may indicate a serious bug
@@ -62,6 +66,11 @@
      Goma canceled this task. This should happen only when you stopped
      your build (e.g., SIGINT for make).
   </ul>
+
+* compiler_proxy will run local fallback whenever this
+happens and your compilation should succeed. You may be able to ignore these
+failures unless a lot of tasks are going to this state. When many tasks fail due
+to this reason, Goma's performance can be significantly worse than usual.</p>
 
 </body>
 </html>

@@ -91,15 +91,21 @@ class CompilerInfo {
     }
     bool operator==(const ResourceInfo& rhs) const {
       return name == rhs.name && type == rhs.type && hash == rhs.hash &&
-             file_stat == rhs.file_stat && is_executable == rhs.is_executable;
+             file_stat == rhs.file_stat && is_executable == rhs.is_executable &&
+             symlink_path == rhs.symlink_path;
     }
     string DebugString() const;
+
+    // Returns true if this resource is up to date.
+    // Returns false if not, and set the reason to |reason|.
+    bool IsUpToDate(const string& cwd, string* reason) const;
 
     string name;
     CompilerInfoData::ResourceType type;
     string hash;
     FileStat file_stat;
     bool is_executable = false;
+    string symlink_path;
   };
 
   virtual ~CompilerInfo() = default;

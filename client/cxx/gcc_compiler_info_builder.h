@@ -9,6 +9,7 @@
 #include <ostream>
 #include <string>
 
+#include "absl/container/flat_hash_set.h"
 #include "autolock_timer.h"
 #include "cxx_compiler_info_builder.h"
 #include "gcc_flags.h"
@@ -60,6 +61,27 @@ class GCCCompilerInfoBuilder : public CxxCompilerInfoBuilder {
   static string GetRealCompilerPath(const string& normal_gcc_path,
                                     const string& cwd,
                                     const std::vector<string>& envs);
+
+ private:
+  // Add resource as EXECUTABLE_BINARY. If the resource is a symlink,
+  // the symlink and the actual files are both added as resource.
+  // |visited_paths| is used not to process the same resource twice.
+  //
+  // Returns true if succeeded (or ignored).
+  // Returns false if an error has occurred.
+  static bool AddResourceAsExecutableBinary(
+      const string& resource_path,
+      const GCCFlags& gcc_flags,
+      absl::flat_hash_set<string>* visited_paths,
+      CompilerInfoData* data);
+  // The same as AddResourceAsExecutableBinary, with limiting symlink follow
+  // count.
+  static bool AddResourceAsExecutableBinaryInternal(
+      const string& resource_path,
+      const GCCFlags& gcc_flags,
+      int rest_symlink_follow_count,
+      absl::flat_hash_set<string>* visited_paths,
+      CompilerInfoData* data);
 };
 
 };  // namespace devtools_goma

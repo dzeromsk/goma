@@ -341,6 +341,11 @@ function expect_success() {
   local cmd="$2"
   echo_bold -n "TEST: "
   echo -n "${testname}..."
+  if [ -z "$cmd" ]; then
+    fail $testname
+    echo_bold "cmd: must not be empty string."
+    exit 1
+  fi
   if eval $cmd >$tmpdir/cmd_out 2>$tmpdir/cmd_err; then
     ok
   else
@@ -384,7 +389,9 @@ function objcmp() {
 
 # Emulate gomacc cancel and confirm the compiler_proxy won't crash.
 # (crbug.com/904532)
-GOMACC_PATH="$GOMACC" python gomacc_close.py
+# TODO: test with another compiler_proxy instance.
+expect_success "gomacc_cancel" \
+  "GOMACC_PATH=${GOMACC} python ${test_dir}/gomacc_close.py"
 
 expect_success "${CC}_v" "${GOMA_CC} -v"
 # test $CC
@@ -460,21 +467,25 @@ CURRENT_DIR_BACKUP=$PWD
 cd $LOCAL_CXX_DIR
 assert_success "${LOCAL_CXX} $CURRENT_DIR_BACKUP/test/oneinclude.cc \
   -c -o $CURRENT_DIR_BACKUP/out_plain.o"
-
-
-if [ "$(uname)" = "Darwin" ]; then
-    # TODO: In Mac, failed to include <iostream>. b/122490524
-    MAYBE_FAIL="FAIL_"
-fi
-
-expect_success "${MAYBE_FAIL}gomacc_relative_path_${CXX}" \
+expect_success "gomacc_relative_path_${CXX}" \
      "${GOMACC} ./${CXX} $CURRENT_DIR_BACKUP/test/oneinclude.cc \
      -c -o $CURRENT_DIR_BACKUP/out.o"
-expect_success "${MAYBE_FAIL}${HERMETIC_GCC}gomacc_relative_path_${CXX}_oneinclude.o" \
+expect_success "${HERMETIC_GCC}gomacc_relative_path_${CXX}_oneinclude.o" \
     "objcmp ${CURRENT_DIR_BACKUP}/out_plain.o ${CURRENT_DIR_BACKUP}/out.o"
-MAYBE_FAIL=
 
 cd $CURRENT_DIR_BACKUP
+
+# ignore PWD if it differs from . even when mtime and size matches.
+# http://b/122976726
+mkdir -p test/dir/subdir
+cd test/dir
+TEST_PWD="$PWD"
+cd subdir;
+expect_success "gomacc_${CXX}_bad_pwd" \
+  "PWD=$TEST_PWD ${GOMACC} ${LOCAL_CXX} -c -o out.o ../../hello.c"
+rm -f out.o
+cd $CURRENT_DIR_BACKUP
+rm -rf test/dir
 
 rm -f out2.o out_plain.o
 assert_success "${LOCAL_CXX} -xc++ - -c -o out_plain.o < test/oneinclude.cc"

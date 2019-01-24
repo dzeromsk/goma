@@ -474,4 +474,29 @@ _abi_test_bad_unwind_temporary:
 	.byte	0xf3,0xc3
 
 
+
+
+
+
+
+.globl	_abi_test_get_and_clear_direction_flag
+.private_extern _abi_test_get_and_clear_direction_flag
+_abi_test_get_and_clear_direction_flag:
+	pushfq
+	popq	%rax
+	andq	$0x400,%rax
+	shlq	$10,%rax
+	cld
+	.byte	0xf3,0xc3
+
+
+
+
+
+.globl	_abi_test_set_direction_flag
+.private_extern _abi_test_set_direction_flag
+_abi_test_set_direction_flag:
+	std
+	.byte	0xf3,0xc3
+
 #endif

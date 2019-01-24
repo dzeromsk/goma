@@ -146,6 +146,9 @@ header h1 span {
 .task-summary-status {
   width: 16ex;
 }
+.task-summary-http {
+  width: 6ex;
+}
 .task-summary-subproc-pid {
   width: 14ex;
   text-align: right;
@@ -215,11 +218,24 @@ header h1 span {
   margin-bottom: 2px;
 }
 
-.task-status-gomaerror {
+.task-status-client-error {
   background-color: pink;
   margin-top: 2px;
   margin-bottom: 2px;
 }
+
+.task-status-http-error {
+  background-color: lightcoral;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+.task-status-backend-error {
+  background-color: mediumorchid;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
 
 .task-status-failure {
   background-color: mistyrose;

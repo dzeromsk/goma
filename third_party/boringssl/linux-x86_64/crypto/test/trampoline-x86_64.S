@@ -478,4 +478,29 @@ abi_test_bad_unwind_temporary:
 	.byte	0xf3,0xc3
 .cfi_endproc	
 .size	abi_test_bad_unwind_temporary,.-abi_test_bad_unwind_temporary
+
+
+
+
+.type	abi_test_set_direction_flag, @function
+.globl	abi_test_get_and_clear_direction_flag
+.hidden abi_test_get_and_clear_direction_flag
+abi_test_get_and_clear_direction_flag:
+	pushfq
+	popq	%rax
+	andq	$0x400,%rax
+	shlq	$10,%rax
+	cld
+	.byte	0xf3,0xc3
+.size	abi_test_get_and_clear_direction_flag,.-abi_test_get_and_clear_direction_flag
+
+
+
+.type	abi_test_set_direction_flag, @function
+.globl	abi_test_set_direction_flag
+.hidden abi_test_set_direction_flag
+abi_test_set_direction_flag:
+	std
+	.byte	0xf3,0xc3
+.size	abi_test_set_direction_flag,.-abi_test_set_direction_flag
 #endif

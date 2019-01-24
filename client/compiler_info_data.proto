@@ -80,9 +80,14 @@ message CompilerInfoData {
     // If arbitrary toolchain support is enabled, this is also used for
     // ToolchainSpec.
     optional FileStat file_stat = 4;
+    // True if the file is executable.
     // If arbitrary toolchain support is enabled, this will be used for
     // ToolchainSpec.
     optional bool is_executable = 5;
+    // If this resource is a symlink to another file, set the path here.
+    // If arbitrary toolchain support is enabled, this will be used for
+    // ToolchainSpec.
+    optional string symlink_path = 6;
   }
 
   // compiler name.

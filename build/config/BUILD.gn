@@ -32,6 +32,11 @@ config("default_libs") {
       "/DELAYLOAD:advapi32.dll",
     ]
   }
+
+  # Make sure libc++ is used instead of libstdc++. See b/123161046
+  if (use_custom_libcxx && is_clang && os == "linux") {
+    ldflags = [ "-nostdlib++" ]
+  }
 }
 
 # Dependencies that all executables and shared libraries should have.

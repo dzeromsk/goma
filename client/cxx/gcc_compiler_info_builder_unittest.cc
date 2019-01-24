@@ -172,21 +172,28 @@ TEST_F(GCCCompilerInfoBuilderTest, BuildWithRealClang) {
   TmpdirUtil tmpdir("build_with_real_clang");
   tmpdir.SetCwd("");
 
+  // clang++ is usually a symlink to clang.
+  // To check a symlink is correctly working, use clang++ instead of clang.
+
+  const string clang = GetClangPath();
+  // TODO: unittest_util should have GetClangXXPath()?
+  const string clangxx = GetClangPath() + "++";
+
   // Needs to use real .so otherwise clang fails to read the file.
   // Linux has .so, and mac has .dylib.
   // TODO: Remove plugin use? (b/122436038)
 #ifdef __MACH__
   const string lib_find_bad_constructs_so = file::JoinPath(
-      file::Dirname(GetClangPath()), "..", "lib", "libFindBadConstructs.dylib");
+      file::Dirname(clangxx), "..", "lib", "libFindBadConstructs.dylib");
 #else
   const string lib_find_bad_constructs_so = file::JoinPath(
-      file::Dirname(GetClangPath()), "..", "lib", "libFindBadConstructs.so");
+      file::Dirname(clangxx), "..", "lib", "libFindBadConstructs.so");
 #endif
 
   std::vector<string> args{
-      GetClangPath(),
+      clangxx,
       "-c",
-      "hello.c",
+      "hello.cc",
   };
 
   if (access(lib_find_bad_constructs_so.c_str(), R_OK) == 0) {
@@ -200,7 +207,7 @@ TEST_F(GCCCompilerInfoBuilderTest, BuildWithRealClang) {
 
   GCCCompilerInfoBuilder builder;
   std::unique_ptr<CompilerInfoData> data =
-      builder.FillFromCompilerOutputs(flags, GetClangPath(), envs);
+      builder.FillFromCompilerOutputs(flags, clangxx, envs);
 
   std::vector<string> actual_executable_binaries;
   ASSERT_NE(data.get(), nullptr);
@@ -211,7 +218,8 @@ TEST_F(GCCCompilerInfoBuilderTest, BuildWithRealClang) {
   }
 
   std::vector<string> expected_executable_binaries{
-      GetClangPath(),
+      clangxx,
+      clang,
   };
 
   if (access(lib_find_bad_constructs_so.c_str(), R_OK) == 0) {

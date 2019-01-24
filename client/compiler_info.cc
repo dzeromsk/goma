@@ -13,6 +13,11 @@
 #include "path.h"
 #include "path_util.h"
 
+#ifndef _WIN32
+#include <errno.h>
+#include <string.h>
+#endif
+
 namespace devtools_goma {
 
 /* static */
@@ -43,13 +48,72 @@ CompilerInfo::ResourceInfo CompilerInfo::ResourceInfo::FromData(
   info.hash = info_data.hash();
   GetFileStatFromData(info_data.file_stat(), &info.file_stat);
   info.is_executable = info_data.is_executable();
+  info.symlink_path = info_data.symlink_path();
   return info;
 }
 
 string CompilerInfo::ResourceInfo::DebugString() const {
   return absl::StrCat("name: ", name, ", type: ", type,
                       ", valid:", file_stat.IsValid(), ", hash: ", hash,
-                      ", is_executable: ", is_executable);
+                      ", is_executable: ", is_executable,
+                      ", symlink_path: ", symlink_path);
+}
+
+bool CompilerInfo::ResourceInfo::IsUpToDate(const string& cwd,
+                                            string* reason) const {
+  if (!symlink_path.empty()) {
+    // symlink case.
+#ifdef _WIN32
+    // symlink is not supported on Windows.
+    return false;
+#else
+    string abs_path = file::JoinPathRespectAbsolute(cwd, name);
+    struct stat st;
+    if (lstat(abs_path.c_str(), &st) < 0) {
+      *reason = absl::StrCat("lstat failed: path=", abs_path,
+                             " error=", strerror(errno));
+      return false;
+    }
+    if (!S_ISLNK(st.st_mode)) {
+      *reason = absl::StrCat("file is not symlink: path=", abs_path);
+      return false;
+    }
+
+    auto new_symlink_path(absl::make_unique<char[]>(st.st_size + 1));
+    ssize_t size =
+        readlink(abs_path.c_str(), new_symlink_path.get(), st.st_size + 1);
+    if (size < 0) {
+      *reason = absl::StrCat("readlink failed: path=", abs_path,
+                             " error=", strerror(errno));
+      return false;
+    }
+    if (size != st.st_size) {
+      *reason = absl::StrCat("unexpected symlink size: path=", abs_path,
+                             " actual=", size, " expected=", st.st_size);
+      return false;
+    }
+    new_symlink_path[size] = '\0';
+    if (symlink_path != absl::string_view(new_symlink_path.get(), size)) {
+      *reason =
+          absl::StrCat("symlink outdate: path=", abs_path,
+                       " old=", symlink_path, " new=", new_symlink_path.get());
+      return false;
+    }
+
+    return true;
+#endif
+  }
+
+  // Non symlink case. Check FileStat is not changed.
+  FileStat new_file_stat(file::JoinPathRespectAbsolute(cwd, name));
+  if (new_file_stat != this->file_stat) {
+    *reason = absl::StrCat("file stat does not match",
+                           " old=", file_stat.DebugString(),
+                           " new=", new_file_stat.DebugString());
+    return false;
+  }
+
+  return true;
 }
 
 string CompilerInfo::DebugString() const {
@@ -114,13 +178,11 @@ bool CompilerInfo::IsUpToDate(const string& local_compiler_path) const {
   }
 
   for (const auto& r : resource_) {
-    FileStat file_stat(file::JoinPathRespectAbsolute(data_->cwd(), r.name));
-    if (file_stat != r.file_stat) {
-      LOG(INFO) << "resouce file is not matched:"
-                << " local_compiler_path=" << local_compiler_path
-                << " resource=" << r.name
-                << " resource_file_stat=" << r.file_stat.DebugString()
-                << " file_stat=" << file_stat.DebugString();
+    string error_reason;
+    if (!r.IsUpToDate(data_->cwd(), &error_reason)) {
+      LOG(INFO) << "resource file is not matched:"
+                << " local_compiler_path=" << local_compiler_path << " "
+                << error_reason;
       return false;
     }
   }
@@ -202,6 +264,54 @@ bool CompilerInfo::UpdateFileStatIfHashMatch(SHA256HashCache* sha256_cache) {
   }
 
   for (const auto& r : resource_) {
+    // Resource can be a symlink. In that case, we compare a symlink instead of
+    // hash.
+    if (!r.symlink_path.empty()) {
+#ifdef _WIN32
+      LOG(ERROR) << "CompilerInfo resource contains a symlink, however it is "
+                    "not supported on Windows: "
+                 << r.name;
+      return false;
+#else
+      string abs_path = file::JoinPathRespectAbsolute(data_->cwd(), r.name);
+      struct stat st;
+      if (lstat(abs_path.c_str(), &st) < 0) {
+        LOG(ERROR) << "CompilerInfo resource: not found: " << abs_path;
+        return false;
+      }
+      if (!S_ISLNK(st.st_mode)) {
+        LOG(ERROR) << "CompilerInfo resource: expected a symlink, but not: "
+                   << abs_path;
+        return false;
+      }
+
+      auto symlink_path(absl::make_unique<char[]>(st.st_size + 1));
+      ssize_t size =
+          readlink(abs_path.c_str(), symlink_path.get(), st.st_size + 1);
+      if (size < 0) {
+        PLOG(ERROR) << "CompilerInfo resource: readlink failed: path="
+                    << abs_path;
+        return false;
+      }
+      if (size != st.st_size) {
+        LOG(ERROR) << "CompilerInfo resource: unexpected symlink size"
+                   << " path=" << abs_path << " actual=" << size
+                   << " expected=" << st.st_size;
+        return false;
+      }
+      symlink_path[size] = '\0';
+
+      if (r.symlink_path != absl::string_view(symlink_path.get(), size)) {
+        LOG(ERROR) << "CompilerInfo symlink resource doesn't match:"
+                   << " name=" << r.name << " symlink_path: " << r.symlink_path
+                   << " vs " << symlink_path;
+        return false;
+      }
+
+      continue;
+#endif
+    }
+
     string r_hash;
     if (!sha256_cache->GetHashFromCacheOrFile(
         file::JoinPathRespectAbsolute(data_->cwd(), r.name), &r_hash)) {
@@ -276,6 +386,30 @@ bool CompilerInfo::UpdateFileStatIfHashMatch(SHA256HashCache* sha256_cache) {
                 << " new=" << file_stat.DebugString();
       subprog.file_stat = file_stat;
       SetFileStatToData(file_stat, data_subprog->mutable_file_stat());
+    }
+  }
+
+  for (size_t i = 0; i < resource_.size(); ++i) {
+    auto& resource = resource_[i];
+    auto* data_resource = data_->mutable_resource(i);
+
+    if (!resource.symlink_path.empty()) {
+      // symlink resource won't have valid file_stat.
+      // Since we have checked the content of sysmlink is not changed before,
+      // we don't need to update FileStat.
+      continue;
+    }
+
+    string abs_path =
+        file::JoinPathRespectAbsolute(data_->cwd(), resource.name);
+    FileStat file_stat(abs_path);
+    if (file_stat != resource.file_stat) {
+      LOG(INFO) << "resource is updated:"
+                << " abs_path=" << abs_path
+                << " old=" << resource.file_stat.DebugString()
+                << " new=" << file_stat.DebugString();
+      resource.file_stat = file_stat;
+      SetFileStatToData(file_stat, data_resource->mutable_file_stat());
     }
   }
 

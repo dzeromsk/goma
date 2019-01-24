@@ -36,6 +36,12 @@ struct FileStat {
 
   std::string DebugString() const;
 
+  // checks stat equals with other.
+  //
+  // Caution: use this for the same filename only. i.e. use only to
+  // detect file is modified or not.
+  // for different filenames, FileStat might be considered as equal
+  // even if file differs, because it only checks mtime/stat/is_dir.
   bool operator==(const FileStat& other) const {
     return mtime == other.mtime && size == other.size &&
            is_directory == other.is_directory;

@@ -70,6 +70,22 @@ static_library("nacl_compiler_info_builder_helper_lib") {
   ]
 }
 
+static_library("chromeos_compiler_info_builder_helper_lib") {
+  sources = [
+    "chromeos_compiler_info_builder_helper.cc",
+    "chromeos_compiler_info_builder_helper.h",
+  ]
+
+  deps = [
+    "//base",
+    "//third_party:glog",
+  ]
+
+  public_deps = [
+    "//third_party/abseil",
+  ]
+}
+
 static_library("cxx_compiler_info_builder_lib") {
   sources = [
     "cxx_compiler_info_builder.cc",
@@ -99,6 +115,7 @@ static_library("gcc_compiler_info_builder_lib") {
     "//client:compiler_info_lib",
   ]
   deps = [
+    ":chromeos_compiler_info_builder_helper_lib",
     ":clang_compiler_info_builder_helper_lib",
     ":cxx_compiler_info_builder_lib",
     ":nacl_compiler_info_builder_helper_lib",
@@ -226,6 +243,19 @@ executable("clang_compiler_info_builder_helper_unittest") {
     ":cxx_compiler_info_lib",
     "//build/config:exe_and_shlib_deps",
     "//client:compiler_info_lib",
+    "//client:goma_test_lib",
+  ]
+}
+
+executable("chromeos_compiler_info_builder_helper_unittest") {
+  testonly = true
+  sources = [
+    "chromeos_compiler_info_builder_helper_unittest.cc",
+  ]
+
+  deps = [
+    ":chromeos_compiler_info_builder_helper_lib",
+    "//build/config:exe_and_shlib_deps",
     "//client:goma_test_lib",
   ]
 }

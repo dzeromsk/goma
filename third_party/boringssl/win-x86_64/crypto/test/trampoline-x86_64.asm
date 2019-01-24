@@ -511,6 +511,29 @@ abi_test_bad_unwind_temporary:
 	DB	0F3h,0C3h		;repret
 
 
+
+
+
+
+
+global	abi_test_get_and_clear_direction_flag
+abi_test_get_and_clear_direction_flag:
+	pushfq
+	pop	rax
+	and	rax,0x400
+	shl	rax,10
+	cld
+	DB	0F3h,0C3h		;repret
+
+
+
+
+
+global	abi_test_set_direction_flag
+abi_test_set_direction_flag:
+	std
+	DB	0F3h,0C3h		;repret
+
 section	.pdata rdata align=4
 ALIGN	4
 

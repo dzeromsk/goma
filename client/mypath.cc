@@ -257,6 +257,28 @@ string GetCacheDirectory() {
   return file::JoinPath(GetGomaTmpDir(), kGomaCacheDir);
 }
 
+#ifndef _WIN32
+// check we can believe PWD environment variable.
+// Align with llvm current_path().
+// llvm checking PWD id and "." id are the same.
+// see also http://b/122976726
+static bool checkPWD(const char* pwd) {
+  struct stat pwd_stat;
+  memset(&pwd_stat, 0, sizeof pwd_stat);
+  if (stat(pwd, &pwd_stat) != 0) {
+    PLOG(WARNING) << "stat: pwd=" << pwd;
+    return false;
+  }
+  struct stat dot_stat;
+  memset(&dot_stat, 0, sizeof dot_stat);
+  if (stat(".", &dot_stat) != 0) {
+    PLOG(WARNING) << "stat: .";
+    return false;
+  }
+  return memcmp(&pwd_stat, &dot_stat, sizeof(struct stat)) == 0;
+}
+#endif
+
 string GetCurrentDirNameOrDie(void) {
 #ifndef _WIN32
   // get_cwd() returns the current resolved directory. However, a compiler is
@@ -269,12 +291,7 @@ string GetCurrentDirNameOrDie(void) {
   const char* pwd = getenv("PWD");
   if (pwd != nullptr && IsPosixAbsolutePath(pwd) &&
       !HasPrefixDir(pwd, "/proc/self/cwd")) {
-    // Align with llvm current_path().
-    // llvm checking PWD id and "." id are the same.
-    FileStat pwd_stat(pwd);
-    FileStat dot_stat(".");
-    if (pwd_stat.IsValid() && dot_stat.IsValid() && pwd_stat.is_directory &&
-        pwd_stat == dot_stat) {
+    if (checkPWD(pwd)) {
       return pwd;
     }
   }

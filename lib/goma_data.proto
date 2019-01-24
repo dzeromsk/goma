@@ -108,6 +108,10 @@ message ToolchainSpec {
   optional int64 size = 3;
   // true if the toolchain has 'x' bit.
   optional bool is_executable = 4;
+  // If this spec is a symlink, set this path.
+  // hash, size, and is_executable should be empty in this case.
+  // If this spec is not a symlink, this should be empty.
+  optional string symlink_path = 5;
 }
 
 message ExecResult {

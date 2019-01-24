@@ -244,6 +244,10 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
   service_.SetUseUserSpecifiedPathForSubprograms(
       FLAGS_USE_USER_SPECIFIED_PATH_FOR_SUBPROGRAMS ||
       FLAGS_ARBITRARY_TOOLCHAIN_SUPPORT);
+#ifdef __MACH__
+  LOG_IF(FATAL, FLAGS_ARBITRARY_TOOLCHAIN_SUPPORT)
+      << "arbitrary toolchain support feature is not available on mac.";
+#endif
   if (FLAGS_HERMETIC == "off") {
     service_.SetHermetic(false);
   } else if (FLAGS_HERMETIC == "fallback") {

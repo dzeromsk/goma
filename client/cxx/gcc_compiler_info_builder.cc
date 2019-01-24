@@ -6,6 +6,7 @@
 
 #include "absl/strings/match.h"
 #include "autolock_timer.h"
+#include "chromeos_compiler_info_builder_helper.h"
 #include "clang_compiler_info_builder_helper.h"
 #include "counterz.h"
 #include "gcc_flags.h"
@@ -320,7 +321,10 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
   std::vector<string> resource_paths_to_collect;
 
   // local compiler.
+  // The server assumes the first resource path is always the local compiler.
+  // So we have to start from a local compiler.
   resource_paths_to_collect.push_back(local_compiler_path);
+
   // real compiler if it differs from local compiler.
   // When clang++ is local compiler, the real compiler is usually clang, and
   // clang++ is just a symlink to clang. In that case, we don't need to collect
@@ -348,17 +352,87 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     NaClCompilerInfoBuilderHelper::CollectNaClClangResources(
         local_compiler_path, flags.cwd(), &resource_paths_to_collect);
   }
-
-  for (const auto& resource_path : resource_paths_to_collect) {
-    CompilerInfoData::ResourceInfo r;
-    if (!CompilerInfoBuilder::ResourceInfoFromPath(
-            flags.cwd(), resource_path, CompilerInfoData::EXECUTABLE_BINARY,
-            &r)) {
-      AddErrorMessage("failed to get resource info for " + resource_path, data);
+  if (ChromeOSCompilerInfoBuilderHelper::IsSimpleChromeClangCommand(
+          local_compiler_path, data->real_compiler_path())) {
+    if (!ChromeOSCompilerInfoBuilderHelper::CollectSimpleChromeClangResources(
+            local_compiler_path, data->real_compiler_path(),
+            &resource_paths_to_collect)) {
+      AddErrorMessage("failed to add simple chrome resources", data);
+      LOG(ERROR)
+          << "failed to add simple chrome resources: local_compiler_path="
+          << local_compiler_path
+          << " real_compiler_path=" << data->real_compiler_path();
       return;
     }
-    *data->add_resource() = std::move(r);
   }
+
+  absl::flat_hash_set<string> visited_paths;
+  for (const auto& resource_path : resource_paths_to_collect) {
+    if (!AddResourceAsExecutableBinary(resource_path, gcc_flags, &visited_paths,
+                                       data)) {
+      return;
+    }
+  }
+}
+
+// static
+bool GCCCompilerInfoBuilder::AddResourceAsExecutableBinary(
+    const string& resource_path,
+    const GCCFlags& gcc_flags,
+    absl::flat_hash_set<string>* visited_paths,
+    CompilerInfoData* data) {
+  // On Linux, MAX_NESTED_LINKS is 8, so I chose 8 here.
+  static const int kMaxNestedLinks = 8;
+  return AddResourceAsExecutableBinaryInternal(
+      resource_path, gcc_flags, kMaxNestedLinks, visited_paths, data);
+}
+
+// static
+bool GCCCompilerInfoBuilder::AddResourceAsExecutableBinaryInternal(
+    const string& resource_path,
+    const GCCFlags& gcc_flags,
+    int rest_symlink_follow_count,
+    absl::flat_hash_set<string>* visited_paths,
+    CompilerInfoData* data) {
+  string abs_resource_path =
+      file::JoinPathRespectAbsolute(gcc_flags.cwd(), resource_path);
+  if (!visited_paths->insert(std::move(abs_resource_path)).second) {
+    // This path has been visited before. Don't proceed.
+    // This is not an error, so return true.
+    return true;
+  }
+
+  CompilerInfoData::ResourceInfo r;
+  if (!CompilerInfoBuilder::ResourceInfoFromPath(
+          gcc_flags.cwd(), resource_path, CompilerInfoData::EXECUTABLE_BINARY,
+          &r)) {
+    AddErrorMessage("failed to get resource info for " + resource_path, data);
+    return false;
+  }
+
+  if (r.symlink_path().empty()) {
+    // Not a symlink. Just add it as a resource.
+    *data->add_resource() = std::move(r);
+    return true;
+  }
+
+  // symlink.
+  if (rest_symlink_follow_count <= 0) {
+    // Needed to follow too many symlink. Return an error.
+    AddErrorMessage("too deep nested symlink: " + resource_path, data);
+    return false;
+  }
+  string symlink_path = file::JoinPathRespectAbsolute(
+      file::Dirname(resource_path), r.symlink_path());
+
+  // Implementation Note: the original resource must come first. If the resource
+  // is a symlink, the actual file must be added after the symlink. The server
+  // assumes the first resource is a compiler used in a command line, even
+  // if it's a symlink.
+  *data->add_resource() = std::move(r);
+  return AddResourceAsExecutableBinaryInternal(symlink_path, gcc_flags,
+                                               rest_symlink_follow_count - 1,
+                                               visited_paths, data);
 }
 
 void GCCCompilerInfoBuilder::SetCompilerPath(

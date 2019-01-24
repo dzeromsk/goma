@@ -98,6 +98,7 @@ Om1vZGlmeQAyMDE4LTExLTE5VDExOjAwOjQ2KzA5OjAwgDTzSQAAAABJRU5ErkJggg==
           <th id="task-summary-head-pid" class="task-summary-head task-summary-pid">pid</th>
           <th id="task-summary-head-state" class="task-summary-head task-summary-state">task state</th>
           <th id="task-summary-head-status" class="task-summary-head task-summary-status">status</th>
+          <th id="task-summary-head-http" class="task-summary-head task-summary-http">http</th>
           <th id="task-summary-head-subproc-pid" class="task-summary-head task-summary-subproc-pid">subproc pid</th>
           <th id="task-summary-head-subproc-state" class="task-summary-head task-summary-subproc-state">subproc state</th>
           <th id="task-summary-head-flag" class="task-summary-head task-summary-flag">flag</th>
@@ -116,7 +117,9 @@ Om1vZGlmeQAyMDE4LTExLTE5VDExOjAwOjQ2KzA5OjAwgDTzSQAAAABJRU5ErkJggg==
         <input type="checkbox" name="task-status-local-fallback" checked> <span class="task-status-local-fallback">Local fallback</span>
         <input type="checkbox" name="task-status-retry" checked> <span class="task-status-retry">Retry</span>
         <input type="checkbox" name="task-status-mismatch" checked> <span class="task-status-mismatch">Mismatch</span>
-        <input type="checkbox" name="task-status-gomaerror" checked> <span class="task-status-gomaerror">Goma Error</span>
+        <input type="checkbox" name="task-status-client-error" checked> <span class="task-status-client-error">Client Error</span>
+        <input type="checkbox" name="task-status-http-error" checked> <span class="task-status-http-error">HTTP Error</span>
+        <input type="checkbox" name="task-status-backend-error" checked> <span class="task-status-backend-error">Backend Error</span>
         <input type="checkbox" name="task-status-failure" checked> <span class="task-status-failure">Failed</span>
         <input type="checkbox" name="task-status-conftestfailure" checked> <span class="task-status-conftestfailure">Failed but maybe during ./configure</span>
         <input type="checkbox" name="task-status-cancel" checked> <span class="task-status-cancel">Canceled</span>

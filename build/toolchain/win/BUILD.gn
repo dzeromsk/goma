@@ -207,7 +207,6 @@ template("msvc_toolchain") {
       libname = "${dllname}.lib"  # e.g. foo.dll.lib
       pdbname = "${dllname}.pdb"
       rspfile = "${dllname}.rsp"
-      pool = "//build/toolchain:link_pool($default_toolchain)"
 
       command = "$python_path $tool_wrapper_path link-wrapper $env False $link /nologo /IMPLIB:$libname /DLL /OUT:$dllname /PDB:$pdbname @$rspfile"
 
@@ -240,7 +239,6 @@ template("msvc_toolchain") {
       dllname = "{{output_dir}}/{{target_output_name}}{{output_extension}}"  # e.g. foo.dll
       pdbname = "${dllname}.pdb"
       rspfile = "${dllname}.rsp"
-      pool = "//build/toolchain:link_pool($default_toolchain)"
 
       command = "$python_path $tool_wrapper_path link-wrapper $env False $link /nologo /DLL /OUT:$dllname /PDB:$pdbname @$rspfile"
 
@@ -264,7 +262,6 @@ template("msvc_toolchain") {
       exename = "{{output_dir}}/{{target_output_name}}{{output_extension}}"
       pdbname = "$exename.pdb"
       rspfile = "$exename.rsp"
-      pool = "//build/toolchain:link_pool($default_toolchain)"
 
       command = "$python_path $tool_wrapper_path link-wrapper $env False $link /nologo /OUT:$exename /PDB:$pdbname @$rspfile"
 

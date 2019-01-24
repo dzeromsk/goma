@@ -3676,12 +3676,26 @@ void CompileTask::ModifyRequestArgs() {
       // Also set toolchains
       ToolchainSpec* toolchain_spec = req_->add_toolchain_specs();
       toolchain_spec->set_path(r.name);
-      toolchain_spec->set_hash(r.hash);
-      toolchain_spec->set_size(r.file_stat.size);
-      toolchain_spec->set_is_executable(true);
+      if (r.symlink_path.empty()) {
+        // non symlink case
+        toolchain_spec->set_hash(r.hash);
+        toolchain_spec->set_size(r.file_stat.size);
+        toolchain_spec->set_is_executable(r.is_executable);
+      } else {
+        // symlink case
+        toolchain_spec->set_symlink_path(r.symlink_path);
+        // hash, file_stat, and is_executable are empty/default vaule.
+        DCHECK(r.hash.empty());
+        DCHECK(!r.file_stat.IsValid());
+        DCHECK(!r.is_executable);
+      }
 
-      req_->add_input()->set_filename(r.name);
-      LOG(INFO) << trace_id_ << " input automatically added: " << r.name;
+      // If the resource is not a symlink, add it as an input to send to the
+      // server.
+      if (r.symlink_path.empty()) {
+        req_->add_input()->set_filename(r.name);
+        LOG(INFO) << trace_id_ << " input automatically added: " << r.name;
+      }
     }
   }
 

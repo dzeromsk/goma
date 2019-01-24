@@ -17,6 +17,12 @@
 #include "posix_helper_win.h"
 #endif
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 namespace devtools_goma {
 
 /* static */
@@ -154,15 +160,44 @@ bool CompilerInfoBuilder::ResourceInfoFromPath(
   if (!file_stat.IsValid()) {
     return false;
   }
+  r->set_name(path);
+  r->set_type(type);
+
+#ifndef _WIN32
+  // Support symlink in non Windows env.
+  struct stat st;
+  if (lstat(abs_path.c_str(), &st) < 0) {
+    PLOG(WARNING) << "failed to lstat: " << abs_path;
+    return false;
+  }
+  if (S_ISLNK(st.st_mode)) {
+    auto symlink_path(absl::make_unique<char[]>(st.st_size + 1));
+    ssize_t size =
+        readlink(abs_path.c_str(), symlink_path.get(), st.st_size + 1);
+    if (size < 0) {
+      // failed to read symlink
+      PLOG(WARNING) << "failed readlink: " << abs_path;
+      return false;
+    }
+    if (size != st.st_size) {
+      PLOG(WARNING) << "unexpected symlink size: path=" << abs_path
+                    << " actual=" << size << " expected=" << st.st_size;
+      return false;
+    }
+    symlink_path[size] = '\0';
+    r->set_symlink_path(symlink_path.get());
+    return true;
+  }
+#endif
+
   string hash;
   if (!GomaSha256FromFile(abs_path, &hash)) {
     return false;
   }
-  r->set_name(path);
-  r->set_type(type);
   r->set_hash(std::move(hash));
   SetFileStatToData(file_stat, r->mutable_file_stat());
   r->set_is_executable(access(abs_path.c_str(), X_OK) == 0);
+
   return true;
 }
 

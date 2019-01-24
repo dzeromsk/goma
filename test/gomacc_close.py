@@ -11,17 +11,20 @@ the connection without waiting for the response.
 This is the regression test for crbug.com/904532.
 """
 
+# TODO: compatible with python3.
+import cStringIO as StringIO
 import os
 import re
+import select
 import shutil
 import socket
-import cStringIO as StringIO
 import subprocess
 import sys
 import tempfile
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 CONTENT_LENGTH_PATTERN = re.compile('\r\nContent-Length:\s*(\d+)\r\n')
+READ_TIMEOUT_IN_SEC = 5.0
 
 
 def GetGomaccPath():
@@ -61,6 +64,9 @@ def ReadAll(conn):
   """
   data = StringIO.StringIO()
   while True:
+    ready, _, _ = select.select([conn], [], [], READ_TIMEOUT_IN_SEC)
+    if not ready:
+      raise Exception('read time out')
     snippet = conn.recv(16)
     if not snippet:
       return

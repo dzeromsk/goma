@@ -111,8 +111,14 @@ function taskStatus(task) {
     }
   }
 
-  if (task['goma_error'] || task['compiler_proxy_error']) {
-    return 'gomaerror';
+  if (task['compiler_proxy_error']) {
+    return 'client-error'
+  }
+  if (task['goma_error']) {
+    if (task['http'] != 200) {
+      return 'http-error';
+    }
+    return 'backend-error'
   }
   if (!success) {
     if (task['flag'] && task['flag'].match(/ conftest\./)) {
@@ -569,6 +575,7 @@ GomaTaskView.prototype = {
       $('<td class="task-summary-pid">').text(task.pid).appendTo(tr);
       $('<td class="task-summary-state">').text(task.state).appendTo(tr);
       $('<td class="task-summary-status">').text(taskStatusName.toUpperCase().replace('-', ' ')).appendTo(tr);
+      $('<td class="task-summary-http">').text(task.http).appendTo(tr);
       $('<td class="task-summary-subproc-pid">').text(task.subproc_pid).appendTo(tr);
       $('<td class="task-summary-subproc-state">').text(task.subproc_state).appendTo(tr);
       // TODO: Show full flag when a cursor is hovered?
