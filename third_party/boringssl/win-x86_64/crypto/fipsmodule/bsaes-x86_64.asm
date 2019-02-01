@@ -1379,6 +1379,12 @@ global	bsaes_ctr32_encrypt_blocks
 ALIGN	16
 bsaes_ctr32_encrypt_blocks:
 
+%ifndef NDEBUG
+%ifndef BORINGSSL_FIPS
+EXTERN	BORINGSSL_function_hit
+	mov	BYTE[((BORINGSSL_function_hit+6))],1
+%endif
+%endif
 	mov	rax,rsp
 $L$ctr_enc_prologue:
 	push	rbp

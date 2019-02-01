@@ -6,6 +6,8 @@
 
 """Script to show diff from previous commit."""
 
+from __future__ import print_function
+
 import argparse
 import json
 import os
@@ -28,7 +30,7 @@ def main():
     with open(options.output_json, 'w') as f:
       result = out.splitlines()
       json.dump(result, f)
-  print out
+  print(out)
 
 
 if __name__ == '__main__':

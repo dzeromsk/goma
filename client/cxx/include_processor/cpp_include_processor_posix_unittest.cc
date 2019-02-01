@@ -217,6 +217,7 @@ class CppIncludeProcessorPosixTest : public testing::Test {
     VLOG(1) << cis.get()->info().DebugString();
 
     CppIncludeProcessor processor;
+    processor.set_enable_clang_modules(true);
     std::set<string> files;
     FileStatCache file_stat_cache;
     ASSERT_TRUE(processor.GetIncludeFiles(

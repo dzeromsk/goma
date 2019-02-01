@@ -27,11 +27,67 @@ CONTENT_LENGTH_PATTERN = re.compile('\r\nContent-Length:\s*(\d+)\r\n')
 READ_TIMEOUT_IN_SEC = 5.0
 
 
+def GomaDir():
+  """Returns goma's directory."""
+  return os.environ.get('GOMA_DIR',
+                        os.path.join(SCRIPT_DIR, '..', 'out', 'Release'))
+
+
 def GetGomaccPath():
   """Returns gomacc's path."""
-  return os.environ.get(
-      'GOMACC_PATH',
-      os.path.join(SCRIPT_DIR, '..', 'out', 'Release', 'gomacc'))
+  return os.path.join(GomaDir(), 'gomacc')
+
+
+def GetGomaCtlPath():
+  """Returns compiler_proxy's path."""
+  return os.path.join(GomaDir(), 'goma_ctl.py')
+
+
+def FindAvailablePort():
+  """Returns available port number."""
+  for p in range(9000, 9100):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    res = s.connect_ex(('localhost', p))
+    if res != 0:
+      return p
+  raise Execption('Cannot find available port')
+
+
+class CompilerProxyManager(object):
+  """compiler_proxy management class."""
+
+  def __init__(self):
+    self.goma_ctl = GetGomaCtlPath()
+    # Temporary directory used by compiler_proxy.
+    self.tmpdir = None
+    # TCP port used by compiler_proxy.
+    self.port = None
+    # IPC socket name used by compiler_proxy.
+    self.ipc_socket = None
+
+  def __enter__(self):
+    self.tmpdir = tempfile.mkdtemp()
+    self.port = FindAvailablePort()
+    self.ipc_socket = os.path.join(self.tmpdir, 'goma.ipc')
+    os.environ['GOMA_TMP_DIR'] = self.tmpdir
+    os.environ['GOMA_COMPILER_PROXY_PORT'] = str(self.port)
+    os.environ['GOMA_COMPILER_PROXY_SOCKET_NAME'] = self.ipc_socket
+    subprocess.check_call([self.goma_ctl, 'ensure_start'])
+    return self
+
+  def __exit__(self, unused_exc_type, unused_exc_value, unused_traceback):
+    subprocess.check_call([self.goma_ctl, 'ensure_stop'])
+    if self.tmpdir:
+      shutil.rmtree(self.tmpdir)
+
+  def IsRunning(self):
+    """Returns True if compiler_proxy is running."""
+    return subprocess.call([self.goma_ctl, 'status']) == 0
+
+  def Stat(self):
+    """Returns goma_ctl.py stat."""
+    return subprocess.check_output([self.goma_ctl, 'stat'])
+
 
 
 def GetContentLength(header):
@@ -105,18 +161,20 @@ def GetGomaccData():
   return data
 
 
-def GetIPCPath():
-  """Returns Unix domain socket for IPC."""
-  tmp_dir = subprocess.check_output([GetGomaccPath(), 'tmp_dir']).strip()
-  return os.path.join(tmp_dir, 'goma.ipc')
-
-
 def main():
   data = GetGomaccData()
   s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-  s.connect((GetIPCPath()))
-  s.send(data)
-  s.close()
+  with CompilerProxyManager() as cpm:
+    before = cpm.Stat()
+    s.connect((cpm.ipc_socket))
+    s.send(data)
+    s.close()
+    if not cpm.IsRunning():
+      raise Exception('compiler_proxy is not running')
+    after = cpm.Stat()
+    if before == after:
+      raise Exception('compiler_proxy seems not get any request.'
+                      ' before=%s\nafter=%s\n' % (before, after))
 
 
 if __name__ == '__main__':

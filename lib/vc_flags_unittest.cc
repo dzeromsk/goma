@@ -975,6 +975,22 @@ TEST_F(VCFlagsTest, ClangClWithMflag) {
   EXPECT_EQ(expected_compiler_info_flags, flags->compiler_info_flags());
 }
 
+TEST_F(VCFlagsTest, ClangClWithTarget) {
+  const std::vector<string> args{
+      "clang-cl.exe",
+      "--target=arm64-windows",
+      "/c",
+      "hello.cc",
+  };
+
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, "C:\\tmp"));
+  const std::vector<string> expected_compiler_info_flags{
+      "--target=arm64-windows",
+  };
+  EXPECT_EQ(expected_compiler_info_flags, flags->compiler_info_flags());
+}
+
 TEST_F(VCFlagsTest, ClangClKnownFlags) {
   // These -f and -g are known.
   std::vector<string> args {

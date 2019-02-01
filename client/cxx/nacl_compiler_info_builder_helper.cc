@@ -96,25 +96,41 @@ void NaClCompilerInfoBuilderHelper::CollectNaClGccResources(
     const string& local_compiler_path,
     const string& cwd,
     std::vector<string>* resource_paths) {
-  absl::string_view local_compiler_dir = file::Dirname(local_compiler_path);
+  absl::string_view local_dir = file::Dirname(local_compiler_path);
 
-  const std::string libexec_dir = file::JoinPath(
-      local_compiler_dir, "..", "libexec", "gcc", "x86_64-nacl", "4.4.3");
+  const std::string libexec_dir = file::JoinPath(local_dir, "..", "libexec");
+  const std::string libexec_gcc_dir =
+      file::JoinPath(libexec_dir, "gcc", "x86_64-nacl", "4.4.3");
+
   // this is subprogram?
   // Note this verbose path is actually used in nacl-gcc.
   const std::string nacl_bin_dir = file::JoinPath(
-      local_compiler_dir, "..", "lib", "gcc", "x86_64-nacl", "4.4.3", "..",
+      local_dir, "..", "lib", "gcc", "x86_64-nacl", "4.4.3", "..",
       "..", "..", "..", "x86_64-nacl", "bin");
 
 #ifdef __linux__
-  resource_paths->push_back(file::JoinPath(libexec_dir, "cc1"));
-  resource_paths->push_back(file::JoinPath(libexec_dir, "cc1plus"));
+  resource_paths->push_back(file::JoinPath(libexec_gcc_dir, "cc1"));
+  resource_paths->push_back(file::JoinPath(libexec_gcc_dir, "cc1plus"));
   resource_paths->push_back(file::JoinPath(nacl_bin_dir, "as"));
 #elif defined(__MACH__)
   // TODO: Get corresponding Mac paths.
 #elif defined(_WIN32)
-  resource_paths->push_back(file::JoinPath(libexec_dir, "cc1.exe"));
-  resource_paths->push_back(file::JoinPath(libexec_dir, "cc1plus.exe"));
+  resource_paths->push_back(file::JoinPath(libexec_dir, "cygiconv-2.dll"));
+  resource_paths->push_back(file::JoinPath(libexec_dir, "cygintl-8.dll"));
+  resource_paths->push_back(file::JoinPath(libexec_dir, "cygwin1.dll"));
+  resource_paths->push_back(file::JoinPath(libexec_dir, "x86_64-nacl-as.exe"));
+
+  absl::string_view compiler_name = file::Basename(local_compiler_path);
+  resource_paths->push_back(file::JoinPath(libexec_dir, compiler_name));
+
+  resource_paths->push_back(file::JoinPath(libexec_gcc_dir, "cc1.exe"));
+  resource_paths->push_back(file::JoinPath(libexec_gcc_dir, "cc1plus.exe"));
+  resource_paths->push_back(file::JoinPath(libexec_gcc_dir, "cyggcc_s-1.dll"));
+  resource_paths->push_back(file::JoinPath(libexec_gcc_dir, "cygiconv-2.dll"));
+  resource_paths->push_back(file::JoinPath(libexec_gcc_dir, "cygintl-8.dll"));
+  resource_paths->push_back(file::JoinPath(libexec_gcc_dir, "cygstdc++-6.dll"));
+  resource_paths->push_back(file::JoinPath(libexec_gcc_dir, "cygwin1.dll"));
+
   resource_paths->push_back(file::JoinPath(nacl_bin_dir, "as.exe"));
 #else
 #error "unsupported platform"

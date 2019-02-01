@@ -359,6 +359,9 @@ GOMA_DEFINE_int32(MAX_INCLUDE_CACHE_ENTRIES,
                   "The max count of include cache.");
 GOMA_DEFINE_int32(MAX_LIST_DIR_CACHE_ENTRY_NUM, 32768,
                   "The entry limit in list dir cache.");
+GOMA_DEFINE_bool(ENABLE_REMOTE_CLANG_MODULES,
+                 false,
+                 "Experimental: Enable clang modules (-fmodules) support.");
 GOMA_DEFINE_int32(MAX_MODULEMAP_CACHE_ENTRIES,
                   32768,
                   "The max number of entries for modulemap cache.");

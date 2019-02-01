@@ -104,8 +104,9 @@ void FakeCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
   if (!CompilerInfoBuilder::ResourceInfoFromPath(
           flags.cwd(), local_compiler_path, CompilerInfoData::EXECUTABLE_BINARY,
           &r)) {
-    AddErrorMessage("failed to get resource info for " + local_compiler_path,
-                    data);
+    AddErrorMessage(
+        "failed to get fake compiler resource info for " + local_compiler_path,
+        data);
     return;
   }
   *data->add_resource() = std::move(r);

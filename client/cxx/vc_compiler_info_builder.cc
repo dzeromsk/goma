@@ -174,7 +174,7 @@ void VCCompilerInfoBuilder::SetClangClSpecificCompilerInfo(
       if (!CompilerInfoBuilder::ResourceInfoFromPath(
               vc_flags.cwd(), resource_path,
               CompilerInfoData::EXECUTABLE_BINARY, &r)) {
-        AddErrorMessage("failed to get resource info for " + resource_path,
+        AddErrorMessage("failed to get VC resource info for " + resource_path,
                         data);
         return;
       }

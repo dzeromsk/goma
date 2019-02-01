@@ -5,6 +5,8 @@
 
 """Creates goma client release archives."""
 
+from __future__ import print_function
+
 
 
 import hashlib
@@ -139,7 +141,7 @@ def MkTarball(src, dst_tar_file):
     assert info.name.startswith(dirname[1:])
     info.name = info.name[len(dirname):]
     if info.name:
-      print 'Adding: %s' % info.name
+      print('Adding: %s' % info.name)
       return info
 
   mode = 'w:gz'
@@ -175,7 +177,7 @@ def MkZip(src, dst_zip_file):
       for f in filenames:
         orig_path = os.path.join(dirpath, f)
         path = orig_path[len(dirname) + 1:]
-        print 'Adding: %s' % path
+        print('Adding: %s' % path)
         zf.write(orig_path, arcname=path)
 
 
@@ -206,7 +208,7 @@ def main():
   src_dir = os.getcwd()
 
   if not os.path.isdir(dist_absdir):
-    os.makedirs(dist_absdir, 0755)
+    os.makedirs(dist_absdir, 0o755)
   if options.store_in_commit_dir:
     gitproc = subprocess.Popen(['git', 'log', '-1', '--pretty=%H'],
                                shell=(sys.platform == 'win32'),
@@ -214,24 +216,24 @@ def main():
                                cwd=src_dir)
     commit = gitproc.communicate()[0].strip()
     if gitproc.returncode:
-      print 'ERROR: git failed to get commit. exit=%d' % gitproc.returncode
+      print('ERROR: git failed to get commit. exit=%d' % gitproc.returncode)
       return gitproc.returncode
     if not commit:
-      print 'ERROR: empty commit hash?'
+      print('ERROR: empty commit hash?')
       return 1
-    print 'Commit: %s' % commit
+    print('Commit: %s' % commit)
     dist_absdir = os.path.join(dist_absdir, commit)
     shutil.rmtree(dist_absdir, ignore_errors=True)
-    os.mkdir(dist_absdir, 0755)
+    os.mkdir(dist_absdir, 0o755)
 
   os.chdir(os.path.join(src_dir, options.build_dir, options.target_dir))
 
   distname = 'goma-%s' % options.platform
   shutil.rmtree(distname, ignore_errors=True)
 
-  print 'Preparing files in %s in %s...' % (distname, os.getcwd())
-  print 'mkdir %s' % distname
-  os.mkdir(distname, 0755)
+  print('Preparing files in %s in %s...' % (distname, os.getcwd()))
+  print('mkdir %s' % distname)
+  os.mkdir(distname, 0o755)
   if options.platform in ('win', 'win64'):
     for cmd in ('gomacc.exe', 'compiler_proxy.exe', 'vcflags.exe',
                 'goma_fetch.exe'):
@@ -256,20 +258,20 @@ def main():
   # Create an archive file.
   if options.platform in ('win', 'win64'):
     target_file = os.path.join(dist_absdir, '%s.zip' % distname)
-    print 'Archiving in %s.zip' % distname
+    print('Archiving in %s.zip' % distname)
     MkZip(os.path.realpath(distname), target_file)
     compiler_proxy_path = 'compiler_proxy.exe'
   else:
     target_file = os.path.join(dist_absdir, '%s.tgz' % distname)
-    print 'Archiving in %s.tgz' % distname
+    print('Archiving in %s.tgz' % distname)
     MkTarball(os.path.realpath(distname), target_file)
     compiler_proxy_path = os.path.join(distname, 'compiler_proxy')
     # Since CIPD uses this directory for creating CIPD package,
     # we need to remove gomacc symlinks.
     DeleteSymlinksToGomacc(distname)
 
-  print
-  print '%s created.' % target_file
+  print()
+  print('%s created.' % target_file)
 
   cp = open(compiler_proxy_path, 'rb')
   # Finds user-agent string (starts with 'compiler-proxy' and ends with 'Z',
@@ -279,9 +281,9 @@ def main():
   # "on 2012-03-05T09:20:30.931701Z"
   m = re.search(r'(compiler-proxy[- a-zA-Z0-9:.@]*Z)', cp.read())
   if m:
-    print '"%s",,%s' % (m.group(1), options.platform)
+    print('"%s",,%s' % (m.group(1), options.platform))
   else:
-    print 'ERROR: user-agent string not found in %s' % compiler_proxy_path
+    print('ERROR: user-agent string not found in %s' % compiler_proxy_path)
     return 1
   cp.close()
   return 0

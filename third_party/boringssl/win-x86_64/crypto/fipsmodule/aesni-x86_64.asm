@@ -17,6 +17,12 @@ global	aes_hw_encrypt
 ALIGN	16
 aes_hw_encrypt:
 
+%ifndef NDEBUG
+%ifndef BORINGSSL_FIPS
+EXTERN	BORINGSSL_function_hit
+	mov	BYTE[((BORINGSSL_function_hit+1))],1
+%endif
+%endif
 	movups	xmm2,XMMWORD[rcx]
 	mov	eax,DWORD[240+r8]
 	movups	xmm0,XMMWORD[r8]
@@ -1134,6 +1140,11 @@ $L$SEH_begin_aes_hw_ctr32_encrypt_blocks:
 
 
 
+%ifndef NDEBUG
+%ifndef BORINGSSL_FIPS
+	mov	BYTE[BORINGSSL_function_hit],1
+%endif
+%endif
 	cmp	rdx,1
 	jne	NEAR $L$ctr32_bulk
 
@@ -4375,6 +4386,11 @@ ALIGN	16
 aes_hw_set_encrypt_key:
 __aesni_set_encrypt_key:
 
+%ifndef NDEBUG
+%ifndef BORINGSSL_FIPS
+	mov	BYTE[((BORINGSSL_function_hit+3))],1
+%endif
+%endif
 DB	0x48,0x83,0xEC,0x08
 
 	mov	rax,-1

@@ -13,9 +13,6 @@
 
 using std::string;
 
-// BEGIN GOOGLE-INTERNAL
-// path.h emulation layer
-// END GOOGLE INTERNAL
 namespace file {
 
 namespace internal {

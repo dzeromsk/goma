@@ -10,6 +10,10 @@
 #include "glog/logging.h"
 #include "path.h"
 
+#ifdef __linux__
+#include <unistd.h>
+#endif
+
 namespace devtools_goma {
 
 // static
@@ -73,20 +77,73 @@ bool ChromeOSCompilerInfoBuilderHelper::CollectSimpleChromeClangResources(
 bool ChromeOSCompilerInfoBuilderHelper::EstimateClangMajorVersion(
     absl::string_view real_compiler_path,
     int* version) {
-  // Assuming real_compiler_path filename is like clang-<N>.elf.
+  // Assuming real_compiler_path filename is like
+  // `clang-<N>.elf` or `clang-<N>`.
 
   absl::string_view filename = file::Basename(real_compiler_path);
   if (!absl::ConsumePrefix(&filename, "clang-")) {
     return false;
   }
-  if (!absl::ConsumeSuffix(&filename, ".elf")) {
-    return false;
-  }
+  // If this has .elf, remove that.
+  // If it doesn't exist, it's not an error.
+  absl::ConsumeSuffix(&filename, ".elf");
+
   if (!absl::SimpleAtoi(filename, version)) {
     return false;
   }
 
   return true;
+}
+
+// static
+bool ChromeOSCompilerInfoBuilderHelper::IsClangInChrootEnv(
+    absl::string_view local_compiler_path) {
+#ifdef __linux__
+  if (!(local_compiler_path == "/usr/bin/clang" ||
+        local_compiler_path == "/usr/bin/clang++")) {
+    return false;
+  }
+
+  // chromeos chroot env should have /etc/cros_chroot_version.
+  if (access("/etc/cros_chroot_version", F_OK) < 0) {
+    return false;
+  }
+
+  return true;
+#else
+  // chromeos chroot should be Linux. So the other platform should not be
+  // chromeos chroot env.
+  return false;
+#endif
+}
+
+// static
+bool ChromeOSCompilerInfoBuilderHelper::CollectChrootClangResources(
+    absl::string_view local_compiler_path,
+    absl::string_view real_compiler_path,
+    std::vector<string>* resource_paths) {
+#ifdef __linux__
+  constexpr absl::string_view lib_dir = "/usr/lib64";
+
+  int version;
+  if (!EstimateClangMajorVersion(real_compiler_path, &version)) {
+    LOG(ERROR) << "failed to estimate clang major version"
+               << " real_compiler_path=" << real_compiler_path;
+    return false;
+  }
+
+  // TODO: Use lld to list the libraries?
+  resource_paths->push_back(
+      file::JoinPath(lib_dir, absl::StrCat("libLLVM-", version, "svn.so")));
+  resource_paths->push_back(file::JoinPath(lib_dir, "libc++.so.1"));
+  resource_paths->push_back(file::JoinPath(lib_dir, "libc++abi.so.1"));
+  resource_paths->push_back(file::JoinPath(lib_dir, "libffi.so.6"));
+  resource_paths->push_back(file::JoinPath(lib_dir, "libxml2.so.2"));
+
+  return true;
+#else
+  return false;
+#endif
 }
 
 }  // namespace devtools_goma

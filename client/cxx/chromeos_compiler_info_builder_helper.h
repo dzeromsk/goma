@@ -31,6 +31,14 @@ class ChromeOSCompilerInfoBuilderHelper {
   // Returns true if succeeded, false otherwise.
   static bool EstimateClangMajorVersion(absl::string_view real_compiler_path,
                                         int* version);
+
+  // Returns true if the current environment is chroot env, and
+  // local_compiler_path indicates a system clang in the chroot env.
+  static bool IsClangInChrootEnv(absl::string_view local_compiler_path);
+  // Collects clang resources in chromeos chroot env.
+  static bool CollectChrootClangResources(absl::string_view local_compiler_path,
+                                          absl::string_view real_compiler_path,
+                                          std::vector<string>* resource_paths);
 };
 
 }  // namespace devtools_goma

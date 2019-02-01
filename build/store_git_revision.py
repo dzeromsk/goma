@@ -6,6 +6,8 @@
 
 """Get compiler_proxy git revision."""
 
+from __future__ import print_function
+
 import argparse
 import os
 import subprocess
@@ -24,14 +26,14 @@ def GetRevisionNumber(args):
       ['git', 'log', '-1', '--pretty=format:%H@%ct'],
       cwd=_SCRIPT_DIR).strip()
   if not git_hash:
-    print 'No git hash set. use unknown as fallback.'
+    print('No git hash set. use unknown as fallback.')
     git_hash = 'unknown'
 
   if args.output_file:
     with open(args.output_file, 'w') as f:
       f.write(git_hash)
   else:
-    print git_hash
+    print(git_hash)
 
 
 def main():

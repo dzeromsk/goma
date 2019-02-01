@@ -41,22 +41,15 @@ all_sources = crypto_sources + ssl_sources
 # Windows' assembly is built with Yasm. The other platforms use the platform
 # assembler.
 if (os == "win") {
-  # FIXME: https://bugs.chromium.org/p/gn/issues/detail?id=13
-  # This is workaround for crbug.com/887234.
-  # We do not use assembly for Windows ASan.
-  if (is_asan) {
-    source_set("boringssl_asm") {
-      visibility = [ ":*" ]  # Only targets in this file can depend on this.
-      public_configs = [ ":no_asm_config" ]
+  import("//third_party/yasm/yasm_assemble.gni")
+  yasm_assemble("boringssl_asm") {
+    if (cpu_arch == "x64") {
+      sources = crypto_sources_win_x86_64
+    } else if (cpu_arch == "x86") {
+      sources = crypto_sources_win_x86
     }
-  } else {
-    import("//third_party/yasm/yasm_assemble.gni")
-    yasm_assemble("boringssl_asm") {
-      if (cpu_arch == "x64") {
-        sources = crypto_sources_win_x86_64
-      } else if (cpu_arch == "x86") {
-        sources = crypto_sources_win_x86
-      }
+    if (!is_debug) {
+      yasm_flags = [ "-DNDEBUG" ]
     }
   }
 } else {

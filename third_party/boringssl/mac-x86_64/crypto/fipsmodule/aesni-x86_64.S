@@ -19,6 +19,12 @@
 .p2align	4
 _aes_hw_encrypt:
 
+#ifndef NDEBUG
+#ifndef BORINGSSL_FIPS
+
+	movb	$1,_BORINGSSL_function_hit+1(%rip)
+#endif
+#endif
 	movups	(%rdi),%xmm2
 	movl	240(%rdx),%eax
 	movups	(%rdx),%xmm0
@@ -543,7 +549,7 @@ _aes_hw_ecb_encrypt:
 	movl	%eax,%r10d
 	testl	%r8d,%r8d
 	jz	L$ecb_decrypt
-
+#--------------------------- ECB ENCRYPT ------------------------------#
 	cmpq	$0x80,%rdx
 	jb	L$ecb_enc_tail
 
@@ -684,7 +690,7 @@ L$ecb_enc_six:
 	movups	%xmm6,64(%rsi)
 	movups	%xmm7,80(%rsi)
 	jmp	L$ecb_ret
-
+#--------------------------- ECB DECRYPT ------------------------------#
 .p2align	4
 L$ecb_decrypt:
 	cmpq	$0x80,%rdx
@@ -1012,7 +1018,7 @@ L$ccm64_dec2_loop:
 
 .p2align	4
 L$ccm64_dec_break:
-
+#xorps	%xmm8,%xmm3
 	movl	240(%r11),%eax
 	movups	(%r11),%xmm0
 	movups	16(%r11),%xmm1
@@ -1041,6 +1047,11 @@ L$oop_enc1_6:
 .p2align	4
 _aes_hw_ctr32_encrypt_blocks:
 
+#ifndef NDEBUG
+#ifndef BORINGSSL_FIPS
+	movb	$1,_BORINGSSL_function_hit(%rip)
+#endif
+#endif
 	cmpq	$1,%rdx
 	jne	L$ctr32_bulk
 
@@ -1443,7 +1454,7 @@ L$ctr32_enc_done:
 	movdqa	64(%rsp),%xmm15
 .byte	102,68,15,56,221,193
 	movdqa	80(%rsp),%xmm0
-	movups	16-128(%rcx),%xmm1
+	movups	16-128(%rcx),%xmm1#real 1st-round key
 .byte	102,69,15,56,221,202
 
 	movups	%xmm2,(%rsi)
@@ -3451,7 +3462,7 @@ _aes_hw_cbc_encrypt:
 	movq	%rcx,%r11
 	testl	%r9d,%r9d
 	jz	L$cbc_decrypt
-
+#--------------------------- CBC ENCRYPT ------------------------------#
 	movups	(%r8),%xmm2
 	movl	%r10d,%eax
 	cmpq	$16,%rdx
@@ -3462,7 +3473,7 @@ _aes_hw_cbc_encrypt:
 L$cbc_enc_loop:
 	movups	(%rdi),%xmm3
 	leaq	16(%rdi),%rdi
-
+#xorps	%xmm3,%xmm2
 	movups	(%rcx),%xmm0
 	movups	16(%rcx),%xmm1
 	xorps	%xmm0,%xmm3
@@ -3504,7 +3515,7 @@ L$cbc_enc_tail:
 	movq	%r11,%rcx
 	xorq	%rdx,%rdx
 	jmp	L$cbc_enc_loop
-
+#--------------------------- CBC DECRYPT ------------------------------#
 .p2align	4
 L$cbc_decrypt:
 	cmpq	$16,%rdx
@@ -4083,6 +4094,11 @@ L$SEH_end_set_decrypt_key:
 _aes_hw_set_encrypt_key:
 __aesni_set_encrypt_key:
 
+#ifndef NDEBUG
+#ifndef BORINGSSL_FIPS
+	movb	$1,_BORINGSSL_function_hit+3(%rip)
+#endif
+#endif
 .byte	0x48,0x83,0xEC,0x08
 
 	movq	$-1,%rax

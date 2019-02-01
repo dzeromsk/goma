@@ -103,6 +103,9 @@ IncludeItem TryInclude(const string& cwd,
 
 }  // anonymous namespace
 
+// static
+bool CppIncludeProcessor::default_enable_clang_modules_;
+
 class IncludePathsObserver : public CppParser::IncludeObserver {
  public:
   IncludePathsObserver(std::string cwd,
@@ -688,6 +691,11 @@ bool CppIncludeProcessor::GetIncludeFiles(const string& filename,
   if (compiler_flags.type() == CompilerFlagType::Gcc) {
     const GCCFlags& flags = static_cast<const GCCFlags&>(compiler_flags);
     if (flags.has_fmodules()) {
+      if (!enable_clang_modules()) {
+        LOG(WARNING) << "-fmodules support is not enabled in compiler_proxy";
+        return false;
+      }
+
       if (!AddClangModulesFiles(flags, current_directory, include_files,
                                 file_stat_cache)) {
         return false;

@@ -2132,8 +2132,14 @@ class GomaEnvWin(GomaEnv):
   _DEPOT_TOOLS_DIR_PATTERN = re.compile(r'.*[/\\]depot_tools[/\\]?$')
 
   def __init__(self):
-    self._win32process = __import__('win32process')
-    self._win32api = __import__('win32api')
+    try:
+      self._win32process = __import__('win32process')
+      self._win32api = __import__('win32api')
+    except ImportError as e:
+      print('You don\'t seem to have installed pywin32 module, '
+            '`pip install pywin32` may fix.')
+      raise e
+
     GomaEnv.__init__(self)
     self._platform = 'win64'
 

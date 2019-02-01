@@ -25,6 +25,7 @@
 #include "compilerz_style.h"
 #include "counterz.h"
 #include "cxx/include_processor/cpp_directive_optimizer.h"
+#include "cxx/include_processor/cpp_include_processor.h"
 #include "cxx/include_processor/cpp_macro.h"
 #include "cxx/include_processor/include_cache.h"
 #include "file_hash_cache.h"
@@ -317,6 +318,9 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
   } else {
     LOG(INFO) << "memory tracker disabled";
   }
+
+  CppIncludeProcessor::SetDefaultEnableClangModules(
+      FLAGS_ENABLE_REMOTE_CLANG_MODULES);
 
   InitialPing();
 

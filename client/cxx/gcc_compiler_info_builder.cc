@@ -365,6 +365,20 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
       return;
     }
   }
+  if (ChromeOSCompilerInfoBuilderHelper::IsClangInChrootEnv(
+          local_compiler_path)) {
+    if (!ChromeOSCompilerInfoBuilderHelper::CollectChrootClangResources(
+            local_compiler_path, data->real_compiler_path(),
+            &resource_paths_to_collect)) {
+      AddErrorMessage("failed to add chromeos chroot env clang resources",
+                      data);
+      LOG(ERROR) << "failed to add chromeos chroot env clang resources: "
+                    "local_compiler_path="
+                 << local_compiler_path
+                 << " real_compiler_path=" << data->real_compiler_path();
+      return;
+    }
+  }
 
   absl::flat_hash_set<string> visited_paths;
   for (const auto& resource_path : resource_paths_to_collect) {
@@ -406,7 +420,8 @@ bool GCCCompilerInfoBuilder::AddResourceAsExecutableBinaryInternal(
   if (!CompilerInfoBuilder::ResourceInfoFromPath(
           gcc_flags.cwd(), resource_path, CompilerInfoData::EXECUTABLE_BINARY,
           &r)) {
-    AddErrorMessage("failed to get resource info for " + resource_path, data);
+    AddErrorMessage(
+        "failed to get GCC resource info for " + resource_path, data);
     return false;
   }
 

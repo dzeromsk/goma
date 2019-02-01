@@ -31,6 +31,17 @@ TEST(ChromeOSCompilerInfoBuilderHelperTest, EstimateClangMajorVersion) {
       "../path/to/usr/bin/clang-10.elf", &version));
   EXPECT_EQ(10, version);
 
+  // without .elf
+  EXPECT_TRUE(ChromeOSCompilerInfoBuilderHelper::EstimateClangMajorVersion(
+      "../path/to/usr/bin/clang-7", &version));
+  EXPECT_EQ(7, version);
+  EXPECT_TRUE(ChromeOSCompilerInfoBuilderHelper::EstimateClangMajorVersion(
+      "../path/to/usr/bin/clang-8", &version));
+  EXPECT_EQ(8, version);
+  EXPECT_TRUE(ChromeOSCompilerInfoBuilderHelper::EstimateClangMajorVersion(
+      "../path/to/usr/bin/clang-10", &version));
+  EXPECT_EQ(10, version);
+
   EXPECT_FALSE(ChromeOSCompilerInfoBuilderHelper::EstimateClangMajorVersion(
       "../path/to/usr/bin/clang++-7.elf", &version));
   EXPECT_FALSE(ChromeOSCompilerInfoBuilderHelper::EstimateClangMajorVersion(

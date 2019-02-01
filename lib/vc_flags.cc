@@ -183,6 +183,8 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
   FlagParser::Flag* flag_std = parser.AddFlag("std");  // e.g. -std=c11
   FlagParser::Flag* flag_no_canonical_prefixes =
       parser.AddBoolFlag("no-canonical-prefixes");
+  FlagParser::Flag* flag_target = parser.AddFlag("target");
+  FlagParser::Flag* flag_hyphen_target = parser.AddFlag("-target");
   std::vector<string> incremental_linker_flags;
   parser.AddBoolFlag("Brepro")->SetOutput(&incremental_linker_flags);
   parser.AddBoolFlag("Brepro-")->SetOutput(&incremental_linker_flags);
@@ -201,6 +203,8 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
     flag_imsvc->SetOutput(&compiler_info_flags_);
     flag_std->SetOutput(&compiler_info_flags_);
     flag_no_canonical_prefixes->SetOutput(&compiler_info_flags_);
+    flag_target->SetOutput(&compiler_info_flags_);
+    flag_hyphen_target->SetOutput(&compiler_info_flags_);
 
     parser.AddBoolFlag("w")->SetOutput(&compiler_info_flags_);
 
@@ -606,6 +610,8 @@ void VCFlags::DefineFlags(FlagParser* parser) {
   parser->AddFlag("Xclang");
   parser->AddFlag("isystem");
   parser->AddPrefixFlag("-analyze");  // enable code analysis (--analyze)
+  parser->AddFlag("target");
+  parser->AddFlag("-target");
 
   opts->flag_prefix = '-';
   opts->alt_flag_prefix = '/';

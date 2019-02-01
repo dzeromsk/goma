@@ -8,6 +8,8 @@
 Use -h to see its usage.
 """
 
+from __future__ import print_function
+
 
 
 import argparse
@@ -55,9 +57,9 @@ def SetupClang():
                             'Release+Asserts', 'bin', 'clang')
   if subprocess32.call([clang_path, "-v"]) == 0:
     os.environ['GOMATEST_CLANG_PATH'] = clang_path
-    print 'GOMATEST_CLANG_PATH=' + os.environ['GOMATEST_CLANG_PATH']
+    print('GOMATEST_CLANG_PATH=' + os.environ['GOMATEST_CLANG_PATH'])
   else:
-    print 'clang is not runnable here. disable clang test'
+    print('clang is not runnable here. disable clang test')
 
 
 def RunTest(build_dir, target, case_opt, non_stop):
@@ -87,7 +89,7 @@ def RunTest(build_dir, target, case_opt, non_stop):
           error_message = case + " failed"
           raise TestError(error_message)
         tests_passed += 1
-      except Exception, ex:
+      except Exception as ex:
         sys.stdout.write("\nERROR: " + str(ex))
         failed_tests.append('target:' + target + ' test:' + case)
         if not non_stop:
