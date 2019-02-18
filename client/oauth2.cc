@@ -6,6 +6,7 @@
 
 #include <sstream>
 
+#include "absl/strings/string_view.h"
 #include "file_helper.h"
 #include "glog/logging.h"
 #include "ioutil.h"
@@ -100,6 +101,14 @@ bool ParseOAuth2Config(const string& str, OAuth2Config* config) {
   string token_uri;
   if (!GetNonEmptyStringFromJson(root, kTokenURI, &token_uri, &err)) {
     LOG(WARNING) << err;
+    token_uri = kGoogleTokenURI;
+  }
+
+  constexpr absl::string_view kLegacyGoogleTokenURI(
+      "https://www.googleapis.com/oauth2/v3/token");
+  if (token_uri == kLegacyGoogleTokenURI) {
+    LOG(WARNING) << "replace legacy token_uri:" << token_uri
+                 << " to new uri:" << kGoogleTokenURI;
     token_uri = kGoogleTokenURI;
   }
 

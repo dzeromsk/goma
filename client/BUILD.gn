@@ -7,6 +7,7 @@ generate_compiler_proxy_info = "generate_compiler_proxy_info.py"
 
 import("//testing/libfuzzer/fuzzer_test.gni")
 import("//third_party/protobuf/proto_library.gni")
+import("//build/util/lastchange.gni")
 
 group("client") {
   deps = [
@@ -376,6 +377,8 @@ static_library("compiler_proxy_lib") {
     "oauth2_token.h",
     "openssl_engine.cc",
     "openssl_engine.h",
+    "rpc_controller.cc",
+    "rpc_controller.h",
     "settings.cc",
     "settings.h",
     "subprocess_controller.cc",
@@ -390,6 +393,14 @@ static_library("compiler_proxy_lib") {
     "subprocess_option_setter.h",
     "subprocess_task.cc",
     "subprocess_task.h",
+    "task/compiler_flag_utils.cc",
+    "task/compiler_flag_utils.h",
+    "task/input_file_task.cc",
+    "task/input_file_task.h",
+    "task/local_output_file_task.cc",
+    "task/local_output_file_task.h",
+    "task/output_file_task.cc",
+    "task/output_file_task.h",
     "threadpool_http_server.cc",
     "threadpool_http_server.h",
     "tls_descriptor.cc",
@@ -497,6 +508,7 @@ static_library("compiler_proxy_lib") {
     "//lib:goma_statz_stats_proto",
     "//third_party:glog",
     "//third_party:gtest_prod",
+    "//third_party/chartjs:chartjs",
     "//third_party/jquery:jquery",
     "//third_party/jsoncpp",
   ]
@@ -881,6 +893,21 @@ executable("goma_fetch") {
   }
 }
 
+action("generate_license") {
+  script = "//tools/licenses.py"
+  inputs = [
+    lastchange_file,
+  ]
+  outputs = [
+    "$root_out_dir/LICENSE",
+  ]
+  args = [
+    rebase_path("../LICENSE", root_build_dir),
+    rebase_path("../third_party", root_build_dir),
+    rebase_path("$root_out_dir/LICENSE", root_build_dir),
+  ]
+}
+
 copy("copy_goma_auth_py") {
   sources = [
     "goma_auth.py",
@@ -1005,6 +1032,7 @@ if (os != "win") {
         ":copy_vpython",
         ":dump_compiler_proxy_symbols",
         ":dump_gomacc_symbols",
+        ":generate_license",
         ":goma_fetch",
         ":goma_tool",
         ":gomacc",
@@ -1025,6 +1053,7 @@ if (os != "win") {
         rebase_path("$root_out_dir/.vpython"),
         rebase_path("$root_out_dir/goma_fetch"),
         rebase_path("$root_out_dir/report_env.sh"),
+        rebase_path("$root_out_dir/LICENSE"),
       ]
     }
   }
@@ -1095,6 +1124,7 @@ if (os != "win") {
         ":copy_vpython",
         ":dump_compiler_proxy_symbols",
         ":dump_gomacc_symbols",
+        ":generate_license",
         ":goma_fetch",
         ":goma_tool",
         ":gomacc",
@@ -1121,6 +1151,7 @@ if (os != "win") {
         rebase_path("$root_out_dir/goma_fetch.exe.pdb"),
         rebase_path("$root_out_dir/vcflags.exe"),
         rebase_path("$root_out_dir/vcflags.exe.pdb"),
+        rebase_path("$root_out_dir/LICENSE"),
       ]
     }
   }

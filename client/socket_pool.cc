@@ -289,8 +289,8 @@ bool SocketPool::AddrData::InitFromIPv4Addr(const string& ipv4, int port) {
 
 void SocketPool::AddrData::InitFromAddrInfo(const struct addrinfo* ai) {
   char buf[128];
-  COMPILE_ASSERT(sizeof buf >= INET_ADDRSTRLEN, buf_too_small_inet);
-  COMPILE_ASSERT(sizeof buf >= INET6_ADDRSTRLEN, buf_too_small_inet6);
+  static_assert(sizeof buf >= INET_ADDRSTRLEN, "buf too small inet");
+  static_assert(sizeof buf >= INET6_ADDRSTRLEN, "buf too small inet6");
 
   this->len = ai->ai_addrlen;
   memcpy(&this->storage, ai->ai_addr, this->len);

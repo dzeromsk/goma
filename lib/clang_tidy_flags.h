@@ -34,7 +34,6 @@ class ClangTidyFlags : public CxxFlags {
   // These are set in CompilerTask::InitCompilerFlags.
   void SetClangArgs(const std::vector<string>& clang_args, const string& dir);
   void SetCompilationDatabasePath(const string& compdb_path);
-  void set_is_successful(bool flag) { is_successful_ = flag; }
 
   // NOTE: These methods are valid only after SetClangArgs() is called.
   // Calling these before SetClangArgs() will cause undefined behavior.

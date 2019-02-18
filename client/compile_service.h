@@ -56,6 +56,7 @@ class LogServiceClient;
 class MultiExecReq;
 class MultiExecResp;
 class MultiFileStore;
+class RpcController;
 
 // CompileService provides ExecService API in compiler proxy.
 // It is proxy to goma service's ExecService API and FileService API, which is
@@ -85,90 +86,6 @@ class CompileService {
     kHumanReadable,
   };
 
-#ifdef _WIN32
-  class MultiRpcController;
-#endif
-  class RpcController {
-   public:
-    explicit RpcController(
-        ThreadpoolHttpServer::HttpServerRequest* http_server_request);
-    ~RpcController();
-
-#ifdef _WIN32
-    // Used as sub-RPC of MultiRpcController.
-    // In this case, you can't call ParseRequest/SendReply.
-    void AttachMultiRpcController(MultiRpcController* multi_rpc);
-#endif
-    bool ParseRequest(ExecReq* req);
-    void SendReply(const ExecResp& resp);
-
-    // Notifies callback when original request is closed.
-    // Can be called from any thread.
-    // callback will be called on the thread where this method is called.
-    void NotifyWhenClosed(OneshotClosure* callback);
-
-    int server_port() const { return server_port_; }
-
-   private:
-    friend class CompileService;
-    ThreadpoolHttpServer::HttpServerRequest* http_server_request_;
-    int server_port_;
-#ifdef _WIN32
-    MultiRpcController* multi_rpc_;
-#endif
-
-    size_t gomacc_req_size_;
-
-    DISALLOW_COPY_AND_ASSIGN(RpcController);
-  };
-
-#ifdef _WIN32
-  // RpcController for MultiExec.
-  class MultiRpcController {
-   public:
-    MultiRpcController(
-        WorkerThreadManager* wm,
-        ThreadpoolHttpServer::HttpServerRequest* http_server_request);
-    ~MultiRpcController();
-
-    // Parses request as MultiExecReq.
-    // Also sets up RpcController and ExecResp for each ExecReq
-    // in the MultiExecReq.
-    bool ParseRequest(MultiExecReq* req);
-
-    RpcController* rpc(int i) const;
-    ExecResp* mutable_resp(int i) const;
-
-    // Called when i-th ExecReq in the MultiExecReq has been done,
-    // rpc(i) will be invalidated.
-    // Returns true if all resp done.
-    bool ExecDone(int i);
-
-    void SendReply();
-
-    // Notifies callback when original request is closed.
-    // Can be called from any thread.
-    // callback will be called on the thread where this method is called.
-    void NotifyWhenClosed(OneshotClosure* callback);
-
-   private:
-    void RequestClosed();
-
-    WorkerThreadManager* wm_;
-    WorkerThread::ThreadId caller_thread_id_;
-    ThreadpoolHttpServer::HttpServerRequest* http_server_request_;
-    mutable Lock mu_;
-    std::vector<RpcController*> rpcs_;
-    std::unique_ptr<MultiExecResp> resp_;
-    OneshotClosure* closed_callback_;
-    std::vector<std::pair<WorkerThread::ThreadId, OneshotClosure*>>
-        closed_callbacks_;
-
-    size_t gomacc_req_size_;
-
-    DISALLOW_COPY_AND_ASSIGN(MultiRpcController);
-  };
-#endif
   struct GetCompilerInfoParam {
     GetCompilerInfoParam()
         : flags(nullptr), cache_hit(false), updated(false) {}
@@ -518,10 +435,10 @@ class CompileService {
   WorkerThreadManager* wm_;
 
   mutable Lock quit_mu_;
-  bool quit_ GUARDED_BY(quit_mu_);
+  bool quit_ GUARDED_BY(quit_mu_) = false;
 
   mutable Lock task_id_mu_;
-  int task_id_ GUARDED_BY(task_id_mu_);
+  int task_id_ GUARDED_BY(task_id_mu_) = 0;
 
   // TODO: add thread annotation
   mutable Lock mu_;  // protects other fields.
@@ -577,31 +494,31 @@ class CompileService {
   std::unique_ptr<AutoUpdater> auto_updater_;
   std::unique_ptr<Watchdog> watchdog_;
 
-  bool need_to_send_content_;
+  bool need_to_send_content_ = false;
   absl::Duration new_file_threshold_duration_;
   std::vector<absl::Duration> timeouts_;
   bool enable_gch_hack_;
-  bool use_relative_paths_in_argv_;
-  bool send_expected_outputs_;
+  bool use_relative_paths_in_argv_ = false;
+  bool send_expected_outputs_ = false;
   string command_check_level_;
-  bool send_compiler_binary_as_input_;
-  bool use_user_specified_path_for_subprograms_;
+  bool send_compiler_binary_as_input_ = false;
+  bool use_user_specified_path_for_subprograms_ = false;
 
   // Set hermetic_mode in ExecReq, that is, don't choose different compiler
   // than local one.
-  bool hermetic_;
+  bool hermetic_ = false;
   // If true, local fallback when no compiler in server side.
   // If false, error when no compiler in server side.
-  bool hermetic_fallback_;
+  bool hermetic_fallback_ = false;
 
-  bool dont_kill_subprocess_;
-  int max_subprocs_pending_;
-  int local_run_preference_;
-  bool local_run_for_failed_input_;
+  bool dont_kill_subprocess_ = false;
+  int max_subprocs_pending_ = 0;
+  int local_run_preference_ = 0;
+  bool local_run_for_failed_input_ = false;
   absl::Duration local_run_delay_;
-  bool store_local_run_output_;
-  bool enable_remote_link_;
-  bool should_fail_for_unsupported_compiler_flag_;
+  bool store_local_run_output_ = false;
+  bool enable_remote_link_ = false;
+  bool should_fail_for_unsupported_compiler_flag_ = false;
   string tmp_dir_;
 
   // key: "req_ver - resp_ver", value: count
@@ -624,53 +541,53 @@ class CompileService {
   std::unordered_map<string, std::pair<string, string>> local_compiler_paths_
       GUARDED_BY(compiler_mu_);
 
-  int num_exec_request_;
-  int num_exec_success_;
-  int num_exec_failure_;
+  int num_exec_request_ = 0;
+  int num_exec_success_ = 0;
+  int num_exec_failure_ = 0;
 
-  int num_exec_compiler_proxy_failure_;
+  int num_exec_compiler_proxy_failure_ = 0;
 
-  int num_exec_goma_finished_;
-  int num_exec_goma_cache_hit_;
-  int num_exec_goma_local_cache_hit_;
-  int num_exec_goma_aborted_;
-  int num_exec_goma_retry_;
-  int num_exec_local_run_;
-  int num_exec_local_killed_;
-  int num_exec_local_finished_;
-  int num_exec_fail_fallback_;
+  int num_exec_goma_finished_ = 0;
+  int num_exec_goma_cache_hit_ = 0;
+  int num_exec_goma_local_cache_hit_ = 0;
+  int num_exec_goma_aborted_ = 0;
+  int num_exec_goma_retry_ = 0;
+  int num_exec_local_run_ = 0;
+  int num_exec_local_killed_ = 0;
+  int num_exec_local_finished_ = 0;
+  int num_exec_fail_fallback_ = 0;
 
   std::map<string, int> local_run_reason_;
 
   mutable ReadWriteLock buf_mu_;
 
-  int num_file_requested_;
-  int num_file_uploaded_;
-  int num_file_missed_;
-  int num_file_output_;
-  int num_file_rename_output_;
-  int num_file_output_buf_ GUARDED_BY(buf_mu_);
+  int num_file_requested_ = 0;
+  int num_file_uploaded_ = 0;
+  int num_file_missed_ = 0;
+  int num_file_output_ = 0;
+  int num_file_rename_output_ = 0;
+  int num_file_output_buf_ GUARDED_BY(buf_mu_) = 0;
 
-  int num_include_processor_total_files_;
-  int num_include_processor_skipped_files_;
+  int num_include_processor_total_files_ = 0;
+  int num_include_processor_skipped_files_ = 0;
   absl::Duration include_processor_total_wait_time_;
   absl::Duration include_processor_total_run_time_;
 
-  size_t cur_sum_output_size_ GUARDED_BY(buf_mu_);
-  size_t max_sum_output_size_ GUARDED_BY(buf_mu_);
-  size_t req_sum_output_size_ GUARDED_BY(buf_mu_);
-  size_t peak_req_sum_output_size_ GUARDED_BY(buf_mu_);
+  size_t cur_sum_output_size_ GUARDED_BY(buf_mu_) = 0;
+  size_t max_sum_output_size_ GUARDED_BY(buf_mu_) = 0;
+  size_t req_sum_output_size_ GUARDED_BY(buf_mu_) = 0;
+  size_t peak_req_sum_output_size_ GUARDED_BY(buf_mu_) = 0;
 
-  bool can_send_user_info_;
+  bool can_send_user_info_ = false;
   absl::optional<absl::Duration> allowed_network_error_duration_;
 
-  int num_active_fail_fallback_tasks_;
-  int max_active_fail_fallback_tasks_;
+  int num_active_fail_fallback_tasks_ = 0;
+  int max_active_fail_fallback_tasks_ = -1;
   absl::Duration allowed_max_active_fail_fallback_duration_;
   absl::optional<absl::Time> reached_max_active_fail_fallback_time_;
 
   int num_forced_fallback_in_setup_[kNumForcedFallbackReasonInSetup];
-  int max_compiler_disabled_tasks_;
+  int max_compiler_disabled_tasks_ = -1;
 
   DISALLOW_COPY_AND_ASSIGN(CompileService);
 };

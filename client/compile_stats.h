@@ -26,6 +26,7 @@ class Value;
 namespace devtools_goma {
 
 class ExecResp;
+class OutputFileTask;
 
 class CompileStats : public ExecLog {
  public:
@@ -37,10 +38,18 @@ class CompileStats : public ExecLog {
   CompileStats();
   ~CompileStats();
 
+  // Determines ExecLog_CacheSource for a given |resp|.
+  static ExecLog_CacheSource GetCacheSourceFromExecResp(const ExecResp& resp);
+  // Determines ExecLog_NetworkFailureType for a given |status|.
+  static ExecLog_NetworkFailureType GetNetworkFailureTypeFromHttpStatus(
+      const HttpClient::Status& status);
+
   // Adds various stat values from |status| to the fields in this class.
   void AddStatsFromHttpStatus(const HttpClient::Status& status);
   // Adds various stat values from |resp| to the fields in this class.
   void AddStatsFromExecResp(const ExecResp& response);
+  // Adds various stat values from |task| to the fields in this class.
+  void AddStatsFromOutputFileTask(const OutputFileTask& task);
 
   // Dumps various stat fields to JSON in human-readable format.  |detail_level|
   // determines the number of fields dumped -- more detailed means more fields

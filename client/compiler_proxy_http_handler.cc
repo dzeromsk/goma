@@ -13,6 +13,7 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "auto_updater.h"
+#include "chart.bundle.min.h"
 #include "compiler_proxy_contentionz_script.h"
 #include "compiler_proxy_histogram.h"
 #include "compiler_proxy_info.h"
@@ -47,6 +48,7 @@
 #include "oauth2_token.h"
 #include "path.h"
 #include "rand_util.h"
+#include "rpc_controller.h"
 #include "subprocess_controller_client.h"
 #include "util.h"
 
@@ -328,6 +330,8 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
       std::make_pair("/", &CompilerProxyHttpHandler::HandleStatusRequest));
   internal_http_handlers_.insert(std::make_pair(
       "/static/jquery.min.js", &CompilerProxyHttpHandler::HandleJQuery));
+  internal_http_handlers_.insert(std::make_pair(
+      "/static/chart.bundle.min.js", &CompilerProxyHttpHandler::HandleChartJS));
   internal_http_handlers_.insert(
       std::make_pair("/static/compiler_proxy_status_logo.png",
                      &CompilerProxyHttpHandler::HandleStatusLogo));
@@ -416,14 +420,9 @@ bool CompilerProxyHttpHandler::InitialPing() {
     status.trace_id = "ping";
     http_status_code =
         service_.http_rpc()->Ping(service_.wm(), "/ping", &status);
-    if ((http_status_code != -1 && http_status_code != 0 &&
-         http_status_code != 401 && http_status_code != 408 &&
-         http_status_code / 100 != 5) ||
-        // Since SocketPool retries connections and it should be natural
-        // to assume that IP address that did not respond well would not
-        // respond well for a while, we can think connection failure
-        // as non-retryable error.
-        !status.connect_success) {
+    if (http_status_code != -1 && http_status_code != 0 &&
+        http_status_code != 401 && http_status_code != 408 &&
+        http_status_code / 100 != 5) {
       LOG(INFO) << "will not retry."
                 << " http_status_code=" << http_status_code
                 << " connect_success=" << status.connect_success
@@ -493,9 +492,8 @@ void CompilerProxyHttpHandler::HandleHttpRequest(
       SendErrorMessage(http_server_request, 401, "Unauthorized");
       return;
     }
-    CompileService::MultiRpcController* rpc =
-        new CompileService::MultiRpcController(service_.wm(),
-                                               http_server_request);
+    MultiRpcController* rpc =
+        new MultiRpcController(service_.wm(), http_server_request);
     MultiExecReq multi_exec;
     if (!rpc->ParseRequest(&multi_exec)) {
       delete rpc;
@@ -522,8 +520,7 @@ void CompilerProxyHttpHandler::HandleHttpRequest(
       SendErrorMessage(http_server_request, 401, "Unauthorized");
       return;
     }
-    CompileService::RpcController* rpc =
-        new CompileService::RpcController(http_server_request);
+    RpcController* rpc = new RpcController(http_server_request);
     ExecReq req;
     if (!rpc->ParseRequest(&req)) {
       delete rpc;
@@ -697,6 +694,18 @@ int CompilerProxyHttpHandler::HandleJQuery(const HttpServerRequest& request,
   OutputOkHeaderAndBody(
       "text/javascript; charset=utf-8",
       absl::string_view(jquery_min_js_start, jquery_min_js_size), &ss);
+
+  *response = ss.str();
+  return 200;
+}
+
+int CompilerProxyHttpHandler::HandleChartJS(const HttpServerRequest& request,
+                                            string* response) {
+  std::ostringstream ss;
+  OutputOkHeaderAndBody(
+      "text/javascript; charset=utf-8",
+      absl::string_view(chart_bundle_min_js_start, chart_bundle_min_js_size),
+      &ss);
 
   *response = ss.str();
   return 200;
@@ -1266,19 +1275,16 @@ int CompilerProxyHttpHandler::HandleCounterRequest(const HttpServerRequest&,
 #endif
 
 #ifdef _WIN32
-void CompilerProxyHttpHandler::ExecDoneInMulti(
-    CompileService::MultiRpcController* rpc,
-    int i) {
+void CompilerProxyHttpHandler::ExecDoneInMulti(MultiRpcController* rpc, int i) {
   if (rpc->ExecDone(i)) {
-    std::unique_ptr<CompileService::MultiRpcController> rpc_autodeleter(rpc);
+    std::unique_ptr<MultiRpcController> rpc_autodeleter(rpc);
     rpc->SendReply();
   }
 }
 #endif
 
-void CompilerProxyHttpHandler::ExecDone(CompileService::RpcController* rpc,
-                                        ExecResp* resp) {
-  std::unique_ptr<CompileService::RpcController> rpc_autodeleter(rpc);
+void CompilerProxyHttpHandler::ExecDone(RpcController* rpc, ExecResp* resp) {
+  std::unique_ptr<RpcController> rpc_autodeleter(rpc);
   std::unique_ptr<ExecResp> resp_autodeleter(resp);
 
   rpc->SendReply(*resp);
@@ -1328,6 +1334,7 @@ void CompilerProxyHttpHandler::RunTrackMemory() {
 
 void CompilerProxyHttpHandler::TrackMemory() LOCKS_EXCLUDED(memory_mu_) {
   int64_t memory_byte = GetConsumingMemoryOfCurrentProcess();
+  int64_t virtual_memory_byte = GetVirtualMemoryOfCurrentProcess();
 
   {
     AUTOLOCK(lock, &memory_mu_);
@@ -1344,6 +1351,7 @@ void CompilerProxyHttpHandler::TrackMemory() LOCKS_EXCLUDED(memory_mu_) {
     last_memory_byte_ = memory_byte;
   }
 
+  // TODO: implement warnings based on virtual memory usage.
   int64_t warning_threshold =
       static_cast<int64_t>(FLAGS_MEMORY_WARNING_THRESHOLD_IN_MB) * 1024 * 1024;
   if (memory_byte >= warning_threshold) {
@@ -1352,7 +1360,7 @@ void CompilerProxyHttpHandler::TrackMemory() LOCKS_EXCLUDED(memory_mu_) {
                  << "warning threshold " << warning_threshold << " bytes";
   } else {
     LOG(INFO) << "memory tracking: consuming memory = " << memory_byte
-              << " bytes";
+              << " bytes, virtual = " << virtual_memory_byte << " bytes";
   }
 
   if (service_.log_service()) {
@@ -1366,6 +1374,7 @@ void CompilerProxyHttpHandler::TrackMemory() LOCKS_EXCLUDED(memory_mu_) {
     }
 
     memory_usage_log.set_memory(memory_byte);
+    memory_usage_log.set_virtual_memory(virtual_memory_byte);
     memory_usage_log.set_time(absl::ToTimeT(absl::Now()));
 
     service_.log_service()->SaveMemoryUsageLog(memory_usage_log);

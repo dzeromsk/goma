@@ -6,27 +6,41 @@
 
 """A Script to set goma_oauth2_config."""
 
+from __future__ import print_function
+
 import argparse
-import BaseHTTPServer
 import copy
 import json
 import os
 import string
 import subprocess
 import sys
-import urllib
-import urlparse
 import webbrowser
 import random
+
+if sys.version_info >= (3, 0):
+  from http.server import BaseHTTPRequestHandler
+  from http.server import HTTPServer
+  from urllib.parse import parse_qs
+  from urllib.parse import urlencode
+  from urllib.parse import urlparse
+  INPUT = input
+else:
+  from BaseHTTPServer import BaseHTTPRequestHandler
+  from BaseHTTPServer import HTTPServer
+  from urllib import urlencode
+  from urlparse import parse_qs
+  from urlparse import urlparse
+  INPUT = raw_input
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 GOOGLE_AUTH_URI = 'https://accounts.google.com/o/oauth2/auth'
 OAUTH_SCOPES = 'https://www.googleapis.com/auth/userinfo.email'
-OAUTH_TOKEN_ENDPOINT = 'https://www.googleapis.com/oauth2/v3/token'
-TOKEN_INFO_ENDPOINT = 'https://www.googleapis.com/oauth2/v3/tokeninfo'
+OAUTH_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
+TOKEN_INFO_ENDPOINT = 'https://oauth2.googleapis.com/tokeninfo'
 OOB_CALLBACK_URN = 'urn:ietf:wg:oauth:2.0:oob'
 
-GOMA_SETTINGS_URI = 'https://cxx-compiler-service.appspot.com/settings'
+GOMA_URI = 'https://goma.chromium.org/cxx-compiler-service/ping'
 
 DEFAULT_GOMA_OAUTH2_CONFIG_FILE_NAME = '.goma_client_oauth2_config'
 
@@ -41,7 +55,7 @@ else:
 
 def ConfirmUserAgreedToS():
   """Returns if user agreed on ToS."""
-  print """You can use Goma (distributed compiler service) if you agree on the
+  print("""You can use Goma (distributed compiler service) if you agree on the
 way we use data and the way we share data.
 
 1. How do we use data?
@@ -74,11 +88,11 @@ compile result.
 
 Contents in source code and header files will be kept at most 153 days
 since last used.
-"""
+""")
 
-  yn = raw_input('Do you agree to our data usage policy? (y/n) -->')
+  yn = INPUT('Do you agree to our data usage policy? (y/n) -->')
   if yn in ('Y', 'y'):
-    print 'You have agreed.'
+    print('You have agreed.')
     return
   sys.exit(1)
 
@@ -124,7 +138,7 @@ class GomaOAuth2Config(dict):
     # TODO: not save unnecessary data.
     with open(self._path, 'wb') as f:
       if os.name == 'posix':
-        os.fchmod(f.fileno(), 0600)
+        os.fchmod(f.fileno(), 0o600)
       json.dump(self, f)
 
   def Delete(self):
@@ -157,7 +171,7 @@ def HttpPostRequest(url, post_dict):
   Returns:
     a response from the server.
   """
-  body = urllib.urlencode(post_dict)
+  body = urlencode(post_dict)
   cmd = [GOMA_FETCH, '--noauth', '--post', url, '--data', body]
   return subprocess.check_output(cmd)
 
@@ -182,7 +196,7 @@ def DefaultOAuth2Config():
   }
 
 
-class AuthorizationCodeHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+class AuthorizationCodeHandler(BaseHTTPRequestHandler):
   """HTTP handler to get authorization code."""
 
   code = None
@@ -199,7 +213,7 @@ class AuthorizationCodeHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     """A handler to receive authorization code."""
     if self.client_address[0] not in ('127.0.0.1', '::1'):
       raise Error('should be localhost but %s' % self.client_address[0])
-    form = urlparse.parse_qs(urlparse.urlparse(self.path).query)
+    form = parse_qs(urlparse(self.path).query)
     server_state = form.get('state', [''])[0]
     if server_state != self.state:
       raise Error('possibly XSRF: state from server (%s) is not %s' % (
@@ -227,7 +241,7 @@ def _RandomString(length):
   """
   generator = random.SystemRandom()
   return ''.join(generator.choice(string.letters + string.digits)
-                 for _ in xrange(length))
+                 for _ in range(length))
 
 
 def GetAuthorizationCodeViaBrowser(config):
@@ -242,9 +256,9 @@ def GetAuthorizationCodeViaBrowser(config):
     authorization code.
   """
   AuthorizationCodeHandler.state = _RandomString(OAUTH_STATE_LENGTH)
-  httpd = BaseHTTPServer.HTTPServer(('', 0), AuthorizationCodeHandler)
+  httpd = HTTPServer(('', 0), AuthorizationCodeHandler)
   config['redirect_uri'] = 'http://localhost:%d' % httpd.server_port
-  body = urllib.urlencode({
+  body = urlencode({
       'scope': config['scope'],
       'redirect_uri': config['redirect_uri'],
       'client_id': config['client_id'],
@@ -268,15 +282,15 @@ def GetAuthorizationCodeViaCommandLine(config):
   Returns:
     authorization code.
   """
-  body = urllib.urlencode({
+  body = urlencode({
       'scope': config['scope'],
       'redirect_uri': config['redirect_uri'],
       'client_id': config['client_id'],
       'response_type': 'code'})
   google_auth_url = '%s?%s' % (config['auth_uri'], body)
-  print 'Please visit following URL with your browser, and approve access:'
-  print google_auth_url
-  return raw_input('Please input the code:')
+  print('Please visit following URL with your browser, and approve access:')
+  print(google_auth_url)
+  return INPUT('Please input the code:')
 
 
 def GetRefreshToken(get_code_func, config):
@@ -320,30 +334,31 @@ def VerifyRefreshToken(config):
   resp = json.loads(HttpPostRequest(config['token_uri'], post_data))
   if 'error' in resp:
     return 'obtain access token: %s' % resp['error']
-  token_info = json.loads(HttpPostRequest(
-      TOKEN_INFO_ENDPOINT,
-      {'access_token': resp['access_token']}))
+  token_info = json.loads(HttpGetRequest(
+    TOKEN_INFO_ENDPOINT + '?access_token=' + resp['access_token']))
   if 'error_description' in token_info:
     return 'token info: %s' % token_info['error_description']
   if not 'email' in token_info:
     return 'no email in token_info %s' % token_info
-  print 'Login as ' + token_info['email']
+  print('Login as ' + token_info['email'])
   return ''
 
 
-def CheckSettings():
-  """Check settings with current login user.
+def CheckPing():
+  """Check ping with current login user.
 
   Returns:
     true if user is ready to use Goma.
   """
-  cmd = [GOMA_FETCH, '--auth', GOMA_SETTINGS_URI]
+  uri = GOMA_URI + os.environ.get('GOMA_RPC_EXTRA_PARAMS', '')
+  cmd = [GOMA_FETCH, '--auth', uri]
   try:
     subprocess.check_output(cmd, stderr=subprocess.STDOUT)  # discard outputs.
-    print 'Ready to use Goma'
+    print('Ready to use Goma')
     return True
   except subprocess.CalledProcessError:
-    print 'Current user is not registered with Goma service. Unable to use Goma'
+    print('Current user is not registered with Goma service. '
+          'Unable to use Goma')
   return False
 
 
@@ -373,7 +388,7 @@ def Login():
     return 1
 
   config.Save()
-  if not CheckSettings():
+  if not CheckPing():
     return 1
   return 0
 
@@ -403,14 +418,14 @@ def Info():
   if err:
     sys.stderr.write(err + '\n')
     return 1
-  if not CheckSettings():
+  if not CheckPing():
     return 1
   return 0
 
 
 def Help():
   """Print Usage"""
-  print '''Usage: %(cmd)s <command> [options]
+  print('''Usage: %(cmd)s <command> [options]
 
 Commands are:
   login  performs interactive login and caches authentication token
@@ -419,7 +434,7 @@ Commands are:
 
 Options are:
   --browser use browser to get goma OAuth2 token (login command only)
-''' % {'cmd' : sys.argv[0]}
+''' % {'cmd' : sys.argv[0]})
   return 0
 
 

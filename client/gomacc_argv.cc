@@ -10,6 +10,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "absl/base/macros.h"
 #include "absl/strings/match.h"
 #include "compiler_flags.h"
 #include "path.h"
@@ -133,7 +134,7 @@ string EscapeWinArg(const string& arg) {
           ss << '\\';
         }  // otherwise, backslashes are interpreted literally.
 
-        FALLTHROUGH_INTENDED;
+        ABSL_FALLTHROUGH_INTENDED;
       default:
         ss << c;
         break;

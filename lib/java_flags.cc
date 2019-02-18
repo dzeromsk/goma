@@ -28,7 +28,7 @@ JavacFlags::JavacFlags(const std::vector<string>& args, const string& cwd)
     : CompilerFlags(args, cwd) {
   if (!CompilerFlags::ExpandPosixArgs(cwd, args, &expanded_args_,
                                       &optional_input_filenames_)) {
-    Fail("Unable to expand args", args);
+    Fail("Unable to expand args");
     return;
   }
   bool has_at_file = !optional_input_filenames_.empty();

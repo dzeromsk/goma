@@ -13,6 +13,7 @@
 
 #include <glog/logging.h>
 
+#include "absl/base/macros.h"
 #include "scoped_fd.h"
 
 namespace {
@@ -199,14 +200,14 @@ bool MachO::GetDylibs(const string& cpu_type, std::vector<DylibEntry>* dylibs) {
             << " size=" << command->cmdsize;
     switch (command->cmd) {
       case LC_IDFVMLIB:
-        FALLTHROUGH_INTENDED;
+        ABSL_FALLTHROUGH_INTENDED;
       case LC_LOADFVMLIB:
         LOG(ERROR) << "Sorry, FVMLIB support is not implemented yet.";
         break;
       case LC_LOAD_DYLIB:
-        FALLTHROUGH_INTENDED;
+        ABSL_FALLTHROUGH_INTENDED;
       case LC_LOAD_WEAK_DYLIB:
-        FALLTHROUGH_INTENDED;
+        ABSL_FALLTHROUGH_INTENDED;
       case LC_REEXPORT_DYLIB:
         {
           dylib_command* dycom = reinterpret_cast<dylib_command*>(command);

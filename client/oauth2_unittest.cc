@@ -69,7 +69,7 @@ TEST(OAuth2Test, ParseOAuth2Config) {
       ", \"redirect_uri\": \"http://localhost:57003\""
       ", \"client_id\": \"575346572923.apps.googleusercontent.com\""
       ", \"scope\": \"https://www.googleapis.com/auth/userinfo.email\""
-      ", \"token_uri\": \"https://www.googleapis.com/oauth2/v3/token\""
+      ", \"token_uri\": \"https://oauth2.googleapis.com/token\""
       ", \"client_secret\": \"xxx_client_secret_xxx\""
       ", \"refresh_token\": \"xxx_refresh_token_xxx\""
       ", \"type\": \"authorized_user\"}";
@@ -78,7 +78,7 @@ TEST(OAuth2Test, ParseOAuth2Config) {
   EXPECT_TRUE(ParseOAuth2Config(kConfigStr, &config));
   EXPECT_TRUE(config.valid());
   EXPECT_EQ("https://accounts.google.com/o/oauth2/auth", config.auth_uri);
-  EXPECT_EQ("https://www.googleapis.com/oauth2/v3/token", config.token_uri);
+  EXPECT_EQ("https://oauth2.googleapis.com/token", config.token_uri);
   EXPECT_EQ("https://www.googleapis.com/auth/userinfo.email", config.scope);
   EXPECT_EQ("575346572923.apps.googleusercontent.com", config.client_id);
   EXPECT_EQ("xxx_client_secret_xxx", config.client_secret);
@@ -92,7 +92,7 @@ TEST(OAuth2Test, ParseOAuth2ConfigWithoutType) {
       ", \"redirect_uri\": \"http://localhost:57003\""
       ", \"client_id\": \"575346572923.apps.googleusercontent.com\""
       ", \"scope\": \"https://www.googleapis.com/auth/userinfo.email\""
-      ", \"token_uri\": \"https://www.googleapis.com/oauth2/v3/token\""
+      ", \"token_uri\": \"https://oauth2.googleapis.com/token\""
       ", \"client_secret\": \"xxx_client_secret_xxx\""
       ", \"refresh_token\": \"xxx_refresh_token_xxx\"}";
 
@@ -100,7 +100,7 @@ TEST(OAuth2Test, ParseOAuth2ConfigWithoutType) {
   EXPECT_TRUE(ParseOAuth2Config(kConfigStr, &config));
   EXPECT_TRUE(config.valid());
   EXPECT_EQ("https://accounts.google.com/o/oauth2/auth", config.auth_uri);
-  EXPECT_EQ("https://www.googleapis.com/oauth2/v3/token", config.token_uri);
+  EXPECT_EQ("https://oauth2.googleapis.com/token", config.token_uri);
   EXPECT_EQ("https://www.googleapis.com/auth/userinfo.email", config.scope);
   EXPECT_EQ("575346572923.apps.googleusercontent.com", config.client_id);
   EXPECT_EQ("xxx_client_secret_xxx", config.client_secret);
@@ -137,7 +137,7 @@ TEST(OAuth2Test, ParseOAuth2ConfigForChromeInfraAuth) {
   OAuth2Config config;
   EXPECT_TRUE(ParseOAuth2Config(kConfigStr, &config));
   EXPECT_EQ("https://accounts.google.com/o/oauth2/auth", config.auth_uri);
-  EXPECT_EQ("https://www.googleapis.com/oauth2/v3/token", config.token_uri);
+  EXPECT_EQ("https://oauth2.googleapis.com/token", config.token_uri);
   EXPECT_EQ("https://www.googleapis.com/auth/userinfo.email", config.scope);
   EXPECT_EQ("575346572923.apps.googleusercontent.com", config.client_id);
   EXPECT_EQ("xxx_client_secret_xxx", config.client_secret);
@@ -147,13 +147,13 @@ TEST(OAuth2Test, ParseOAuth2ConfigForChromeInfraAuth) {
 
 TEST(OAuth2Test, ParseOAuth2ConfigError) {
   static const char* kConfigStr =
-     "{\"auth_uri\": \"https://accounts.google.com/o/oauth2/auth\""
-     ", \"redirect_uri\": \"http://localhost:57003\""
-     ", \"client_id\": \"575346572923.apps.googleusercontent.com\""
-     ", \"scope\": \"https://www.googleapis.com/auth/userinfo.email\""
-     ", \"token_uri\": \"https://www.googleapis.com/oauth2/v3/token\""
-     ", \"client_secret\": \"\""
-     ", \"refresh_token\": \"\"}";
+      "{\"auth_uri\": \"https://accounts.google.com/o/oauth2/auth\""
+      ", \"redirect_uri\": \"http://localhost:57003\""
+      ", \"client_id\": \"575346572923.apps.googleusercontent.com\""
+      ", \"scope\": \"https://www.googleapis.com/auth/userinfo.email\""
+      ", \"token_uri\": \"https://oauth2.googleapis.com/token\""
+      ", \"client_secret\": \"\""
+      ", \"refresh_token\": \"\"}";
 
   OAuth2Config config;
   EXPECT_FALSE(ParseOAuth2Config(kConfigStr, &config));
@@ -163,7 +163,7 @@ TEST(OAuth2Test, ParseOAuth2ConfigError) {
 TEST(OAuth2Test, FormatOAuth2Config) {
   OAuth2Config config;
   config.auth_uri = "https://accounts.google.com/o/oauth2/auth";
-  config.token_uri = "https://www.googleapis.com/oauth2/v3/token";
+  config.token_uri = "https://oauth2.googleapis.com/token";
   config.scope = "https://www.googleapis.com/auth/userinfo.email";
   config.client_id = "575346572923.apps.googleusercontent.com";
   config.client_secret = "xxx_client_secret_xxx";

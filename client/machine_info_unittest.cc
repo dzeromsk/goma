@@ -13,6 +13,7 @@ TEST(MachineInfoTest, Smoke) {
   EXPECT_NE(0, GetNumCPUs());
   EXPECT_NE(0, GetSystemTotalMemory());
   EXPECT_NE(0, GetConsumingMemoryOfCurrentProcess());
+  EXPECT_NE(0, GetVirtualMemoryOfCurrentProcess());
 }
 
 }  // namespace devtools_goma

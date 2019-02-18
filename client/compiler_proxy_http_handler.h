@@ -19,7 +19,12 @@
 
 namespace devtools_goma {
 
+class RpcController;
 class WorkerThreadManager;
+
+#ifdef _WIN32
+class MultiRpcController;
+#endif
 
 // This class is used to handle for every HTTP request to compiler_proxy.
 class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
@@ -86,6 +91,7 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
   int HandleCompilerzStyle(const HttpServerRequest& request, string* response);
 
   int HandleJQuery(const HttpServerRequest& request, string* response);
+  int HandleChartJS(const HttpServerRequest& request, string* response);
 
   int HandleLegendHelp(const HttpServerRequest& request, string* response);
 
@@ -158,10 +164,10 @@ class CompilerProxyHttpHandler : public ThreadpoolHttpServer::HttpHandler,
 #endif
 
 #ifdef _WIN32
-  void ExecDoneInMulti(CompileService::MultiRpcController* rpc, int i);
+  void ExecDoneInMulti(MultiRpcController* rpc, int i);
 #endif
 
-  void ExecDone(CompileService::RpcController* rpc, ExecResp* resp);
+  void ExecDone(RpcController* rpc, ExecResp* resp);
 
   void SendErrorMessage(
       ThreadpoolHttpServer::HttpServerRequest* http_server_request,

@@ -6,7 +6,7 @@
 #ifndef DEVTOOLS_GOMA_CLIENT_CXX_INCLUDE_PROCESSOR_PREDEFINED_MACROS_H_
 #define DEVTOOLS_GOMA_CLIENT_CXX_INCLUDE_PROCESSOR_PREDEFINED_MACROS_H_
 
-#include "basictypes.h"
+#include "absl/base/macros.h"
 
 namespace devtools_goma {
 
@@ -18,8 +18,7 @@ const char* const kPredefinedObjectMacros[] = {
   "__COUNTER__",
   "__BASE_FILE__",
 };
-const int kPredefinedObjectMacroSize =
-    arraysize(kPredefinedObjectMacros);
+const int kPredefinedObjectMacroSize = ABSL_ARRAYSIZE(kPredefinedObjectMacros);
 
 const char* const kPredefinedFunctionMacros[] = {
   "__has_include",
@@ -34,7 +33,7 @@ const char* const kPredefinedFunctionMacros[] = {
   "__has_builtin",
 };
 const int kPredefinedFunctionMacroSize =
-    arraysize(kPredefinedFunctionMacros);
+    ABSL_ARRAYSIZE(kPredefinedFunctionMacros);
 
 }  // namespace devtools_goma
 

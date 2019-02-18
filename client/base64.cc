@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "absl/base/macros.h"
 #include "absl/strings/string_view.h"
 #include "basictypes.h"
 
@@ -39,7 +40,7 @@ std::string Base64UrlEncode(absl::string_view str, bool padding) {
   switch (remain) {
     case 2:
       val |= (str[si+1] & 0xFFU) << 8;
-      FALLTHROUGH_INTENDED;
+      ABSL_FALLTHROUGH_INTENDED;
     case 1:
       val |= (str[si+0] & 0xFFU) << 16;
       break;

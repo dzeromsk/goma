@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 #
 # Copyright 2012 The Goma Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -9,10 +9,13 @@
 See: http://clang.llvm.org/docs/LanguageExtensions.html#feature-checking-macros
 """
 
+# TODO: make this work with the latest clang code.
+#                    Currently, the script cannot get some fields.
+
 
 
 import re
-import urllib2
+import urllib.request, urllib.error, urllib.parse
 
 BASE_URL = 'http://llvm.org/svn/llvm-project/cfe/trunk'
 ATTR_URL = BASE_URL + '/include/clang/Basic/Attr.td'
@@ -32,8 +35,8 @@ class Error(Exception):
 
 
 def GetRevision():
-  trunk = urllib2.urlopen(BASE_URL).read()
-  matched = re.search('Revision (\d+):', trunk)
+  trunk = urllib.request.urlopen(BASE_URL).read().decode('utf-8')
+  matched = re.search(r'Revision (\d+):', trunk)
   if matched:
     return matched.group(1)
   raise Error('Failed to parse revision.')
@@ -47,44 +50,45 @@ def ScrapeFunction(source, function_name):
   s = source[m.end():]
   m = re.search('\n}', s)
   if not m:
-    raise Error(function_name + " doesn't end")
+    raise Error(function_name + ' doesn\'t end')
 
   return s[:m.start()]
 
 
 # Fetch all required data.
 revision = GetRevision()
-ppmacro_expansion = urllib2.urlopen(PPMACRO_EXPANSION_URL).read()
-attr_td = urllib2.urlopen(ATTR_URL).read()
-builtins_def = urllib2.urlopen(BUILTINS_URL).read()
+ppmacro_expansion = urllib.request.urlopen(
+    PPMACRO_EXPANSION_URL).read().decode('utf-8')
+attr_td = urllib.request.urlopen(ATTR_URL).read().decode('utf-8')
+builtins_def = urllib.request.urlopen(BUILTINS_URL).read().decode('utf-8')
 
-print '// This is auto-generated file from generate_feature_list.py.'
-print '// Clang revision: %s.' % revision
-print '// *** DO NOT EDIT ***'
+print('// This is auto-generated file from generate_feature_list.py.')
+print('// Clang revision: %s.' % revision)
+print('// *** DO NOT EDIT ***')
 
 # __has_feature
 featureFunc = ScrapeFunction(ppmacro_expansion, 'HasFeature')
 features = CASE_NAME_PATTERN.findall(featureFunc)
 features.sort()
-print
-print 'static const char* KNOWN_FEATURES[] = {'
+print()
+print('static const char* KNOWN_FEATURES[] = {')
 for feature in features:
-  print '  "%s",' % feature
-print '};'
-print 'static const unsigned long NUM_KNOWN_FEATURES ='
-print '    sizeof(KNOWN_FEATURES) / sizeof(KNOWN_FEATURES[0]);'
+  print('  "%s",' % feature)
+print('};')
+print('static const unsigned long NUM_KNOWN_FEATURES =')
+print('    sizeof(KNOWN_FEATURES) / sizeof(KNOWN_FEATURES[0]);')
 
 # __has_extension
 extensionFunc = ScrapeFunction(ppmacro_expansion, 'HasExtension')
 extensions = CASE_NAME_PATTERN.findall(extensionFunc)
 extensions.sort()
-print
-print 'static const char* KNOWN_EXTENSIONS[] = {'
+print()
+print('static const char* KNOWN_EXTENSIONS[] = {')
 for extension in extensions:
-  print '  "%s",' % extension
-print '};'
-print 'static const unsigned long NUM_KNOWN_EXTENSIONS ='
-print '    sizeof(KNOWN_EXTENSIONS) / sizeof(KNOWN_EXTENSIONS[0]);'
+  print('  "%s",' % extension)
+print('};')
+print('static const unsigned long NUM_KNOWN_EXTENSIONS =')
+print('    sizeof(KNOWN_EXTENSIONS) / sizeof(KNOWN_EXTENSIONS[0]);')
 
 # __has_attribute
 attributes = set()
@@ -103,12 +107,12 @@ for spellings in re.findall(SPELLINGS_PATTERN, attr_td):
       attributes.add(attr)
 attributes = list(attributes)
 attributes.sort()
-print
-print 'static const char* KNOWN_ATTRIBUTES[] = {'
-print '\n'.join(['  "%s",' % attr for attr in attributes])
-print '};'
-print 'static const unsigned long NUM_KNOWN_ATTRIBUTES ='
-print '    sizeof(KNOWN_ATTRIBUTES) / sizeof(KNOWN_ATTRIBUTES[0]);'
+print()
+print('static const char* KNOWN_ATTRIBUTES[] = {')
+print('\n'.join(['  "%s",' % attr for attr in attributes]))
+print('};')
+print('static const unsigned long NUM_KNOWN_ATTRIBUTES =')
+print('    sizeof(KNOWN_ATTRIBUTES) / sizeof(KNOWN_ATTRIBUTES[0]);')
 
 # __has_cpp_attribute
 # CXX11<"clang", "fallthrough", 1>  --> clang::fallthrough
@@ -124,12 +128,12 @@ for spellings in re.findall(SPELLINGS_PATTERN, attr_td):
       cpp_attributes.add(name)
 cpp_attributes = list(cpp_attributes)
 cpp_attributes.sort()
-print
-print 'static const char* KNOWN_CPP_ATTRIBUTES[] = {'
-print '\n'.join(['  "%s",' % attr for attr in cpp_attributes])
-print '};'
-print 'static const unsigned long NUM_KNOWN_CPP_ATTRIBUTES ='
-print '    sizeof(KNOWN_CPP_ATTRIBUTES) / sizeof(KNOWN_CPP_ATTRIBUTES[0]);'
+print()
+print('static const char* KNOWN_CPP_ATTRIBUTES[] = {')
+print('\n'.join(['  "%s",' % attr for attr in cpp_attributes]))
+print('};')
+print('static const unsigned long NUM_KNOWN_CPP_ATTRIBUTES =')
+print('    sizeof(KNOWN_CPP_ATTRIBUTES) / sizeof(KNOWN_CPP_ATTRIBUTES[0]);')
 
 # __has_declspec_attribute
 declspec_attributes = set()
@@ -138,21 +142,21 @@ for spellings in re.findall(SPELLINGS_PATTERN, attr_td):
     declspec_attributes.add(attr)
 declspec_attributes = list(declspec_attributes)
 declspec_attributes.sort()
-print
-print 'static const char* KNOWN_DECLSPEC_ATTRIBUTES[] = {'
-print '\n'.join(['  "%s",' % attr for attr in attributes])
-print '};'
-print 'static const unsigned long NUM_KNOWN_DECLSPEC_ATTRIBUTES ='
-print '    sizeof(KNOWN_DECLSPEC_ATTRIBUTES) /'
-print '    sizeof(KNOWN_DECLSPEC_ATTRIBUTES[0]);'
+print()
+print('static const char* KNOWN_DECLSPEC_ATTRIBUTES[] = {')
+print('\n'.join(['  "%s",' % attr for attr in attributes]))
+print('};')
+print('static const unsigned long NUM_KNOWN_DECLSPEC_ATTRIBUTES =')
+print('    sizeof(KNOWN_DECLSPEC_ATTRIBUTES) /')
+print('    sizeof(KNOWN_DECLSPEC_ATTRIBUTES[0]);')
 
 # __has_builtin
 builtins = list(set(re.findall(BUILTINS_PATTERN, builtins_def)))
 builtins.sort()
-print
-print 'static const char* KNOWN_BUILTINS[] = {'
-print '\n'.join(['  "%s",' % builtin for builtin in builtins])
-print '};'
-print 'static const unsigned long NUM_KNOWN_BUILTINS ='
-print '    sizeof(KNOWN_BUILTINS) /'
-print '    sizeof(KNOWN_BUILTINS[0]);'
+print()
+print('static const char* KNOWN_BUILTINS[] = {')
+print('\n'.join(['  "%s",' % builtin for builtin in builtins]))
+print('};')
+print('static const unsigned long NUM_KNOWN_BUILTINS =')
+print('    sizeof(KNOWN_BUILTINS) /')
+print('    sizeof(KNOWN_BUILTINS[0]);')

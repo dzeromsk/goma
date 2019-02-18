@@ -7,6 +7,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "absl/base/macros.h"
 #include "cxx_compiler_info.h"
 #include "gtest/gtest.h"
 #include "unittest_util.h"
@@ -334,42 +335,44 @@ TEST(ClangCompilerInfoBuilderHelperTest, ParseFeatures) {
       "dummy_macro1", "dummy_macro2",
   };
   static const unsigned long kNumDummyObjectMacros =
-      arraysize(kDummyObjectMacros);
+      ABSL_ARRAYSIZE(kDummyObjectMacros);
   static const char* kDummyFunctionMacros[] = {
       "dummy_func1", "dummy_func2",
   };
   static const unsigned long kNumDummyFunctionMacros =
-      arraysize(kDummyFunctionMacros);
+      ABSL_ARRAYSIZE(kDummyFunctionMacros);
   static const char* kDummyFeatures[] = {
       "dummy_feature1", "dummy_feature2",
   };
-  static const unsigned long kNumDummyFeatures = arraysize(kDummyFeatures);
+  static const unsigned long kNumDummyFeatures = ABSL_ARRAYSIZE(kDummyFeatures);
   static const char* kDummyExtensions[] = {
       "dummy_extension1", "dummy_extension2",
   };
-  static const unsigned long kNumDummyExtensions = arraysize(kDummyExtensions);
+  static const unsigned long kNumDummyExtensions =
+      ABSL_ARRAYSIZE(kDummyExtensions);
   static const char* kDummyAttributes[] = {
       "dummy_attribute1", "dummy_attribute2", "dummy_attribute3",
       "dummy_attribute4", "_Alignas",         "asm",
   };
-  static const unsigned long kNumDummyAttributes = arraysize(kDummyAttributes);
+  static const unsigned long kNumDummyAttributes =
+      ABSL_ARRAYSIZE(kDummyAttributes);
   static const char* kDummyCppAttributes[] = {
       "dummy_cpp_attribute1", "dummy_cpp_attribute2",
       "clang::dummy_cpp_attribute1", "clang::dummy_cpp_attribute2",
   };
   static const unsigned long kNumDummyCppAttributes =
-      arraysize(kDummyCppAttributes);
+      ABSL_ARRAYSIZE(kDummyCppAttributes);
 
   static const char* kDummyDeclspecAttributes[] = {
       "dummy_declspec_attributes1", "dummy_declspec_attributes2",
   };
   static const unsigned long kNumDummyDeclspecAttributes =
-      arraysize(kDummyDeclspecAttributes);
+      ABSL_ARRAYSIZE(kDummyDeclspecAttributes);
 
   static const char* kDummyBuiltins[] = {
       "dummy_builtin1", "dummy_builtin2",
   };
-  static const unsigned long kNumDummyBuiltins = arraysize(kDummyBuiltins);
+  static const unsigned long kNumDummyBuiltins = ABSL_ARRAYSIZE(kDummyBuiltins);
 
   static const char kClangOutput[] =
       "# 1 \"a.c\"\n"

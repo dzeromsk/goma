@@ -56,6 +56,7 @@ Om1vZGlmeQAyMDE4LTExLTE5VDExOjAwOjQ2KzA5OjAwgDTzSQAAAABJRU5ErkJggg==
 " type="image/png" />
 <link rel="stylesheet" href="/static/compiler_proxy_status_style.css">
 <script src="/static/jquery.min.js"></script>
+<script src="/static/chart.bundle.min.js"></script>
 <script src="/static/compiler_proxy_status_script.js"></script>
 </head>
 
@@ -94,14 +95,14 @@ Om1vZGlmeQAyMDE4LTExLTE5VDExOjAwOjQ2KzA5OjAwgDTzSQAAAABJRU5ErkJggg==
       <table id="task-summary-table">
         <thead><tr>
           <th id="task-summary-head-id" class="task-summary-head task-summary-id">id</th>
-          <th id="task-summary-head-time" class="task-summary-head task-summary-time">time</th>
+          <th id="task-summary-head-duration" class="task-summary-head task-summary-duration">duration</th>
           <th id="task-summary-head-pid" class="task-summary-head task-summary-pid">pid</th>
           <th id="task-summary-head-state" class="task-summary-head task-summary-state">task state</th>
           <th id="task-summary-head-status" class="task-summary-head task-summary-status">status</th>
           <th id="task-summary-head-http" class="task-summary-head task-summary-http">http</th>
           <th id="task-summary-head-subproc-pid" class="task-summary-head task-summary-subproc-pid">subproc pid</th>
           <th id="task-summary-head-subproc-state" class="task-summary-head task-summary-subproc-state">subproc state</th>
-          <th id="task-summary-head-flag" class="task-summary-head task-summary-flag">flag</th>
+          <th id="task-summary-head-command" class="task-summary-head task-summary-command">command</th>
           <th id="task-summary-head-major-factor" class="task-summary-head task-summary-major-factor">major factor</th>
         </tr></thead>
         <tbody id="task-summary-list"></tbody>
@@ -184,8 +185,12 @@ Om1vZGlmeQAyMDE4LTExLTE5VDExOjAwOjQ2KzA5OjAwgDTzSQAAAABJRU5ErkJggg==
       <h3>Network</h3>
       <table>
         <tr><th>QPS</th><th>Traffic</th></tr>
-        <tr><td><img id="http-rpc-qps"></td><td><img id="http-rpc-traffic"></td></tr>
+        <tr>
+          <td><canvas id="http-rpc-qps-chart" width="350" height="180"></canvas></td>
+          <td><canvas id="http-rpc-traffic-chart" width="350" height="180"></canvas></td>
+        </tr>
       </table>
+
       <h3>Http RPC Info</h3>
       <table id="http-rpc-info" class="stats-info-table">
         <colgroup>

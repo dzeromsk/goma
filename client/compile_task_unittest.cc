@@ -19,6 +19,7 @@
 #include "gtest/gtest.h"
 #include "json_util.h"
 #include "prototmp/goma_data.pb.h"
+#include "rpc_controller.h"
 #include "threadpool_http_server.h"
 #include "worker_thread_manager.h"
 
@@ -107,11 +108,12 @@ class CompileTaskTest : public ::testing::Test {
 
     http_server_request_ = absl::make_unique<DummyHttpServerRequest>(
         worker_thread_manager_.get(), http_server_.get());
-    rpc_controller_ = absl::make_unique<CompileService::RpcController>(
-        http_server_request_.get());
+    rpc_controller_ =
+        absl::make_unique<RpcController>(http_server_request_.get());
 
     compile_task_ = new CompileTask(compile_service_.get(), kCompileTaskId);
-    compile_task_->Init(rpc_controller_.get(), exec_request_, &exec_response_,
+    auto req = absl::make_unique<ExecReq>(exec_request_);
+    compile_task_->Init(rpc_controller_.get(), std::move(req), &exec_response_,
                         nullptr);
   }
 
@@ -140,7 +142,7 @@ class CompileTaskTest : public ::testing::Test {
   std::unique_ptr<ThreadpoolHttpServer> http_server_;
   std::unique_ptr<CompileService> compile_service_;
   std::unique_ptr<DummyHttpServerRequest> http_server_request_;
-  std::unique_ptr<CompileService::RpcController> rpc_controller_;
+  std::unique_ptr<RpcController> rpc_controller_;
 
   // CompileTask's destructor is private. It must be a bare pointer. Call
   // Deref() to clean up.
@@ -192,7 +194,7 @@ TEST_F(CompileTaskTest, DumpToJsonWithUnsuccessfulStart) {
 
   Json::Value json;
   compile_task()->DumpToJson(false, &json);
-  EXPECT_FALSE(json.isMember("http"));
+  EXPECT_FALSE(json.isMember("http_status"));
   EXPECT_TRUE(json.isMember("state"));
 
   std::string error_message;
@@ -203,8 +205,9 @@ TEST_F(CompileTaskTest, DumpToJsonWithUnsuccessfulStart) {
   EXPECT_EQ("FINISHED", state);
 
   // There should be no HTTP response code if there was no call to the server.
-  int http = -1;
-  EXPECT_FALSE(GetIntFromJson(json, "http", &http, &error_message))
+  int http_status = -1;
+  EXPECT_FALSE(
+      GetIntFromJson(json, "http_status", &http_status, &error_message))
       << error_message;
 }
 
@@ -218,7 +221,7 @@ TEST_F(CompileTaskTest, DumpToJsonWithValidCallToServer) {
 
   Json::Value json;
   compile_task()->DumpToJson(false, &json);
-  EXPECT_TRUE(json.isMember("http"));
+  EXPECT_TRUE(json.isMember("http_status"));
   EXPECT_TRUE(json.isMember("state"));
 
   std::string error_message;
@@ -228,10 +231,10 @@ TEST_F(CompileTaskTest, DumpToJsonWithValidCallToServer) {
       << error_message;
   EXPECT_EQ("FINISHED", state);
 
-  int http = -1;
-  EXPECT_TRUE(GetIntFromJson(json, "http", &http, &error_message))
+  int http_status = -1;
+  EXPECT_TRUE(GetIntFromJson(json, "http_status", &http_status, &error_message))
       << error_message;
-  EXPECT_EQ(200, http);
+  EXPECT_EQ(200, http_status);
 }
 
 TEST_F(CompileTaskTest, DumpToJsonWithHTTPErrorCode) {
@@ -247,10 +250,10 @@ TEST_F(CompileTaskTest, DumpToJsonWithHTTPErrorCode) {
 
   std::string error_message;
 
-  int http = -1;
-  EXPECT_TRUE(GetIntFromJson(json, "http", &http, &error_message))
+  int http_status = -1;
+  EXPECT_TRUE(GetIntFromJson(json, "http_status", &http_status, &error_message))
       << error_message;
-  EXPECT_EQ(403, http);
+  EXPECT_EQ(403, http_status);
 }
 
 TEST_F(CompileTaskTest, DumpToJsonWithDone) {

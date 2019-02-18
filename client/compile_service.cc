@@ -19,6 +19,8 @@
 
 #include <json/json.h>
 
+#include "absl/base/macros.h"
+#include "absl/memory/memory.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_join.h"
 #include "absl/time/clock.h"
@@ -55,6 +57,7 @@
 #include "mypath.h"
 #include "path.h"
 #include "path_resolver.h"
+#include "rpc_controller.h"
 #include "util.h"
 #include "watchdog.h"
 #include "worker_thread.h"
@@ -83,6 +86,55 @@ const char* kCurrentDir = ";.;";
 
 namespace devtools_goma {
 
+namespace {
+
+void SetDefaultOSSpecificRequesterInfo(RequesterInfo* info) {
+#ifdef _WIN32
+  info->add_dimensions("os:win");
+  info->set_path_style(RequesterInfo::WINDOWS_STYLE);
+#elif defined(__MACH__)
+  info->add_dimensions("os:mac");
+  info->set_path_style(RequesterInfo::POSIX_STYLE);
+#elif defined(__linux__)
+  info->add_dimensions("os:linux");
+  info->set_path_style(RequesterInfo::POSIX_STYLE);
+#else
+#error "unsupported platform"
+#endif
+}
+
+// Fills out various fields of |stats| prior to running the associated task.
+void InitCompileStatsForTask(const CompileService& service,
+                             const ExecReq& req,
+                             const RpcController& rpc,
+                             int task_id,
+                             CompileStats* stats) {
+  for (const auto& arg : req.arg())
+    stats->add_arg(arg);
+  for (const auto& env : req.env())
+    stats->add_env(env);
+  stats->set_cwd(req.cwd());
+
+  if (service.CanSendUserInfo()) {
+    stats->set_username(service.username());
+    stats->set_nodename(service.nodename());
+  }
+
+  if (req.requester_info().has_build_id()) {
+    stats->set_build_id(req.requester_info().build_id());
+    LOG(INFO) << "Task:" << task_id << " build_id:"
+              << req.requester_info().build_id();
+  }
+
+  stats->gomacc_req_size = rpc.gomacc_req_size();
+  stats->set_port(rpc.server_port());
+  // TODO: Convert field to protobuf/timestamp.
+  stats->set_compiler_proxy_start_time(absl::ToTimeT(service.start_time()));
+  stats->set_task_id(task_id);
+}
+
+}  // anonymous namespace
+
 class CompareTaskHandlerTime {
  public:
   bool operator()(CompileTask* a, CompileTask* b) const {
@@ -90,228 +142,8 @@ class CompareTaskHandlerTime {
   }
 };
 
-CompileService::RpcController::RpcController(
-    ThreadpoolHttpServer::HttpServerRequest* http_server_request)
-    : http_server_request_(http_server_request),
-      server_port_(http_server_request->server().port()),
-#ifdef _WIN32
-      multi_rpc_(nullptr),
-#endif
-      gomacc_req_size_(0) {
-  DCHECK(http_server_request_ != nullptr);
-}
-
-CompileService::RpcController::~RpcController() {
-  DCHECK(http_server_request_ == nullptr);
-}
-
-#ifdef _WIN32
-void CompileService::RpcController::AttachMultiRpcController(
-    CompileService::MultiRpcController* multi_rpc) {
-  CHECK_EQ(gomacc_req_size_, 0U);
-  multi_rpc_ = multi_rpc;
-  http_server_request_ = nullptr;
-}
-#endif
-
-// Returns true if header looks like a request coming from browser.
-// see also goma_ipc.cc:GomaIPC::SendRequest.
-bool IsBrowserRequest(absl::string_view header) {
-  if (header.find("\r\nHost: 0.0.0.0\r\n") != absl::string_view::npos) {
-    return false;
-  }
-  // TODO: check it doesn't contain Origin header etc?
-  return true;
-}
-
-bool CompileService::RpcController::ParseRequest(ExecReq* req) {
-  absl::string_view header = http_server_request_->header();
-  if (http_server_request_->request_content_length() <= 0) {
-    LOG(WARNING) << "Invalid request from client (no content-length):"
-                 << header;
-    return false;
-  }
-  // it won't protect request by using network communications API.
-  // https://developer.chrome.com/apps/app_network
-  if (IsBrowserRequest(header)) {
-    LOG(WARNING) << "Unallowed request from browser:" << header;
-    return false;
-  }
-  if (header.find("\r\nContent-Type: binary/x-protocol-buffer\r\n") ==
-      absl::string_view::npos) {
-    LOG(WARNING) << "Invalid request from client (invalid content-type):"
-                 << header;
-    return false;
-  }
-
-  gomacc_req_size_ = http_server_request_->request_content_length();
-  return req->ParseFromArray(
-        http_server_request_->request_content(),
-        http_server_request_->request_content_length());
-}
-
-void CompileService::RpcController::SendReply(const ExecResp& resp) {
-  CHECK(http_server_request_ != nullptr);
-
-  size_t gomacc_resp_size = resp.ByteSize();
-  std::ostringstream http_response_message;
-  http_response_message
-    << "HTTP/1.1 200 OK\r\n"
-    << "Content-Type: binary/x-protocol-buffer\r\n"
-    << "Content-Length: " << gomacc_resp_size << "\r\n\r\n";
-  string response_string = http_response_message.str();
-  int header_size = response_string.size();
-  response_string.resize(header_size + gomacc_resp_size);
-  resp.SerializeToArray(&response_string[header_size], gomacc_resp_size);
-  http_server_request_->SendReply(response_string);
-  http_server_request_ = nullptr;
-}
-
-void CompileService::RpcController::NotifyWhenClosed(OneshotClosure* callback) {
-#ifdef _WIN32
-  if (multi_rpc_) {
-    multi_rpc_->NotifyWhenClosed(callback);
-    return;
-  }
-#endif
-  CHECK(http_server_request_ != nullptr);
-  http_server_request_->NotifyWhenClosed(callback);
-}
-
-#ifdef _WIN32
-CompileService::MultiRpcController::MultiRpcController(
-    WorkerThreadManager* wm,
-    ThreadpoolHttpServer::HttpServerRequest* http_server_request)
-    : wm_(wm),
-      caller_thread_id_(wm->GetCurrentThreadId()),
-      http_server_request_(http_server_request),
-      resp_(new MultiExecResp),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          closed_callback_(NewCallback(
-              this, &CompileService::MultiRpcController::RequestClosed))),
-      gomacc_req_size_(0) {
-  DCHECK(http_server_request_ != nullptr);
-  http_server_request_->NotifyWhenClosed(closed_callback_);
-}
-
-CompileService::MultiRpcController::~MultiRpcController() {
-  DCHECK(http_server_request_ == nullptr);
-  CHECK(rpcs_.empty());
-  CHECK_EQ(caller_thread_id_, wm_->GetCurrentThreadId());
-}
-
-bool CompileService::MultiRpcController::ParseRequest(MultiExecReq* req) {
-  CHECK_EQ(caller_thread_id_, wm_->GetCurrentThreadId());
-  if (http_server_request_->request_content_length() <= 0) {
-    LOG(WARNING) << "Invalid request from client (no content-length):"
-                 << http_server_request_->request();
-    return false;
-  }
-  gomacc_req_size_ = http_server_request_->request_content_length();
-  bool ok = req->ParseFromArray(
-        http_server_request_->request_content(),
-        http_server_request_->request_content_length());
-  if (ok) {
-    for (int i = 0; i < req->req_size(); ++i) {
-      CompileService::RpcController* rpc =
-          new CompileService::RpcController(http_server_request_);
-      rpc->AttachMultiRpcController(this);
-      rpcs_.push_back(rpc);
-      resp_->add_response();
-    }
-    CHECK_EQ(req->req_size(), static_cast<int>(rpcs_.size()));
-    CHECK_EQ(req->req_size(), resp_->response_size());
-  }
-  return ok;
-}
-
-CompileService::RpcController* CompileService::MultiRpcController::rpc(
-    int i) const {
-  CHECK_EQ(caller_thread_id_, wm_->GetCurrentThreadId());
-  DCHECK_GE(i, 0);
-  DCHECK_LT(i, static_cast<int>(rpcs_.size()));
-  return rpcs_[i];
-}
-
-ExecResp* CompileService::MultiRpcController::mutable_resp(int i) const {
-  CHECK_EQ(caller_thread_id_, wm_->GetCurrentThreadId());
-  DCHECK_GE(i, 0);
-  DCHECK_LT(i, resp_->response_size());
-  return resp_->mutable_response(i)->mutable_resp();
-}
-
-bool CompileService::MultiRpcController::ExecDone(int i) {
-  CHECK_EQ(caller_thread_id_, wm_->GetCurrentThreadId());
-  DCHECK_GE(i, 0);
-  DCHECK_LT(i, static_cast<int>(rpcs_.size()));
-  DCHECK(rpcs_[i] != nullptr);
-  delete rpcs_[i];
-  rpcs_[i] = nullptr;
-  for (const auto* rpc : rpcs_) {
-    if (rpc != nullptr)
-      return false;
-  }
-  rpcs_.clear();
-  return true;
-}
-
-void CompileService::MultiRpcController::SendReply() {
-  CHECK_EQ(caller_thread_id_, wm_->GetCurrentThreadId());
-  CHECK(http_server_request_ != nullptr);
-  CHECK(rpcs_.empty());
-
-  size_t gomacc_resp_size = resp_->ByteSize();
-  std::ostringstream http_response_message;
-  http_response_message
-    << "HTTP/1.1 200 OK\r\n"
-    << "Content-Type: binary/x-protocol-buffer\r\n"
-    << "Content-Length: " << gomacc_resp_size << "\r\n\r\n";
-  string response_string = http_response_message.str();
-  int header_size = response_string.size();
-  response_string.resize(header_size + gomacc_resp_size);
-  resp_->SerializeToArray(&response_string[header_size], gomacc_resp_size);
-  http_server_request_->SendReply(response_string);
-  http_server_request_ = nullptr;
-}
-
-void CompileService::MultiRpcController::NotifyWhenClosed(
-    OneshotClosure* callback) {
-  // This might be called on the different thread than caller_thread_id_.
-  {
-    AUTOLOCK(lock, &mu_);
-    if (closed_callback_ != nullptr) {
-      closed_callbacks_.emplace_back(wm_->GetCurrentThreadId(), callback);
-      return;
-    }
-  }
-  // closed_callback_ has been called, that is, http_server_request_
-  // was already closed, so runs callback now on the same thread.
-  wm_->RunClosureInThread(
-      FROM_HERE,
-      wm_->GetCurrentThreadId(), callback,
-      WorkerThread::PRIORITY_IMMEDIATE);
-}
-
-void CompileService::MultiRpcController::RequestClosed() {
-  std::vector<std::pair<WorkerThread::ThreadId,
-                        OneshotClosure*>> callbacks;
-  {
-    AUTOLOCK(lock, &mu_);
-    closed_callback_ = nullptr;
-    callbacks.swap(closed_callbacks_);
-  }
-  for (const auto& callback : callbacks) {
-    wm_->RunClosureInThread(FROM_HERE, callback.first,
-                            callback.second,
-                            WorkerThread::PRIORITY_IMMEDIATE);
-  }
-}
-#endif
-
 CompileService::CompileService(WorkerThreadManager* wm, int compiler_info_pool)
     : wm_(wm),
-      quit_(false),
-      task_id_(0),
       max_active_tasks_(1000),
       max_finished_tasks_(1000),
       max_failed_tasks_(1000),
@@ -325,52 +157,9 @@ CompileService::CompileService(WorkerThreadManager* wm, int compiler_info_pool)
       file_hash_cache_(new FileHashCache),
       include_processor_pool_(WorkerThreadManager::kFreePool),
       histogram_(new CompilerProxyHistogram),
-      need_to_send_content_(false),
       new_file_threshold_duration_(absl::Minutes(1)),
       enable_gch_hack_(true),
-      use_relative_paths_in_argv_(false),
-      send_expected_outputs_(false),
-      send_compiler_binary_as_input_(false),
-      use_user_specified_path_for_subprograms_(false),
-      hermetic_(false),
-      hermetic_fallback_(false),
-      dont_kill_subprocess_(false),
-      max_subprocs_pending_(0),
-      local_run_preference_(0),
-      local_run_for_failed_input_(false),
-      local_run_delay_(absl::ZeroDuration()),
-      store_local_run_output_(false),
-      enable_remote_link_(false),
-      num_exec_request_(0),
-      num_exec_success_(0),
-      num_exec_failure_(0),
-      num_exec_compiler_proxy_failure_(0),
-      num_exec_goma_finished_(0),
-      num_exec_goma_cache_hit_(0),
-      num_exec_goma_local_cache_hit_(0),
-      num_exec_goma_aborted_(0),
-      num_exec_goma_retry_(0),
-      num_exec_local_run_(0),
-      num_exec_local_killed_(0),
-      num_exec_local_finished_(0),
-      num_exec_fail_fallback_(0),
-      num_file_requested_(0),
-      num_file_uploaded_(0),
-      num_file_missed_(0),
-      num_file_output_(0),
-      num_file_rename_output_(0),
-      num_file_output_buf_(0),
-      num_include_processor_total_files_(0),
-      num_include_processor_skipped_files_(0),
-      cur_sum_output_size_(0),
-      max_sum_output_size_(0),
-      req_sum_output_size_(0),
-      peak_req_sum_output_size_(0),
-      can_send_user_info_(false),
-      num_active_fail_fallback_tasks_(0),
-      max_active_fail_fallback_tasks_(-1),
-      num_forced_fallback_in_setup_{},
-      max_compiler_disabled_tasks_(-1) {
+      num_forced_fallback_in_setup_{} {
   if (username_.empty() || username_ == "unknown") {
     LOG(WARNING) << "Failed to obtain username:" << username_;
   }
@@ -480,8 +269,18 @@ void CompileService::Exec(
     }
 
     task = new CompileTask(this, task_id);
-    task->mutable_stats()->gomacc_req_size = rpc->gomacc_req_size_;
-    task->Init(rpc, req, resp, callback);
+    InitCompileStatsForTask(*this, req, *rpc, task_id, task->mutable_stats());
+
+    auto task_req = absl::make_unique<ExecReq>(req);
+    if (CanSendUserInfo() && !username().empty()) {
+      task_req->mutable_requester_info()->set_username(username());
+    }
+    task_req->mutable_requester_info()->set_compiler_proxy_id(
+        absl::StrCat(compiler_proxy_id_prefix(), task_id));
+
+    SetDefaultOSSpecificRequesterInfo(task_req->mutable_requester_info());
+
+    task->Init(rpc, std::move(task_req), resp, callback);
 
     AUTOLOCK(lock, &mu_);
     if (static_cast<int>(active_tasks_.size()) >= max_active_tasks_) {
@@ -1778,6 +1577,8 @@ void CompileService::DumpCommonStatsUnlocked(GomaStats* stats) {
     outputs->set_peak_req(peak_req_sum_output_size_);
     stats->mutable_memory_stats()->set_consuming(
         GetConsumingMemoryOfCurrentProcess());
+    stats->mutable_memory_stats()->set_virtual_memory_size(
+        GetVirtualMemoryOfCurrentProcess());
     stats->mutable_time_stats()->set_uptime(
         absl::ToInt64Seconds(absl::Now() - start_time()));
 
@@ -1921,7 +1722,7 @@ bool CompileService::IncrementActiveFailFallbackTasks() {
 
 void CompileService::RecordForcedFallbackInSetup(
     ForcedFallbackReasonInSetup r) {
-  DCHECK(r >= 0 && r < arraysize(num_forced_fallback_in_setup_))
+  DCHECK(r >= 0 && r < ABSL_ARRAYSIZE(num_forced_fallback_in_setup_))
       << "Unknown fallback reason:" << r;
   {
     AUTOLOCK(lock, &mu_);

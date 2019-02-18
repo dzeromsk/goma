@@ -95,12 +95,11 @@ TEST(HttpClientOptions, InitFromURLGCEMetadata) {
 
 TEST(HttpClientOptions, InitFromURLGoogleOAuth2TokenURI) {
   HttpClient::Options options;
-  EXPECT_TRUE(options.InitFromURL(
-      "https://www.googleapis.com/oauth2/v3/token"));
-  EXPECT_EQ("www.googleapis.com", options.dest_host_name);
+  EXPECT_TRUE(options.InitFromURL("https://oauth2.googleapis.com/token"));
+  EXPECT_EQ("oauth2.googleapis.com", options.dest_host_name);
   EXPECT_EQ(443, options.dest_port);
   EXPECT_TRUE(options.use_ssl);
-  EXPECT_EQ("/oauth2/v3/token", options.url_path_prefix);
+  EXPECT_EQ("/token", options.url_path_prefix);
 }
 
 TEST(HttpClientOptions, InitFromURLWithExplicitPort) {

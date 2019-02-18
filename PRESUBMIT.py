@@ -96,6 +96,7 @@ def CheckChangeOnUpload(input_api, output_api):
   results += CheckChangeLintsClean(input_api, output_api)
   results += input_api.canned_checks.CheckChangeHasNoCrAndHasOnlyOneEol(
       input_api, output_api)
+  results += input_api.canned_checks.CheckPatchFormatted(input_api, output_api)
   results += input_api.canned_checks.CheckChangeHasNoTabs(
       input_api, output_api)
   results += input_api.canned_checks.CheckChangeTodoHasOwner(

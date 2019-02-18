@@ -24,10 +24,12 @@ It shows
  - Warning lines
 """
 
+from __future__ import print_function
 
 
 
 import datetime
+import functools
 import glob
 import gzip
 import json
@@ -270,7 +272,7 @@ def LongValueFromJsonStats(json_stats, keys):
     curr = curr[k]
   if not curr:
     return None
-  return long(curr)
+  return int(curr)
 
 
 class SimpleStats(object):
@@ -290,9 +292,9 @@ class SimpleStats(object):
       self.stats[name] = {}
     self.stats[name]['num'] = self.stats[name].get('num', 0) + 1
     self.stats[name]['min'] = min(
-        self.stats[name].get('min', sys.maxint), value)
+        self.stats[name].get('min', sys.maxsize), value)
     self.stats[name]['max'] = max(
-        self.stats[name].get('max', -sys.maxint - 1), value)
+        self.stats[name].get('max', -sys.maxsize - 1), value)
     self.stats[name]['sum'] = self.stats[name].get('sum', 0) + value
     self.stats[name]['sum_x2'] = (
         self.stats[name].get('sum_x2', 0) + value*value)
@@ -316,7 +318,7 @@ def DiagnoseGomaLog(options, args):
     logging.error('no compiler_proxy INFO file found')
     return 1
 
-  print compiler_proxy_infos
+  print(compiler_proxy_infos)
 
   log_created = None  # Initial LogLine.
   goma_revision = None
@@ -503,7 +505,7 @@ def DiagnoseGomaLog(options, args):
       memory_threshold = options.memory_threshold
       if memory_threshold < 0:
         # Automatically configure memory threshold.
-        gibibyte = 1024 * 1024 * 1024L
+        gibibyte = 1024 * 1024 * 1024
         memory_threshold = 3 * gibibyte
 
       if consuming_memory and consuming_memory > memory_threshold:
@@ -514,133 +516,133 @@ def DiagnoseGomaLog(options, args):
         messages.append('Too much missing files: %d > %d' % (
                         missed_files, options.filemiss_threshold))
 
-  print log_created.logtext
-  print
-  print 'goma built revision %s' % goma_revision
-  print 'goma version %s' % goma_version
-  print 'goma flags %s' % goma_flags
-  print 'goma limits %s' % goma_limits
+  print(log_created.logtext)
+  print()
+  print('goma built revision %s' % goma_revision)
+  print('goma version %s' % goma_version)
+  print('goma flags %s' % goma_flags)
+  print('goma limits %s' % goma_limits)
 
-  print
+  print()
   for compile_type in tasks:
-    print
-    print '%s: # of tasks: %d' % (compile_type, len(tasks[compile_type]))
+    print()
+    print('%s: # of tasks: %d' % (compile_type, len(tasks[compile_type])))
     if tasks[compile_type]:
-      print '   replies:'
-      for resp in replies[compile_type].keys():
-        print '     %s : %d' % (resp, replies[compile_type][resp])
+      print('   replies:')
+      for resp, value in replies[compile_type].items():
+        print('     %s : %d' % (resp, value))
       unfinished = []
       for task in tasks[compile_type].values():
         if not task.response:
           unfinished.append(task)
       if len(unfinished) > 0:
         messages.append('unfinished job %d' % len(unfinished))
-        print '   unfinished: %d' % len(unfinished)
+        print('   unfinished: %d' % len(unfinished))
         for task in unfinished:
-          print '     Task:%s - unfinished' % task.id
+          print('     Task:%s - unfinished' % task.id)
           for logline in task.loglines:
-            print '       %s %s' % (logline.logtime, logline.logtext)
-          print
+            print('       %s %s' % (logline.logtime, logline.logtext))
+          print()
 
-      print '   durations:'
-      durations = tasks[compile_type].values()
+      print('   durations:')
+      durations = list(tasks[compile_type].values())
       total_duration = datetime.timedelta()
-      durations.sort(cmp=lambda a, b: cmp(a.Duration(), b.Duration()))
+      durations.sort(key=lambda a: a.Duration())
       for d in durations:
         total_duration += d.Duration()
-      print '       ave : %s' % (total_duration / len(durations))
-      print '       max : %s' % durations[-1].Duration()
-      print '        98%%: %s' % durations[int(len(durations)*0.98)].Duration()
-      print '        91%%: %s' % durations[int(len(durations)*0.91)].Duration()
-      print '        75%%: %s' % durations[int(len(durations)*0.75)].Duration()
-      print '        50%%: %s' % durations[len(durations)/2].Duration()
-      print '        25%%: %s' % durations[int(len(durations)*0.25)].Duration()
-      print '         9%%: %s' % durations[int(len(durations)*0.09)].Duration()
-      print '         2%%: %s' % durations[int(len(durations)*0.02)].Duration()
-      print '       min : %s' % durations[0].Duration()
-      print '   long tasks:'
+      print('       ave : %s' % (total_duration / len(durations)))
+      print('       max : %s' % durations[-1].Duration())
+      print('        98%%: %s' % durations[int(len(durations)*0.98)].Duration())
+      print('        91%%: %s' % durations[int(len(durations)*0.91)].Duration())
+      print('        75%%: %s' % durations[int(len(durations)*0.75)].Duration())
+      print('        50%%: %s' % durations[int(len(durations)*0.50)].Duration())
+      print('        25%%: %s' % durations[int(len(durations)*0.25)].Duration())
+      print('         9%%: %s' % durations[int(len(durations)*0.09)].Duration())
+      print('         2%%: %s' % durations[int(len(durations)*0.02)].Duration())
+      print('       min : %s' % durations[0].Duration())
+      print('   long tasks:')
       for i in range(min(3, len(durations))):
         task = durations[-(i + 1)]
-        print '   #%d %s Task:%s' % (i + 1, task.Duration(), task.id)
-        print '       %s' % task.desc
-        print '       %s' % task.response
+        print('   #%d %s Task:%s' % (i + 1, task.Duration(), task.id))
+        print('       %s' % task.desc)
+        print('       %s' % task.response)
       if fail_tasks[compile_type]:
         if len(fail_tasks[compile_type]) > options.fail_tasks_threshold:
           messages.append('Too many fail tasks in %s: %d > %d' % (
               compile_type, len(fail_tasks[compile_type]),
               options.fail_tasks_threshold))
-        print '   fail tasks:'
+        print('   fail tasks:')
         for i in range(min(3, len(fail_tasks[compile_type]))):
           task = fail_tasks[compile_type][i]
-          print '    Task:%s' % task.id
-          print '      %s' % task.desc
+          print('    Task:%s' % task.id)
+          print('      %s' % task.desc)
           for logline in task.loglines:
-            print '       %s %s' % (logline.logtime, logline.logtext)
+            print('       %s %s' % (logline.logtime, logline.logtext))
 
   if crash_dump:
     messages.append('CRASH dump exists')
-    print
-    print 'Crash'
-    print crash_dump
+    print()
+    print('Crash')
+    print(crash_dump)
 
   if statz_output:
-    print
-    print 'Goma stats: ', statz_output
+    print()
+    print('Goma stats: ', statz_output)
 
   if json_statz_output:
-    print
-    print 'Goma json stats: ', json_statz_output
+    print()
+    print('Goma json stats: ', json_statz_output)
 
-  print
-  print 'Duration per num active tasks'
+  print()
+  print('Duration per num active tasks')
   for p in durations_per_parallelism.durations:
-    print ' %d tasks: %s' % (p, durations_per_parallelism.durations[p])
+    print(' %d tasks: %s' % (p, durations_per_parallelism.durations[p]))
 
   if fatals:
     messages.append('FATAL log exists: %s' % len(fatals))
-    print
-    print 'Fatal'
+    print()
+    print('Fatal')
     for fatal in fatals:
-      print fatal
+      print(fatal)
   if len(error_task_ids) > options.errors_threshold:
     messages.append('Task having ERROR log exists: %s > %s' % (
         len(error_task_ids), options.errors_threshold))
   if options.show_errors and errors:
-    print
-    print 'Error'
+    print()
+    print('Error')
     for error in errors:
-      print error
+      print(error)
   if warnings_known:
-    print
+    print()
     warnings_known_out = []
-    for warntype, count in warnings_known.iteritems():
+    for warntype, count in warnings_known.items():
       if count > options.show_known_warnings_threshold:
         warnings_known_out.append('  %d: %s' % (count, warntype))
     if warnings_known_out:
-      print 'Known warning'
+      print('Known warning')
       for warning in warnings_known_out:
-        print warning
+        print(warning)
   if len(warning_task_ids) > options.warnings_threshold:
     messages.append('Task having WARNING log exists: %s > %s' % (
         len(warning_task_ids), options.warnings_threshold))
   if options.show_warnings and warnings:
-    print
-    print 'Warning'
+    print()
+    print('Warning')
     for warning in warnings:
-      print warning
+      print(warning)
 
   if (len(slow_tasks) > 0 and
       uptime > options.show_slow_tasks_if_uptime_longer_than_sec):
     options.show_slow_tasks = True
-    for key, value in slow_task_stats.stats.iteritems():
+    for key, value in slow_task_stats.stats.items():
       messages.append('%s: num=%d, longest=%s' % (
           key, value['num'], value['max']))
 
   if options.show_slow_tasks and slow_tasks:
-    print
-    print 'SLOW Tasks'
+    print()
+    print('SLOW Tasks')
     for slow_task in slow_tasks:
-      print slow_task
+      print(slow_task)
 
   if options.output_json:
     summary = {
@@ -658,9 +660,9 @@ def DiagnoseGomaLog(options, args):
       json.dump(summary, f)
 
   if messages:
-    print
+    print()
     for msg in messages:
-      print msg
+      print(msg)
     return 1
   return 0
 

@@ -14,10 +14,10 @@ deps = {
      "client/third_party/glog":
      "https://github.com/google/glog.git@2063b387080c1e7adffd33ca07adff0eb346ff1a",
 
-     # googletest
+     # googletest 1.8.1
      "client/third_party/gtest":
      Var('chromium_git') + '/external/github.com/google/googletest.git' + '@' +
-         '145d05750b15324899473340c8dd5af50d125d33',
+         '2fe3bd994b3189899d93f1d5a881e725e046fdc2',
 
      # zlib 1.2.8
      "client/third_party/zlib":
@@ -37,7 +37,7 @@ deps = {
 
      # chrome's deps/third_party/boringssl
      "client/third_party/boringssl/src":
-     "https://boringssl.googlesource.com/boringssl@8cbb5f8f204d188211b340412cc0dd4d5b09649a",
+     "https://boringssl.googlesource.com/boringssl@104306f587751f34852838915fb61ce5551c2332",
 
      # google-breakpad
      "client/third_party/breakpad/breakpad":
@@ -109,6 +109,14 @@ hooks = [
          "python",
          "client/test/third_party/binutils/download.py",
        ],
+     },
+
+     {
+       # Update LASTCHANGE.
+       'name': 'lastchange',
+       'pattern': '.',
+       'action': ['python', 'client/build/util/lastchange.py',
+                  '-o', 'client/build/util/LASTCHANGE'],
      },
 
      # Pull GN binaries.

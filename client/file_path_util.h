@@ -7,6 +7,7 @@
 
 #include <set>
 #include <string>
+#include <vector>
 
 #include "file_stat.h"
 
@@ -50,7 +51,8 @@ bool GetRealExecutablePath(const FileStat* gomacc_filestat,
 // for files normalized by JoinPathRepectAbsolute with |cwd|.
 // Relative path is taken in high priority.
 void RemoveDuplicateFiles(const std::string& cwd,
-                          std::set<std::string>* filenames);
+                          std::set<std::string>* filenames,
+                          std::vector<std::string>* removed_files);
 
 #ifdef _WIN32
 // Resolves path extension of |cmd| using PATHEXT environment given with

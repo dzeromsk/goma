@@ -273,6 +273,12 @@ inline void SetFileStatToData(const FileStat& file_stat,
   data->set_is_directory(file_stat.is_directory);
 }
 
+// NOTE
+// The default value of CompilerInfoData::FileStat and devtools_goma::FileStat
+// is incompatible. CompilerInfoData::FileStat is proto message, so the default
+// values are all 0. However, devtools_goma::FileStat is not.
+// Before calling this function, you have to check
+// CompilerInfoData::FileStat really exists.
 inline void GetFileStatFromData(const CompilerInfoData::FileStat& data,
                                 FileStat* file_stat) {
   file_stat->mtime = absl::FromTimeT(data.mtime());

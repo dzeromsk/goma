@@ -121,7 +121,7 @@ function taskStatus(task) {
     return 'backend-error'
   }
   if (!success) {
-    if (task['flag'] && task['flag'].match(/ conftest\./)) {
+    if (task['command'] && task['command'].match(/ conftest\./)) {
       return 'conftestfailure';
     }
     return 'failure';
@@ -200,6 +200,9 @@ function GomaTaskView() {
 }
 
 GomaTaskView.prototype = {
+  qpsChart: null,
+  trafficChart: null,
+
   setPageSize: function(size) {
     this.taskMaxSize = size;
   },
@@ -337,8 +340,8 @@ GomaTaskView.prototype = {
   updateNetworkStats: function() {
     var httprpc = this.resp['http_rpc'];
 
-    $('#http-rpc-qps').attr('src', httprpc['qps_chart']);
-    $('#http-rpc-traffic').attr('src', httprpc['traffic_chart']);
+    this.drawQPSChart(httprpc['qps_data']['qps'], httprpc['qps_data']['http_err']);
+    this.drawTrafficChart(httprpc['traffic_data']['read'], httprpc['traffic_data']['write']);
 
     $('#rpc-health-status').text(httprpc['health_status']);
 
@@ -374,6 +377,96 @@ GomaTaskView.prototype = {
     } else {
       $('#http-rpc-info').removeClass('warning');
     }
+  },
+
+  makeEmptyChart: function(canvasCtx, label1, label2) {
+    let labels = [];
+    for (let i = 0; i < 120; ++i) {
+      labels[i] = i - 119;
+    }
+
+    return new Chart(canvasCtx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: label1,
+          data: [],
+          backgroundColor: "rgba(0,255,0,0.9)",
+          borderColor: "rgba(0,255,0,0.9)",
+          borderWidth: 1,
+          pointRadius: 0,
+          fill: false,
+        }, {
+          label: label2,
+          data: [],
+          backgroundColor: "rgba(0,0,255,0.9)",
+          borderColor: "rgba(0,0,255,0.9)",
+          pointRadius: 0,
+          borderWidth: 1,
+          fill: false,
+        }]
+      },
+      options: {
+        elements: {
+          line: {
+            tension: 0,  // disables bezier curves
+          }
+        },
+        scales: {
+          xAxes: [{
+            display: true,
+            scaleLabel: {
+              display: true,
+              labelString: 'Time'
+            },
+          }],
+          yAxes: [{
+            ticks: {
+              beginAtZero: true,
+              min: 0,
+            },
+          }],
+        },
+        animation:false
+      }
+    });
+  },
+
+  drawQPSChart: function(qps_data, http_err_data) {
+    if (qps_data.length != 120 || http_err_data.length != 120) {
+      console.error('data length mismatch: ',
+                    'qps_data.length=' + qps_data.length,
+                    'http_err_data.length=' + http_err_data.length);
+      return;
+    }
+
+    if (!this.qpsChart) {
+      let ctx = $('#http-rpc-qps-chart')[0].getContext('2d');
+      this.qpsChart = this.makeEmptyChart(ctx, 'QPS', 'HTTP error');
+    }
+
+    this.qpsChart.data.datasets[0].data = qps_data;
+    this.qpsChart.data.datasets[1].data = http_err_data;
+    this.qpsChart.update();
+  },
+
+  drawTrafficChart: function(read_data, write_data) {
+    if (read_data.length != 120 || write_data.length != 120) {
+      console.error('data length mismatch: ',
+                    'read_data.length=' + read_data.length,
+                    'write_data.length=' + write_data.length);
+      return;
+    }
+
+    if (!this.trafficChart) {
+      let ctx = $('#http-rpc-traffic-chart')[0].getContext('2d');
+      this.trafficChart = this.makeEmptyChart(ctx, 'read', 'write');
+    }
+
+    this.trafficChart.data.datasets[0].data = read_data;
+    this.trafficChart.data.datasets[1].data = write_data;
+    this.trafficChart.update();
   },
 
   setTaskPositionFirst: function() {
@@ -512,13 +605,13 @@ GomaTaskView.prototype = {
         };
       })(this.currentTaskOrderAscending ? 1 : -1);
 
-      // When key is 'time', if 'time' is missing, we should use 'elapsed'
-      // instead.
-      if (sortKey == 'time') {
+      // When key is 'duration', if 'duration' is missing, we should use
+      // 'elapsed' instead.
+      if (sortKey == 'duration') {
         sortFunc = (function(ascending) {
           return function(a, b) {
-            var v1 = a['time'] || a['elapsed'] || '0';
-            var v2 = b['time'] || b['elapsed'] || '0';
+            var v1 = a['duration'] || a['elapsed'] || '0';
+            var v2 = b['duration'] || b['elapsed'] || '0';
             return compare(parseInt(v1), parseInt(v2), ascending);
           };
         })(this.currentTaskOrderAscending ? 1 : -1);
@@ -565,22 +658,22 @@ GomaTaskView.prototype = {
       var taskStatusName = taskStatus(task);
       tr.addClass('task-status-' + taskStatusName);
       $('<td class="task-summary-id">').text(task.id).appendTo(tr);
-      if ('time' in task) {
-        $('<td class="task-summary-time">').text(task.time).appendTo(tr);
+      if ('duration' in task) {
+        $('<td class="task-summary-duration">').text(task.duration).appendTo(tr);
       } else if ('elapsed' in task) {
-        $('<td class="task-summary-time">').text(task.elapsed).appendTo(tr);
+        $('<td class="task-summary-duration">').text(task.elapsed).appendTo(tr);
       } else {
-        $('<td class="task-summary-time">').appendTo(tr);
+        $('<td class="task-summary-duration">').appendTo(tr);
       }
       $('<td class="task-summary-pid">').text(task.pid).appendTo(tr);
       $('<td class="task-summary-state">').text(task.state).appendTo(tr);
       $('<td class="task-summary-status">').text(taskStatusName.toUpperCase().replace('-', ' ')).appendTo(tr);
-      $('<td class="task-summary-http">').text(task.http).appendTo(tr);
+      $('<td class="task-summary-http-status">').text(task.http_status).appendTo(tr);
       $('<td class="task-summary-subproc-pid">').text(task.subproc_pid).appendTo(tr);
       $('<td class="task-summary-subproc-state">').text(task.subproc_state).appendTo(tr);
-      // TODO: Show full flag when a cursor is hovered?
+      // TODO: Show full command when a cursor is hovered?
       // It will take a big area, though... b/24883527
-      $('<td class="task-summary-flag">').text(makeFlagSummary(task.flag)).appendTo(tr);
+      $('<td class="task-summary-command">').text(makeFlagSummary(task.command)).appendTo(tr);
       $('<td class="task-summary-major-factor">').text(task.major_factor).appendTo(tr);
 
       tr.click((function(taskId) {
@@ -708,12 +801,12 @@ GomaTaskView.prototype = {
 
     add('id');
     add('elapsed');
-    add('time');
+    add('duration');
     add('pid');
     add('state');
     add('subproc_state');
     add('subproc_pid');
-    addLongString('flag');
+    addLongString('command');
     add('major_factor');
     add('command_version_mismatch');
     add('command_binary_hash_mismatch');
@@ -728,7 +821,7 @@ GomaTaskView.prototype = {
     }
 
     add('cache_key');
-    add('http');
+    add('http_status');
     add('exit');
     add('retry');
     addLineBreak();
@@ -797,7 +890,7 @@ GomaTaskView.prototype = {
     if (addArrayItem('env')) {
       addLineBreak();
     }
-    addArrayItem('exec_output_file');
+    addArrayItem('exec_output_files');
     addLineBreak();
     if (addLongString('stdout', true)) {
       addLineBreak();
@@ -805,7 +898,7 @@ GomaTaskView.prototype = {
     if (addLongString('stderr', true)) {
       addLineBreak();
     }
-    addArrayItem('inputs');
+    addArrayItem('input_files');
     addArrayItem('system_library_paths');
     add('response_header');
 

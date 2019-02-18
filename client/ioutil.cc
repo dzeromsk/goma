@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/base/macros.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
@@ -189,7 +190,7 @@ string EscapeString(const string& str) {
             break;
           }
         }
-        FALLTHROUGH_INTENDED;
+          ABSL_FALLTHROUGH_INTENDED;
       default:
         if (str[i] < 0x20) {
           escaped_str << "\\u" << std::hex << std::setw(4)

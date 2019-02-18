@@ -1,0 +1,35 @@
+# Copyright 2019 The Goma Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+genc = "//client/genc.py"
+
+action("gen_chartjs") {
+  script = genc
+  sources = [
+    "chart.bundle.min.js",
+  ]
+  outputs = [
+    "$target_gen_dir/chart.bundle.min.c",
+    "$target_gen_dir/chart.bundle.min.h",
+  ]
+  args = [
+    "--out-dir",
+    rebase_path("$target_gen_dir"),
+    rebase_path("chart.bundle.min.js"),
+  ]
+}
+
+config("chartjs_config") {
+  include_dirs = [ "$target_gen_dir" ]
+}
+static_library("chartjs") {
+  sources = [
+    "$target_gen_dir/chart.bundle.min.c",
+    "$target_gen_dir/chart.bundle.min.h",
+  ]
+  deps = [
+    ":gen_chartjs",
+  ]
+  public_configs = [ ":chartjs_config" ]
+}

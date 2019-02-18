@@ -18,3 +18,5 @@ gyp-mac-tool
 out
 
 /buildtools
+/build/util/LASTCHANGE*
+!/build/util/LASTCHANGE.dummy

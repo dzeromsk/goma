@@ -30,10 +30,12 @@
 # pragma comment(lib, "psapi.lib")
 # include <lmcons.h>  // for UNLEN
 #endif
+
+#include "absl/base/macros.h"
 #include "env_flags.h"
 #include "file_dir.h"
-#include "filesystem.h"
 #include "file_stat.h"
+#include "filesystem.h"
 #include "mypath_helper.h"
 #include "path.h"
 #include "path_resolver.h"
@@ -67,21 +69,6 @@ static string GetEnvMatchedCondition(
   return default_value;
 }
 
-static string GetTempDirectoryEnv() {
-  static const char* kTmpdirEnvs[] = {
-    "TEST_TMPDIR",
-    "TMPDIR",
-    "TMP",
-  };
-  return GetEnvMatchedCondition(
-      std::vector<const char*>(&kTmpdirEnvs[0],
-                               &kTmpdirEnvs[arraysize(kTmpdirEnvs)]),
-      [](const string& tmpdir) {
-        return file::IsDirectory(tmpdir, file::Defaults()).ok();
-      },
-      "/tmp");
-}
-
 }  // anonymous namespace
 
 namespace devtools_goma {
@@ -97,11 +84,8 @@ string GetUsernameEnv() {
 
   return GetEnvMatchedCondition(
       std::vector<const char*>(&kUserEnvs[0],
-                               &kUserEnvs[arraysize(kUserEnvs)]),
-      [](const string& user) {
-        return user != kRoot;
-      },
-      "");
+                               &kUserEnvs[ABSL_ARRAYSIZE(kUserEnvs)]),
+      [](const string& user) { return user != kRoot; }, "");
 }
 
 string GetUsernameNoEnv() {
@@ -205,11 +189,12 @@ string GetGomaTmpDir() {
   }
 
   string tmpdir = GetPlatformSpecificTempDirectory();
+#ifndef _WIN32
   if (tmpdir.empty()) {
-    tmpdir = GetTempDirectoryEnv();
+    tmpdir = "/tmp";
   }
-  CHECK(!tmpdir.empty()) << "Could not determine temp directory. "
-                         << "Make sure TMPDIR or TMP are not empty.";
+#endif
+  CHECK(!tmpdir.empty()) << "Could not determine temp directory.";
 
   // Assume goma_ctl.py creates /tmp/goma_<user> or %TEMP%\goma.
 #ifndef _WIN32

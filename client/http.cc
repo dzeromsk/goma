@@ -83,6 +83,15 @@ constexpr int kMaxConnectionFailure = 5;
 
 constexpr int kDefaultErrorThresholdPercent = 30;
 
+template <typename T>
+Json::Value VectorToJson(const std::vector<T>& vec) {
+  Json::Value v;
+  for (const auto& elem : vec) {
+    v.append(elem);
+  }
+  return v;
+}
+
 bool IsFatalNetworkErrorCode(int status_code) {
   return status_code == 302 || status_code == 401 || status_code == 403;
 }
@@ -437,7 +446,7 @@ class HttpClient::Task {
 
   void DoWrite() {
     if (!active_) {
-      LOG(WARNING) << "Already finished?";
+      LOG(WARNING) << status_->trace_id << " Already finished?";
       RunCallback(FAIL, "Writable, but already inactive");
       return;
     }
@@ -447,7 +456,7 @@ class HttpClient::Task {
       return;
     }
     CHECK(descriptor_);
-    VLOG(7) << "DoWrite " << descriptor_;
+    VLOG(7) << status_->trace_id << " DoWrite " << descriptor_;
     const void* data = nullptr;
     int size = 0;
     if (!request_stream_->Next(&data, &size)) {
@@ -489,7 +498,7 @@ class HttpClient::Task {
 
   void DoRead() {
     if (!active_) {
-      LOG(WARNING) << "Already finished?";
+      LOG(WARNING) << status_->trace_id << " Already finished?";
       RunCallback(FAIL, "Readable, but already inactive");
       return;
     }
@@ -507,9 +516,8 @@ class HttpClient::Task {
     int buf_size;
     resp_->NextBuffer(&buf, &buf_size);
     ssize_t read_size = descriptor_->Read(buf, buf_size);
-    VLOG(7) << "DoRead " << descriptor_
-            << " buf_size=" << buf_size
-            << " read_size=" << read_size;
+    VLOG(7) << status_->trace_id << " DoRead " << descriptor_
+            << " buf_size=" << buf_size << " read_size=" << read_size;
     if (read_size < 0) {
       if (descriptor_->NeedRetry()) {
         return;
@@ -573,7 +581,7 @@ class HttpClient::Task {
 
   void DoTimeout() {
     if (!active_) {
-      LOG(WARNING) << "Already finished?";
+      LOG(WARNING) << status_->trace_id << " Already finished?";
       return;
     }
     if (client_->failnow()) {
@@ -676,7 +684,7 @@ class HttpClient::Task {
     if (!is_ping_) {
       client_->UpdateStats(*status_);
     } else {
-      LOG(INFO) << "We will not update status for ping.";
+      LOG(INFO) << status_->trace_id << " We will not update status for ping.";
     }
     OneshotClosure* callback = callback_;
     callback_ = nullptr;
@@ -1253,10 +1261,10 @@ void HttpClient::DumpToJson(Json::Value* json) const {
   std::vector<double> qps;
   std::vector<double> http_err;
   for (size_t i = 0; i < kMaxTrafficHistory - traffic_history_.size(); ++i) {
-    read_value.push_back(-1.0);
-    write_value.push_back(-1.0);
-    qps.push_back(-1.0);
-    http_err.push_back(-1.0);
+    read_value.push_back(0);
+    write_value.push_back(0);
+    qps.push_back(0);
+    http_err.push_back(0);
   }
   for (TrafficHistory::const_iterator iter = traffic_history_.begin();
        iter != traffic_history_.end();
@@ -1273,6 +1281,10 @@ void HttpClient::DumpToJson(Json::Value* json) const {
   byte_max = byte_max * 1.1;
   q_max = q_max * 1.1;
 
+  (*json)["traffic_data"]["read"] = VectorToJson(read_value);
+  (*json)["traffic_data"]["write"] = VectorToJson(write_value);
+  (*json)["qps_data"]["qps"] = VectorToJson(qps);
+  (*json)["qps_data"]["http_err"] = VectorToJson(http_err);
 }
 
 void HttpClient::DumpStatsToProto(HttpRPCStats* stats) const {
@@ -1864,11 +1876,9 @@ bool HttpClient::Response::Recv(int r) {
     // still reading header.
     return false;
   }
-  VLOG(2) << "header ready " << status_code_
-          << " resp_len=" << resp.size()
-          << " status_code=" << status_code_
-          << " offset=" << body_offset_
-          << " content_length=" << content_length
+  VLOG(2) << trace_id_ << " header ready " << status_code_
+          << " resp_len=" << resp.size() << " status_code=" << status_code_
+          << " offset=" << body_offset_ << " content_length=" << content_length
           << " is_chunked=" << is_chunked
           << " total_recv_len=" << total_recv_len_;
   if (content_length != string::npos) {

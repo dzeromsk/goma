@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "goma_file_http.h"
 #include "http.h"
 
 namespace devtools_goma {
@@ -16,7 +17,6 @@ class ExecReq_Input;
 class ExecResult_Output;
 class FileBlob;
 class FileServiceClient;
-class FileServiceHttpClient;
 class RequesterInfo;
 
 // BlobClient uploads/downloads file blob between client and server.

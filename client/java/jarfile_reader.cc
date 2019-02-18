@@ -6,8 +6,8 @@
 
 #include <cstring>
 
+#include "absl/base/macros.h"
 #include "absl/strings/match.h"
-#include "basictypes.h"
 #include "glog/logging.h"
 
 namespace {
@@ -225,8 +225,8 @@ ssize_t JarFileReader::Read(void* ptr, size_t len) {
   // https://en.wikipedia.org/wiki/Zip_(file_format)
   // Central directory file header should be the largest.
   static const size_t kMaxHeaderSize = 46;
-  COMPILE_ASSERT(kBufSize > kMaxHeaderSize,
-                 "Buffer size should be larger than ZIP header size.");
+  static_assert(kBufSize > kMaxHeaderSize,
+                "Buffer size should be larger than ZIP header size.");
 
   off_t buffer_head_pos_at_beginning = buffer_head_pos_;
   if (is_buffer_normalized_) {

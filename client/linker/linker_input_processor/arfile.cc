@@ -44,6 +44,7 @@ extern "C" {
 #include <sstream>
 #include <utility>
 
+#include "absl/base/macros.h"
 #include "absl/strings/match.h"
 #include "glog/logging.h"
 
@@ -123,19 +124,19 @@ bool ArFile::EntryHeader::SerializeToString(string* output) const {
   memmove(hdr.ar_name, orig_ar_name.c_str(), sizeof(hdr.ar_name));
   len = snprintf(hdr.ar_date, sizeof(hdr.ar_date), "%llu",
       static_cast<unsigned long long>(ar_date));
-  if (len < arraysize(hdr.ar_date))
+  if (len < ABSL_ARRAYSIZE(hdr.ar_date))
     hdr.ar_date[len] = ' ';
   len = snprintf(hdr.ar_uid,  sizeof(hdr.ar_uid),   "%u", ar_uid);
-  if (len < arraysize(hdr.ar_uid))
+  if (len < ABSL_ARRAYSIZE(hdr.ar_uid))
     hdr.ar_uid[len] = ' ';
   len = snprintf(hdr.ar_gid,  sizeof(hdr.ar_gid),   "%u", ar_gid);
-  if (len < arraysize(hdr.ar_gid))
+  if (len < ABSL_ARRAYSIZE(hdr.ar_gid))
     hdr.ar_gid[len] = ' ';
   len = snprintf(hdr.ar_mode, sizeof(hdr.ar_mode),  "%o", ar_mode);
-  if (len < arraysize(hdr.ar_mode))
+  if (len < ABSL_ARRAYSIZE(hdr.ar_mode))
     hdr.ar_mode[len] = ' ';
   len = snprintf(hdr.ar_size, sizeof(hdr.ar_size), "%zu", ar_size);
-  if (len < arraysize(hdr.ar_size))
+  if (len < ABSL_ARRAYSIZE(hdr.ar_size))
     hdr.ar_size[len] = ' ';
   memmove(hdr.ar_fmag, ARFMAG, sizeof(hdr.ar_fmag));
   output->assign(reinterpret_cast<char*>(&hdr),  sizeof(hdr));

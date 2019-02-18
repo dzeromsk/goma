@@ -181,14 +181,12 @@ GOMA_DEFINE_string(PROXY_HOST, "",
 GOMA_DEFINE_int32(PROXY_PORT, 0,
                   "The port of an HTTP proxy.");
 
-#define DEFAULT_SETTINGS_SERVER "https://cxx-compiler-service.appspot.com/settings"
-#define DEFAULT_STUBBY_PROXY_IP_ADDRESS ""
-GOMA_DEFINE_string(SETTINGS_SERVER, DEFAULT_SETTINGS_SERVER,
-                   "Settings server URL");
+GOMA_DEFINE_string(SETTINGS_SERVER, "", "Settings server URL");
 GOMA_DEFINE_string(ASSERT_SETTINGS,
                    "",
                    "Assert settings name matches with this value, "
                    "if specified.");
+#define DEFAULT_STUBBY_PROXY_IP_ADDRESS "goma.chromium.org"
 GOMA_DEFINE_string(STUBBY_PROXY_IP_ADDRESS, DEFAULT_STUBBY_PROXY_IP_ADDRESS,
                    "The IP address or hostname of the goma server");
 GOMA_DEFINE_int32(STUBBY_PROXY_PORT, 443,
@@ -232,13 +230,7 @@ GOMA_DEFINE_int32(MAX_OVERCOMMIT_INCOMING_SOCKETS,
                   DEFAULT_MAX_OVERCOMIT_INCOMING_SOCKETS,
                   "Number of overcommitted incoming sockets per threads on "
                   "select.");
-#if defined(__LP64__) || defined(_WIN64)
-# define DEFAULT_MAX_ACTIVE_TASKS 2048
-#else  // 32bit system would not have enough memory
-# define DEFAULT_MAX_ACTIVE_TASKS 200
-#endif
-GOMA_DEFINE_int32(MAX_ACTIVE_TASKS, DEFAULT_MAX_ACTIVE_TASKS,
-                  "Number of active tasks.");
+GOMA_DEFINE_int32(MAX_ACTIVE_TASKS, 2048, "Number of active tasks.");
 GOMA_DEFINE_int32(MAX_FINISHED_TASKS, 1024,
                   "Number of task information to keep for monitoring.");
 GOMA_DEFINE_int32(MAX_FAILED_TASKS, 1024,
@@ -544,15 +536,8 @@ GOMA_DEFINE_int32(MEMORY_TRACK_INTERVAL, 60,
                   "Interval seconds to track compiler_proxy memory. "
                   "Periodical memory tracking is disabled if this value is not "
                   "positive.");
-#if defined(__LP64__) || defined(_WIN64)
-// 4GB on 64bit
-# define DEFAULT_MEMORY_WARNING_THRESHOLD_IN_MB (1024 * 4)
-#else
-// 1.5GB on 32bit
-# define DEFAULT_MEMORY_WARNING_THRESHOLD_IN_MB (1024 + 512)
-#endif
 GOMA_DEFINE_int32(MEMORY_WARNING_THRESHOLD_IN_MB,
-                  DEFAULT_MEMORY_WARNING_THRESHOLD_IN_MB,
+                  1024 * 4,
                   "If consuming memory exceeds this value, warning log will be"
                   " shown.");
 

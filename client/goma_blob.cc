@@ -11,7 +11,6 @@
 #include "compiler_specific.h"
 #include "glog/logging.h"
 #include "goma_file.h"
-#include "goma_file_http.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_data.pb.h"
 MSVC_POP_WARNING()

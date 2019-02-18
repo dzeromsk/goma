@@ -28,7 +28,7 @@ def main():
       # this is "rm -f", it is ok to fail.
       try:
         os.remove(f)
-      except OSError, err:
+      except OSError as err:
         if err.errno != errno.ENOENT:
           raise
     os.symlink(args.target, f)

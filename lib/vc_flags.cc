@@ -94,7 +94,7 @@ VCFlags::VCFlags(const std::vector<string>& args, const string& cwd)
   bool result =
       ExpandArgs(cwd, args, &expanded_args_, &optional_input_filenames_);
   if (!result) {
-    Fail("Unable to expand args", args);
+    Fail("Unable to expand args");
     return;
   }
 

@@ -11,8 +11,6 @@ the connection without waiting for the response.
 This is the regression test for crbug.com/904532.
 """
 
-# TODO: compatible with python3.
-import cStringIO as StringIO
 import os
 import re
 import select
@@ -21,6 +19,15 @@ import socket
 import subprocess
 import sys
 import tempfile
+
+# TODO: remove this when we deprecate python2.
+if sys.version_info >= (3, 0):
+  import io
+  STRINGIO = io.StringIO
+else:
+  import cStringIO
+  STRINGIO = cStringIO.StringIO
+
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 CONTENT_LENGTH_PATTERN = re.compile('\r\nContent-Length:\s*(\d+)\r\n')
@@ -105,7 +112,7 @@ def GetContentLength(header):
   """
   matched = CONTENT_LENGTH_PATTERN.search(header)
   if matched:
-    return long(matched.group(1))
+    return int(matched.group(1))
   return None
 
 
@@ -118,7 +125,7 @@ def ReadAll(conn):
   Returns:
     data read from conn.
   """
-  data = StringIO.StringIO()
+  data = STRINGIO()
   while True:
     ready, _, _ = select.select([conn], [], [], READ_TIMEOUT_IN_SEC)
     if not ready:

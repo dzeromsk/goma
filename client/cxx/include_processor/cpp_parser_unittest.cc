@@ -1149,4 +1149,15 @@ TEST(CppParserTest, GluingInteger) {
   EXPECT_TRUE(cpp_parser.IsMacroDefined("OK"));
 }
 
+// regression test for b/30547167
+TEST(CppParserTest, MissingHeader) {
+  CppParser cpp_parser;
+  CppIncludeObserver include_observer(&cpp_parser);
+  cpp_parser.set_include_observer(&include_observer);
+
+  cpp_parser.AddStringInput("#include <should_not_exist.h>", "foo.cc");
+
+  EXPECT_FALSE(cpp_parser.ProcessDirectives());
+}
+
 }  // namespace devtools_goma

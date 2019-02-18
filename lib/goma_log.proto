@@ -160,6 +160,7 @@ message ExecLog {
   optional bool compiler_proxy_error = 77;
 }
 
+// NEXT ID TO USE: 8
 message MemoryUsageLog {
   // compiler_proxy identification
   optional int32 compiler_proxy_start_time = 1;
@@ -171,6 +172,7 @@ message MemoryUsageLog {
 
   // memory information
   optional int64 memory = 5;
+  optional int64 virtual_memory = 7;
   optional int64 time = 6;
 }
 

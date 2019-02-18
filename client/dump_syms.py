@@ -11,6 +11,8 @@ Usage:
     --output compiler_proxy.sym
 """
 
+from __future__ import print_function
+
 import argparse
 import os
 import platform
@@ -66,7 +68,7 @@ class MacDumpSyms(DumpSyms):
         r'|^.*: in compilation unit .* \(offset 0x[a-f\d]+\):$')
       for line in stderr_data.split('\n'):
         if line != '' and not filter_re.match(line):
-          print >> sys.stderr, line
+          print(line, file=sys.stderr)
 
 def GetDumpSyms(dump_syms, src, dst):
   if platform.system() == 'Darwin':

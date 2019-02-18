@@ -408,7 +408,8 @@ void NamedPipeServer::Stop() {
         INFINITE,
         TRUE);
     switch (w) {
-      case WAIT_OBJECT_0:  FALLTHROUGH_INTENDED;
+      case WAIT_OBJECT_0:
+        ABSL_FALLTHROUGH_INTENDED;
       case WAIT_OBJECT_0 + 1:
         finished = true;
         break;
@@ -624,7 +625,7 @@ bool NamedPipeServer::NewPipe(
       if (SetEvent(overlapped->hEvent)) {
         break;
       }
-      FALLTHROUGH_INTENDED;
+      ABSL_FALLTHROUGH_INTENDED;
     default:
       LOG_SYSRESULT(GetLastError());
       LOG(ERROR) << "Failed to ConnectNamedPipe";

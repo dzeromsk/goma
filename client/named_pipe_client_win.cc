@@ -8,8 +8,9 @@
 
 #include <glog/logging.h>
 
-#include "simple_timer.h"
+#include "absl/base/macros.h"
 #include "platform_thread.h"
+#include "simple_timer.h"
 
 namespace devtools_goma {
 

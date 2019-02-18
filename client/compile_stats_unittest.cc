@@ -312,7 +312,7 @@ TEST(CompileStatsTest, DumpToJsonBasic) {
 
   EXPECT_EQ(9, json.getMemberNames().size()) << json.toStyledString();
 
-  EXPECT_TRUE(json.isMember("time"));
+  EXPECT_TRUE(json.isMember("duration"));
   EXPECT_TRUE(json.isMember("major_factor"));
 
   EXPECT_TRUE(json.isMember("command_version_mismatch"));
@@ -327,7 +327,7 @@ TEST(CompileStatsTest, DumpToJsonBasic) {
   std::string error_message;
 
   std::string time_str;
-  EXPECT_TRUE(GetStringFromJson(json, "time", &time_str, &error_message))
+  EXPECT_TRUE(GetStringFromJson(json, "duration", &time_str, &error_message))
       << error_message;
   EXPECT_EQ("1400 ms", time_str);
 

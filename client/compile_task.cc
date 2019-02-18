@@ -24,6 +24,7 @@
 #include <json/json.h>
 
 #include "absl/base/call_once.h"
+#include "absl/base/macros.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
@@ -33,7 +34,6 @@
 #include "autolock_timer.h"
 #include "callback.h"
 #include "clang_tidy_flags.h"
-#include "compilation_database_reader.h"
 #include "compile_service.h"
 #include "compile_stats.h"
 #include "compiler_flag_type_specific.h"
@@ -70,8 +70,13 @@
 #include "path.h"
 #include "path_resolver.h"
 #include "path_util.h"
+#include "rpc_controller.h"
 #include "simple_timer.h"
 #include "subprocess_task.h"
+#include "task/compiler_flag_utils.h"
+#include "task/input_file_task.h"
+#include "task/local_output_file_task.h"
+#include "task/output_file_task.h"
 #include "time_util.h"
 #include "util.h"
 #include "vc_flags.h"
@@ -188,8 +193,9 @@ string StateName(CompileTask::State state) {
     "LOCAL_FINISHED",
   };
 
-  static_assert(CompileTask::NUM_STATE == arraysize(names),
-                "CompileTask::NUM_STATE and arraysize(names) is not matched");
+  static_assert(
+      CompileTask::NUM_STATE == ABSL_ARRAYSIZE(names),
+      "CompileTask::NUM_STATE and ABSL_ARRAYSIZE(names) is not matched");
 
   CHECK_GE(state, 0);
   CHECK_LT(state, CompileTask::NUM_STATE);
@@ -250,407 +256,31 @@ bool IsBigobjFormat(const unsigned char* buf) {
   return true;
 }
 
+bool IsSameErrorMessage(absl::string_view remote_stdout,
+                        absl::string_view local_stdout,
+                        absl::string_view remote_stderr,
+                        absl::string_view local_stderr) {
+  if (remote_stdout == local_stdout && remote_stderr == local_stderr) {
+    return true;
+  }
+
+  // b/66308332
+  // local error message might be merged to stdout.
+  // stdout and stderr might be interleaved, but it's not considered.
+  if (local_stdout == remote_stderr && local_stderr.empty() &&
+      remote_stdout.empty()) {
+    return true;
+  }
+
+  return false;
+}
+
 }  // namespace
 
 absl::once_flag CompileTask::init_once_;
 Lock CompileTask::global_mu_;
 
 std::deque<CompileTask*>* CompileTask::link_file_req_tasks_ = nullptr;
-
-class CompileTask::InputFileTask {
- public:
-  // Gets InputFileTask for the filename.
-  // If an InputFileTask for the same filename already exists, use the same
-  // InputFileTask.
-  static InputFileTask* NewInputFileTask(
-      WorkerThreadManager* wm,
-      std::unique_ptr<BlobClient::Uploader> blob_uploader,
-      FileHashCache* file_hash_cache,
-      const FileStat& file_stat,
-      const string& filename,
-      bool missed_content,
-      bool linking,
-      bool is_new_file,
-      const string& old_hash_key,
-      CompileTask* task,
-      ExecReq_Input* input) {
-    DCHECK(file::IsAbsolutePath(filename)) << filename;
-
-    absl::call_once(init_once_,
-                    &CompileTask::InputFileTask::InitializeStaticOnce);
-
-    InputFileTask* input_file_task = nullptr;
-    {
-      AUTOLOCK(lock, &global_mu_);
-      std::pair<std::unordered_map<string, InputFileTask*>::iterator, bool> p =
-          task_by_filename_->insert(std::make_pair(filename, input_file_task));
-      if (p.second) {
-        p.first->second = new InputFileTask(
-            wm, std::move(blob_uploader), file_hash_cache, file_stat,
-            filename, missed_content, linking, is_new_file, old_hash_key);
-      }
-      input_file_task = p.first->second;
-      DCHECK(input_file_task != nullptr);
-      input_file_task->SetTaskInput(task, input);
-    }
-    DCHECK_GT(input_file_task->num_tasks(), 0U);
-    VLOG(1) << task->trace_id_ << " start input "
-            << task->num_input_file_task_ << " " << filename;
-    task->StartInputFileTask();
-    return input_file_task;
-  }
-
-  void Run(CompileTask* task, OneshotClosure* closure) {
-    WorkerThread::ThreadId thread_id = task->thread_id_;
-    {
-      AUTOLOCK(lock, &mu_);
-      switch (state_) {
-        case INIT:  // first run.
-          state_ = RUN;
-          break;
-        case RUN:
-          VLOG(1) << task->trace_id() << " input running ("
-                  << tasks_.size() << " tasks)";
-          callbacks_.emplace_back(thread_id, closure);
-          return;
-        case DONE:
-          VLOG(1) << task->trace_id() << " input done";
-          wm_->RunClosureInThread(FROM_HERE, thread_id, closure,
-                                  WorkerThread::PRIORITY_LOW);
-          return;
-      }
-    }
-
-    if (missed_content_) {
-      LOG(INFO) << task->trace_id() << " (" << num_tasks() << " tasks)"
-                << " input " << filename_ << " [missed content]";
-    } else {
-      VLOG(1) << task->trace_id() << " (" << num_tasks() << " tasks)"
-              << " input " << filename_;
-    }
-    bool uploaded_in_side_channel = false;
-    // TODO: use string_view in file_hash_cache methods.
-    string hash_key = old_hash_key_;
-    if (need_to_compute_key()) {
-      VLOG(1) << task->trace_id()
-              << " (" << num_tasks() << " tasks)"
-              << " compute hash key:" << filename_
-              << " size:" << file_stat_.size;
-      success_ = blob_uploader_->ComputeKey();
-      if (success_) {
-        hash_key = blob_uploader_->hash_key();
-        new_cache_key_ = !file_hash_cache_->IsKnownCacheKey(hash_key);
-      }
-    }
-
-    if (need_to_upload_content(hash_key)) {
-      if (need_hash_only_ || file_stat_.size > 2*1024*1024) {
-        // upload in side channel.
-        LOG(INFO) << task->trace_id()
-                  << "(" << num_tasks() << " tasks)"
-                  << " upload:" << filename_
-                  << " size:" << file_stat_.size
-                  << " reason:" << upload_reason(hash_key);
-        success_ = blob_uploader_->Upload();
-        if (success_) {
-          uploaded_in_side_channel = true;
-        }
-      } else {
-        // upload embedded.
-        LOG(INFO) << task->trace_id()
-                  << " (" << num_tasks() << " tasks)"
-                  << " embed:" << filename_
-                  << " size:" << file_stat_.size
-                  << " reason:" << upload_reason(hash_key);
-        success_ = blob_uploader_->Embed();
-      }
-    } else if (file_stat_.size < 512) {
-      // For small size of file blob, embed it even if the copmile task
-      // requested hash key only.
-      LOG(INFO) << task->trace_id()
-                << " (" << num_tasks() << " tasks)"
-                << " embed:" << filename_
-                << " size:" << file_stat_.size
-                << " reason:small";
-      need_hash_only_ = false;
-      success_ = blob_uploader_->Embed();
-    } else {
-      VLOG(1) << task->trace_id()
-              << " (" << num_tasks() << " tasks)"
-              << " hash only:" << filename_
-              << " size:" << file_stat_.size
-              << " missed_content:" << missed_content_
-              << " is_new_file:" << is_new_file_
-              << " new_cache_key:" << new_cache_key_
-              << " success:" << success_;
-    }
-
-    if (!success_) {
-      LOG(WARNING) << task->trace_id()
-                   << " (" << num_tasks() << " tasks)"
-                   << " input file failed:" << filename_;
-    } else {
-      hash_key = blob_uploader_->hash_key();
-      CHECK(!hash_key.empty())
-          << task->trace_id()
-          << " (" << num_tasks() << " tasks)"
-          << " no hash key?" << filename_;
-      // Stores file cache key only if we have already uploaded the blob
-      // in side channel, or we assume the blob has already been uploaded
-      // since it's old enough.
-      // When we decide to upload the blob by embedding it to the request,
-      // we have to store file cache key after the compile request without no
-      // missing inputs error. If missing inputs error happens, it's safer to
-      // resend the blob since we might send the second request to
-      // the different cluster. That cluster might not have the cache.
-      // If blob is old enough, we assume that the file has already been
-      // uploaded. In that case, we register file hash id to
-      // |file_hash_cache_|.
-      // See b/11261931
-      //     b/12087209
-      if (uploaded_in_side_channel || !is_new_file_) {
-        // Set upload_timestamp_ms only if we have uploaded the content.
-        absl::optional<absl::Time> upload_timestamp_ms;
-        if (uploaded_in_side_channel) {
-          upload_timestamp_ms = absl::Now();
-        }
-        new_cache_key_ = file_hash_cache_->StoreFileCacheKey(
-            filename_, hash_key, upload_timestamp_ms, file_stat_);
-        VLOG(1) << task->trace_id() << " (" << num_tasks() << " tasks)"
-                << " input file ok: " << filename_
-                << (uploaded_in_side_channel ? " upload" : " hash only");
-      } else {
-        VLOG(1) << task->trace_id() << " (" << num_tasks() << " tasks)"
-                << " input file ok: " << filename_
-                << (new_cache_key_ ? " embedded upload"
-                    : " already uploaded");
-      }
-    }
-
-    {
-      AUTOLOCK(lock, &global_mu_);
-      std::unordered_map<string, InputFileTask*>::iterator found =
-          task_by_filename_->find(filename_);
-      DCHECK(found != task_by_filename_->end());
-      DCHECK(found->second == this);
-      task_by_filename_->erase(found);
-      VLOG(1) << task->trace_id() << " (" << num_tasks() << " tasks)"
-              << " clear task by filename" << filename_;
-    }
-    std::vector<std::pair<WorkerThread::ThreadId,
-                          OneshotClosure*>> callbacks;
-
-    {
-      AUTOLOCK(lock, &mu_);
-      DCHECK_EQ(RUN, state_);
-      state_ = DONE;
-      callbacks.swap(callbacks_);
-    }
-    wm_->RunClosureInThread(FROM_HERE, thread_id, closure,
-                            WorkerThread::PRIORITY_LOW);
-    for (const auto& callback : callbacks)
-      wm_->RunClosureInThread(FROM_HERE,
-                              callback.first, callback.second,
-                              WorkerThread::PRIORITY_LOW);
-  }
-
-  void Done(CompileTask* task) {
-    bool all_finished = false;
-    {
-      AUTOLOCK(lock, &mu_);
-      std::map<CompileTask*, ExecReq_Input*>::iterator found =
-          tasks_.find(task);
-      CHECK(found != tasks_.end());
-      tasks_.erase(found);
-      all_finished = tasks_.empty();
-    }
-    task->MaybeRunInputFileCallback(true);
-    if (all_finished)
-      delete this;
-  }
-
-  const string& filename() const { return filename_; }
-  bool missed_content() const { return missed_content_; }
-  bool need_hash_only() const { return need_hash_only_; }
-  const absl::optional<absl::Time>& mtime() const {
-    return file_stat_.mtime;
-  }
-  const SimpleTimer& timer() const { return timer_; }
-  ssize_t file_size() const { return file_stat_.size; }
-  const string& old_hash_key() const { return old_hash_key_; }
-  const string& hash_key() const { return blob_uploader_->hash_key(); }
-  bool success() const { return success_; }
-  bool new_cache_key() const { return new_cache_key_; }
-
-  size_t num_tasks() const {
-    AUTOLOCK(lock, &mu_);
-    return tasks_.size();
-  }
-
-  bool UpdateInputInTask(CompileTask* task) const {
-    ExecReq_Input* input = GetInputForTask(task);
-    CHECK(input != nullptr) << task->trace_id() << " filename:" << filename_;
-    return blob_uploader_->GetInput(input);
-  }
-
-  ExecReq_Input* GetInputForTask(CompileTask* task) const {
-    AUTOLOCK(lock, &mu_);
-    std::map<CompileTask*, ExecReq_Input*>::const_iterator found =
-        tasks_.find(task);
-    if (found != tasks_.end()) {
-      return found->second;
-    }
-    return nullptr;
-  }
-
-  bool need_to_compute_key() const {
-    if (need_to_upload_content(old_hash_key_)) {
-      // we'll calculate hash key during uploading.
-      return false;
-    }
-    return file_stat_.size >= 512;
-  }
-
-  bool need_to_upload_content(absl::string_view hash_key) const {
-    if (missed_content_) {
-      return true;
-    }
-    if (absl::EndsWith(filename_, ".rsp")) {
-      return true;
-    }
-    if (is_new_file_) {
-      if (new_cache_key_) {
-        return true;
-      }
-    }
-    if (old_hash_key_.empty()) {
-      // old file and first check. we assume the file was already uploaded.
-      return false;
-    }
-    return old_hash_key_ != hash_key;
-  }
-
-  const char* upload_reason(absl::string_view hash_key) const {
-    if (missed_content_) {
-      return "missed content";
-    }
-    if (absl::EndsWith(filename_, ".rsp")) {
-      return "rsp file";
-    }
-    if (is_new_file_) {
-      if (new_cache_key_) {
-        return "new file cache_key";
-      }
-    }
-    if (old_hash_key_.empty()) {
-      return "no need to upload - maybe already in cache.";
-    }
-    if (old_hash_key_ != hash_key) {
-      return "update cache_key";
-    }
-    return "no need to upload - cache_key matches";
-  }
-
-  const HttpClient::Status& http_status() const {
-    // TODO: blob_uploader should support this API?
-    return blob_uploader_->http_status();
-  }
-
- private:
-  enum State {
-    INIT,
-    RUN,
-    DONE,
-  };
-
-  InputFileTask(WorkerThreadManager* wm,
-                std::unique_ptr<BlobClient::Uploader> blob_uploader,
-                FileHashCache* file_hash_cache,
-                const FileStat& file_stat,
-                string filename,
-                bool missed_content,
-                bool linking,
-                bool is_new_file,
-                string old_hash_key)
-      : wm_(wm),
-        blob_uploader_(std::move(blob_uploader)),
-        file_hash_cache_(file_hash_cache),
-        file_stat_(file_stat),
-        filename_(std::move(filename)),
-        state_(INIT),
-        missed_content_(missed_content),
-        need_hash_only_(linking),  // we need hash key only in linking.
-        is_new_file_(is_new_file),
-        old_hash_key_(std::move(old_hash_key)),
-        success_(false),
-        new_cache_key_(false) {
-    timer_.Start();
-  }
-  ~InputFileTask() {
-    CHECK(tasks_.empty());
-  }
-
-  void SetTaskInput(CompileTask* task, ExecReq_Input* input) {
-    AUTOLOCK(lock, &mu_);
-    tasks_.insert(std::make_pair(task, input));
-  }
-
-  static void InitializeStaticOnce() {
-    AUTOLOCK(lock, &global_mu_);
-    task_by_filename_ = new std::unordered_map<string, InputFileTask*>;
-  }
-
-  WorkerThreadManager* wm_;
-  std::unique_ptr<BlobClient::Uploader> blob_uploader_;
-  FileHashCache* file_hash_cache_;
-  const FileStat file_stat_;
-
-  const string filename_;
-  State state_;
-
-  mutable Lock mu_;
-  std::map<CompileTask*, ExecReq_Input*> tasks_ GUARDED_BY(mu_);
-  std::vector<std::pair<WorkerThread::ThreadId, OneshotClosure*>>
-      callbacks_ GUARDED_BY(mu_);
-
-  // true if goma servers couldn't find the content, so we must upload it.
-  const bool missed_content_;
-
-  // true if we'll use hash key only in ExecReq to prevent from bloating it.
-  // false to embed content in ExecReq.
-  bool need_hash_only_;
-
-  // true if the file is considered as new file, so the file might not be
-  // in goma cache yet.
-  // false means the file is old enough, so we could think someone else already
-  // uploaded the content in goma cache.
-  const bool is_new_file_;
-
-  // hash key stored in file_hash_cache.
-  const string old_hash_key_;
-
-  SimpleTimer timer_;
-
-  // true if goma file ops is succeeded.
-  bool success_;
-
-  // true if the hash_key_ is first inserted in file hash cache.
-  bool new_cache_key_;
-
-  static absl::once_flag init_once_;
-
-  static Lock global_mu_;
-  static std::unordered_map<string, InputFileTask*>* task_by_filename_
-      GUARDED_BY(global_mu_);
-
-  DISALLOW_COPY_AND_ASSIGN(InputFileTask);
-};
-
-absl::once_flag CompileTask::InputFileTask::init_once_;
-Lock CompileTask::InputFileTask::global_mu_;
-
-std::unordered_map<string, CompileTask::InputFileTask*>*
-    CompileTask::InputFileTask::task_by_filename_;
 
 // Returns true if all outputs are FILE blob (so no need of further http_rpc).
 bool IsOutputFileEmbedded(const ExecResult& result) {
@@ -661,178 +291,6 @@ bool IsOutputFileEmbedded(const ExecResult& result) {
   return true;
 }
 
-// TODO: move to BlobClient::Downloader?
-struct CompileTask::OutputFileInfo {
-  OutputFileInfo() : mode(0666), size(0) {}
-  // actual output filename.
-  string filename;
-  // file mode/permission.
-  int mode;
-
-  size_t size;
-
-  // tmp_filename is filename written by OutputFileTask.
-  // tmp_filename may be the same as output filename (when !need_rename), or
-  // rename it to real output filename in CommitOutput().
-  // if tmp file was not written in OutputFileTask, because it holds content
-  // in content field, tmp_filename will be "".
-  string tmp_filename;
-
-  // hash_key is hash of output filename. It will be stored in file hash cache
-  // once output file is committed.
-  // TODO: fix this to support cas digest.
-  string hash_key;
-
-  // content is output content.
-  // it is used to hold output content in memory while output file task.
-  // it will be used iff tmp_filename == "".
-  string content;
-};
-
-class CompileTask::OutputFileTask {
- public:
-  // Doesn't take ownership of |info|.
-  OutputFileTask(WorkerThreadManager* wm,
-                 std::unique_ptr<BlobClient::Downloader> blob_downloader,
-                 CompileTask* task,
-                 int output_index,
-                 const ExecResult_Output& output,
-                 OutputFileInfo* info)
-      : wm_(wm),
-        thread_id_(wm->GetCurrentThreadId()),
-        blob_downloader_(std::move(blob_downloader)),
-        task_(task),
-        output_index_(output_index),
-        output_(output),
-        output_size_(output.blob().file_size()),
-        info_(info),
-        success_(false) {
-    timer_.Start();
-    task_->StartOutputFileTask();
-  }
-  ~OutputFileTask() {
-    task_->MaybeRunOutputFileCallback(output_index_, true);
-  }
-
-  void Run(OneshotClosure* closure) {
-    VLOG(1) << task_->trace_id() << " output " << info_->filename;
-    if (info_->tmp_filename.empty()) {
-      success_ = blob_downloader_->DownloadInBuffer(output_, &info_->content);
-    } else {
-      // TODO: We might want to restrict paths this program may write?
-      success_ =
-          blob_downloader_->Download(output_, info_->tmp_filename, info_->mode);
-    }
-    if (success_) {
-      // TODO: fix to support cas digest.
-      info_->hash_key = FileServiceClient::ComputeHashKey(output_.blob());
-    } else {
-      LOG(WARNING) << task_->trace_id()
-                   << " " << (task_->cache_hit() ? "cached" : "no-cached")
-                   << " output file failed:" << info_->filename;
-    }
-    wm_->RunClosureInThread(FROM_HERE, thread_id_, closure,
-                            WorkerThread::PRIORITY_LOW);
-  }
-
-  CompileTask* task() const { return task_; }
-  const ExecResult_Output& output() const { return output_; }
-  const SimpleTimer& timer() const { return timer_; }
-  bool success() const { return success_; }
-  bool IsInMemory() const {
-    return info_->tmp_filename.empty();
-  }
-
-  int num_rpc() const {
-    // TODO: need this?
-    return blob_downloader_->num_rpc();
-  }
-  const HttpClient::Status& http_status() const {
-    // TODO: blob_uploader should support this API?
-    return blob_downloader_->http_status();
-  }
-
- private:
-  WorkerThreadManager* wm_;
-  WorkerThread::ThreadId thread_id_;
-  std::unique_ptr<BlobClient::Downloader> blob_downloader_;
-  CompileTask* task_;
-  int output_index_;
-  const ExecResult_Output& output_;
-  size_t output_size_;
-  OutputFileInfo* info_;
-  SimpleTimer timer_;
-  bool success_;
-
-  DISALLOW_COPY_AND_ASSIGN(OutputFileTask);
-};
-
-class CompileTask::LocalOutputFileTask {
- public:
-  LocalOutputFileTask(WorkerThreadManager* wm,
-                      std::unique_ptr<BlobClient::Uploader> blob_uploader,
-                      FileHashCache* file_hash_cache,
-                      const FileStat& file_stat,
-                      CompileTask* task,
-                      string filename)
-      : wm_(wm),
-        thread_id_(wm_->GetCurrentThreadId()),
-        blob_uploader_(std::move(blob_uploader)),
-        file_hash_cache_(file_hash_cache),
-        file_stat_(file_stat),
-        task_(task),
-        filename_(std::move(filename)),
-        success_(false) {
-    timer_.Start();
-    task_->StartLocalOutputFileTask();
-  }
-  ~LocalOutputFileTask() {
-    task_->MaybeRunLocalOutputFileCallback(true);
-  }
-
-  void Run(OneshotClosure* closure) {
-    // Store hash_key of output file.  This file would be used in link phase.
-    VLOG(1) << task_->trace_id() << " local output " << filename_;
-    success_ = blob_uploader_->Upload();
-    if (success_) {
-      string hash_key = blob_uploader_->hash_key();
-      bool new_cache_key = file_hash_cache_->StoreFileCacheKey(
-          filename_, hash_key, absl::Now(), file_stat_);
-      if (new_cache_key) {
-        LOG(INFO) << task_->trace_id()
-                  << " local output store:" << filename_
-                  << " size=" << file_stat_.size;
-        success_ = blob_uploader_->Store();
-      }
-    }
-    if (!success_) {
-      LOG(WARNING) << task_->trace_id()
-                   << " local output read failed:" << filename_;
-    }
-    wm_->RunClosureInThread(FROM_HERE, thread_id_, closure,
-                            WorkerThread::PRIORITY_LOW);
-  }
-
-  CompileTask* task() const { return task_; }
-  const string& filename() const { return filename_; }
-  const SimpleTimer& timer() const { return timer_; }
-  const FileStat& file_stat() const { return file_stat_; }
-  bool success() const { return success_; }
-
- private:
-  WorkerThreadManager* wm_;
-  WorkerThread::ThreadId thread_id_;
-  std::unique_ptr<BlobClient::Uploader> blob_uploader_;
-  FileHashCache* file_hash_cache_;
-  const FileStat file_stat_;
-  CompileTask* task_;
-  const string filename_;
-  SimpleTimer timer_;
-  bool success_;
-
-  DISALLOW_COPY_AND_ASSIGN(LocalOutputFileTask);
-};
-
 /* static */
 void CompileTask::InitializeStaticOnce() {
   AUTOLOCK(lock, &global_mu_);
@@ -842,45 +300,11 @@ void CompileTask::InitializeStaticOnce() {
 CompileTask::CompileTask(CompileService* service, int id)
     : service_(service),
       id_(id),
-      rpc_(nullptr),
       caller_thread_id_(service->wm()->GetCurrentThreadId()),
-      done_(nullptr),
       stats_(new CompileStats),
-      response_code_(0),
-      state_(INIT),
-      abort_(false),
-      finished_(false),
       req_(new ExecReq),
-      linking_(false),
-      precompiling_(false),
-      compiler_type_specific_(nullptr),
-      gomacc_pid_(SubProcessState::kInvalidPid),
-      canceled_(false),
       resp_(new ExecResp),
-      exit_status_(0),
-      http_rpc_status_(absl::make_unique<HttpRPC::Status>()),
-      delayed_setup_subproc_(nullptr),
-      subproc_(nullptr),
-      subproc_weight_(SubProcessReq::LIGHT_WEIGHT),
-      subproc_exit_status_(0),
-      want_fallback_(false),
-      should_fallback_(false),
-      verify_output_(false),
-      fail_fallback_(false),
-      local_run_(false),
-      local_killed_(false),
-      depscache_used_(false),
-      gomacc_revision_mismatched_(false),
-      replied_(false),
-      input_file_callback_(nullptr),
-      num_input_file_task_(0),
-      input_file_success_(false),
-      output_file_callback_(nullptr),
-      num_output_file_task_(0),
-      output_file_success_(false),
-      local_output_file_callback_(nullptr),
-      num_local_output_file_task_(0),
-      refcnt_(0) {
+      http_rpc_status_(absl::make_unique<HttpRPC::Status>()) {
   thread_id_ = GetCurrentThreadId();
   absl::call_once(init_once_, InitializeStaticOnce);
   Ref();
@@ -908,8 +332,8 @@ void CompileTask::Deref() {
     delete this;
 }
 
-void CompileTask::Init(CompileService::RpcController* rpc,
-                       const ExecReq& req,
+void CompileTask::Init(RpcController* rpc,
+                       std::unique_ptr<ExecReq> req,
                        ExecResp* resp,
                        OneshotClosure* done) {
   VLOG(1) << trace_id_ << " init";
@@ -919,11 +343,13 @@ void CompileTask::Init(CompileService::RpcController* rpc,
   rpc_ = rpc;
   rpc_resp_ = resp;
   done_ = done;
-  *req_ = req;
+  req_ = std::move(req);
 #ifdef _WIN32
-  pathext_ = GetEnvFromEnvIter(req.env().begin(), req.env().end(), "PATHEXT",
-                               true);
+  pathext_ = GetEnvFromEnvIter(
+      req_->env().begin(), req_->env().end(), "PATHEXT", true);
 #endif
+
+  requester_info_ = req_->requester_info();
 }
 
 void CompileTask::Start() {
@@ -957,6 +383,9 @@ void CompileTask::Start() {
   }
 #endif
   CopyEnvFromRequest();
+
+  gomacc_pid_ = requester_info_.pid();
+
   InitCompilerFlags();
   if (flags_.get() == nullptr) {
     LOG(ERROR) << trace_id_ << " Start error: CompilerFlags is nullptr";
@@ -1041,7 +470,8 @@ void CompileTask::Start() {
     ProcessFinished("fail to find local compiler");
     return;
   }
-  VLOG(1) << "local_compiler:" << req_->command_spec().local_compiler_path();
+  VLOG(1) << trace_id_
+          << " local_compiler:" << req_->command_spec().local_compiler_path();
   local_compiler_path_ = req_->command_spec().local_compiler_path();
 
   verify_output_ = ShouldVerifyOutput();
@@ -1255,19 +685,21 @@ void CompileTask::ProcessFileRequest() {
           << " start processing of input files "
           << required_files_.size();
 
-  std::set<string> missed_content_files;
+  absl::flat_hash_set<string> missed_content_files;
   for (const auto& filename : resp_->missing_input()) {
     missed_content_files.insert(filename);
     VLOG(2) << trace_id_ << " missed content: " << filename;
-    if (interleave_uploaded_files_.find(filename) !=
-        interleave_uploaded_files_.end()) {
+    if (interleave_uploaded_files_.contains(filename)) {
       LOG(WARNING) << trace_id_ << " interleave-uploaded file missing:"
                    << filename;
     }
   }
 
   // InputFileTask assumes that filename is unique in single compile task.
-  RemoveDuplicateFiles(flags_->cwd(), &required_files_);
+  std::vector<string> removed_files;
+  RemoveDuplicateFiles(flags_->cwd(), &required_files_, &removed_files);
+  LOG_IF(INFO, !removed_files.empty())
+      << trace_id_ << " de-duplicated:" << removed_files;
 
   // TODO: We don't need to clear the input when we are retrying.
   req_->clear_input();
@@ -1282,8 +714,7 @@ void CompileTask::ProcessFileRequest() {
     input->set_filename(filename);
     const std::string abs_filename =
         file::JoinPathRespectAbsolute(flags_->cwd(), filename);
-    bool missed_content =
-        missed_content_files.find(filename) != missed_content_files.end();
+    bool missed_content = missed_content_files.contains(filename);
     absl::optional<absl::Time> mtime;
     string hash_key;
     bool hash_key_is_ok = false;
@@ -1321,9 +752,8 @@ void CompileTask::ProcessFileRequest() {
         abs_filename, missed_timestamp, input_file_stat, &hash_key);
     if (missed_content) {
       if (hash_key_is_ok) {
-        VLOG(2) << trace_id_ << " interleave uploaded: "
-                << " filename=" << abs_filename;
-        // TODO: warn if interleave uploaded file is missing.
+        LOG(INFO) << trace_id_ << " interleave uploaded: "
+                  << " filename=" << abs_filename;
         interleave_uploaded_files_.insert(filename);
       } else {
         LOG(INFO) << trace_id_ << " missed content:" << abs_filename;
@@ -1591,28 +1021,15 @@ void CompileTask::ProcessCallExecDone() {
                          resp_->cache_hit() != ExecResp::NO_CACHE));
 
   if (stats_->cache_hit()) {
-    if (!resp_->has_cache_hit()) {
-      // for old backends.
-      stats_->set_cache_source(ExecLog::UNKNOWN_CACHE);
+    if (resp_->cache_hit() == ExecResp::NO_CACHE) {
+      LOG(ERROR) << trace_id_ << " cache_hit, but NO_CACHE";
     } else {
-      switch (resp_->cache_hit()) {
-        case ExecResp::NO_CACHE:
-          LOG(ERROR) << trace_id_ << " cache_hit, but NO_CACHE";
-          break;
-        case ExecResp::MEM_CACHE:
-          stats_->set_cache_source(ExecLog::MEM_CACHE);
-          break;
-        case ExecResp::STORAGE_CACHE:
-          stats_->set_cache_source(ExecLog::STORAGE_CACHE);
-          break;
-        case ExecResp::LOCAL_OUTPUT_CACHE:
-          stats_->set_cache_source(ExecLog::LOCAL_OUTPUT_CACHE);
-          break;
-        default:
-          LOG(ERROR) << trace_id_ << " unknown cache_source="
-                     << resp_->cache_hit();
-          stats_->set_cache_source(ExecLog::UNKNOWN_CACHE);
+      auto cache_source = CompileStats::GetCacheSourceFromExecResp(*resp_);
+      if (cache_source == ExecLog::UNKNOWN_CACHE) {
+        LOG(ERROR) << trace_id_
+                   << " unknown cache_source=" << resp_->cache_hit();
       }
+      stats_->set_cache_source(cache_source);
     }
   }
 
@@ -1629,33 +1046,8 @@ void CompileTask::ProcessCallExecDone() {
     return;
   }
 
-  if (!http_rpc_status_->enabled) {
-    stats_->set_network_failure_type(ExecLog::DISABLED);
-  } else if (http_rpc_status_->err == 0) {
-    stats_->set_network_failure_type(ExecLog::NO_NETWORK_ERROR);
-  } else {   // i.e. http_rpc_status_->err != 0.
-    stats_->set_network_failure_type(ExecLog::UNKNOWN_NETWORK_ERROR);
-    switch (http_rpc_status_->state) {
-      case HttpClient::Status::INIT:  FALLTHROUGH_INTENDED;
-      case HttpClient::Status::PENDING:
-        stats_->set_network_failure_type(ExecLog::CONNECT_FAILED);
-        break;
-      case HttpClient::Status::SENDING_REQUEST:
-        stats_->set_network_failure_type(ExecLog::SEND_FAILED);
-        break;
-      case HttpClient::Status::REQUEST_SENT:
-        stats_->set_network_failure_type(ExecLog::TIMEDOUT_AFTER_SEND);
-        break;
-      case HttpClient::Status::RECEIVING_RESPONSE:
-        stats_->set_network_failure_type(ExecLog::RECEIVE_FAILED);
-        break;
-      case HttpClient::Status::RESPONSE_RECEIVED:
-        if (http_rpc_status_->http_return_code != 200) {
-          stats_->set_network_failure_type(ExecLog::BAD_HTTP_STATUS_CODE);
-        }
-        break;
-    }
-  }
+  stats_->set_network_failure_type(
+      CompileStats::GetNetworkFailureTypeFromHttpStatus(*http_rpc_status_));
 
   const int err = http_rpc_status_->err;
   if (err < 0) {
@@ -1814,8 +1206,7 @@ void CompileTask::ProcessFileResponse() {
     for (const auto& filename : resp_->missing_input()) {
       std::ostringstream ss;
       ss << "Required file not on goma cache:" << filename;
-      if (interleave_uploaded_files_.find(filename)
-          != interleave_uploaded_files_.end()) {
+      if (interleave_uploaded_files_.contains(filename)) {
         ss << " (interleave uploaded)";
       }
       AddErrorToResponse(TO_LOG, ss.str(), true);
@@ -1891,7 +1282,7 @@ void CompileTask::ProcessFileResponse() {
     }
   }
 
-  exec_output_file_.clear();
+  exec_output_files_.clear();
   ClearOutputFile();
   output_file_.resize(resp_->result().output_size());
   SetOutputFileCallback();
@@ -1900,7 +1291,7 @@ void CompileTask::ProcessFileResponse() {
     const string& output_filename = resp_->result().output(i).filename();
     CheckOutputFilename(output_filename);
 
-    exec_output_file_.push_back(output_filename);
+    exec_output_files_.push_back(output_filename);
     string filename = file::JoinPathRespectAbsolute(
         stats_->cwd(), output_filename);
     // TODO: check output paths matches with flag's output filenames?
@@ -2759,7 +2150,8 @@ void CompileTask::ProcessLocalFileOutput() {
     bool found_in_cache = service_->file_hash_cache()->GetFileCacheKey(
         filename, absl::nullopt, output_file_stat, &hash_key);
     if (found_in_cache) {
-      VLOG(1) << "file:" << filename << " already on cache: " << hash_key;
+      VLOG(1) << trace_id_ << " file:" << filename
+              << " already on cache: " << hash_key;
       continue;
     }
     LOG(INFO) << trace_id_ << " local output:" << filename;
@@ -2871,7 +2263,8 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
   }
   if (gomacc_pid_ != SubProcessState::kInvalidPid)
     (*root)["pid"] = gomacc_pid_;
-  if (!flag_dump_.empty()) (*root)["flag"] = flag_dump_;
+  if (!flag_dump_.empty())
+    (*root)["command"] = flag_dump_;
   (*root)["state"] = StateName(state_);
   if (abort_) (*root)["abort"] = 1;
   if (subproc_pid != static_cast<pid_t>(SubProcessState::kInvalidPid)) {
@@ -2880,7 +2273,8 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
     (*root)["subproc_pid"] = Json::Value::Int64(subproc_pid);
   }
   // for task color.
-  if (response_code_) (*root)["http"] = response_code_;
+  if (response_code_)
+    (*root)["http_status"] = response_code_;
   if (fail_fallback_) (*root)["fail_fallback"]= 1;
   if (canceled_)
     (*root)["canceled"] = 1;
@@ -2903,12 +2297,12 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
       }
     }
 
-    if (exec_output_file_.size() > 0) {
-      Json::Value exec_output_file(Json::arrayValue);
-      for (size_t i = 0; i < exec_output_file_.size(); ++i) {
-        exec_output_file.append(exec_output_file_[i]);
+    if (exec_output_files_.size() > 0) {
+      Json::Value exec_output_files(Json::arrayValue);
+      for (size_t i = 0; i < exec_output_files_.size(); ++i) {
+        exec_output_files.append(exec_output_files_[i]);
       }
-      (*root)["exec_output_file"] = exec_output_file;
+      (*root)["exec_output_files"] = exec_output_files;
     }
     if (!resp_cache_key_.empty())
       (*root)["cache_key"] = resp_cache_key_;
@@ -2927,13 +2321,11 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
     if (!stderr_.empty())
       (*root)["stderr"] = stderr_;
 
-    Json::Value inputs(Json::arrayValue);
-    for (std::set<string>::const_iterator iter = required_files_.begin();
-         iter != required_files_.end();
-         ++iter) {
-      inputs.append(*iter);
+    Json::Value input_files(Json::arrayValue);
+    for (const auto& file : required_files_) {
+      input_files.append(file);
     }
-    (*root)["inputs"] = inputs;
+    (*root)["input_files"] = input_files;
 
     if (system_library_paths_.size() > 0) {
       Json::Value system_library_paths(Json::arrayValue);
@@ -2955,55 +2347,6 @@ void CompileTask::CopyEnvFromRequest() {
   requester_env_ = req_->requester_env();
   want_fallback_ = requester_env_.fallback();
   req_->clear_requester_env();
-
-  for (const auto& arg : req_->arg())
-    stats_->add_arg(arg);
-  for (const auto& env : req_->env())
-    stats_->add_env(env);
-  stats_->set_cwd(req_->cwd());
-
-  gomacc_pid_ = req_->requester_info().pid();
-
-  if (service_->CanSendUserInfo()) {
-    if (!service_->username().empty())
-      req_->mutable_requester_info()->set_username(service_->username());
-    stats_->set_username(req_->requester_info().username());
-    stats_->set_nodename(service_->nodename());
-  }
-  if (req_->requester_info().has_build_id()) {
-    stats_->set_build_id(req_->requester_info().build_id());
-    LOG(INFO) << trace_id_ << " build_id:" << req_->requester_info().build_id();
-  }
-  req_->mutable_requester_info()->set_compiler_proxy_id(
-      GenerateCompilerProxyId());
-
-  // TODO: Is here the best position to set these requester info?
-  // pathtype/dimension might be changed after compiler_proxy understand the
-  // compile request well.
-#ifdef _WIN32
-  req_->mutable_requester_info()->add_dimensions("os:win");
-  req_->mutable_requester_info()->set_path_style(RequesterInfo::WINDOWS_STYLE);
-#elif defined(__MACH__)
-  req_->mutable_requester_info()->add_dimensions("os:mac");
-  req_->mutable_requester_info()->set_path_style(RequesterInfo::POSIX_STYLE);
-#elif defined(__linux__)
-  req_->mutable_requester_info()->add_dimensions("os:linux");
-  req_->mutable_requester_info()->set_path_style(RequesterInfo::POSIX_STYLE);
-#else
-#error "unsupported platform"
-#endif
-
-  stats_->set_port(rpc_->server_port());
-  // TODO: Convert field to protobuf/timestamp.
-  stats_->set_compiler_proxy_start_time(absl::ToTimeT(service_->start_time()));
-  stats_->set_task_id(id_);
-  requester_info_ = req_->requester_info();
-}
-
-string CompileTask::GenerateCompilerProxyId() const {
-  std::ostringstream s;
-  s << service_->compiler_proxy_id_prefix() << id_;
-  return s.str();
 }
 
 void CompileTask::InitCompilerFlags() {
@@ -3025,35 +2368,11 @@ void CompileTask::InitCompilerFlags() {
   } else if (flags_->type() == CompilerFlagType::Clexe) {
     // TODO: check linking_ etc.
   } else if (flags_->type() == CompilerFlagType::ClangTidy) {
-    // Sets the actual gcc_flags for clang_tidy_flags here.
-    ClangTidyFlags& clang_tidy_flags = static_cast<ClangTidyFlags&>(*flags_);
-    if (clang_tidy_flags.input_filenames().size() != 1) {
-      LOG(WARNING) << trace_id_ << " Input file is not unique.";
-      clang_tidy_flags.set_is_successful(false);
-      return;
-    }
-    const string& input_file = clang_tidy_flags.input_filenames()[0];
-    const string input_file_abs =
-        file::JoinPathRespectAbsolute(clang_tidy_flags.cwd(), input_file);
-    string compdb_path = CompilationDatabaseReader::FindCompilationDatabase(
-      clang_tidy_flags.build_path(), file::Dirname(input_file_abs));
+    InitClangTidyFlags(static_cast<ClangTidyFlags*>(flags_.get()));
+  }
 
-    std::vector<string> clang_args;
-    string build_dir;
-    if (!CompilationDatabaseReader::MakeClangArgs(clang_tidy_flags,
-                                                  compdb_path,
-                                                  &clang_args,
-                                                  &build_dir)) {
-      // Failed to make clang args. Then Mark CompilerFlags unsuccessful.
-      LOG(WARNING) << trace_id_
-                   << " Failed to make clang args. local fallback.";
-      clang_tidy_flags.set_is_successful(false);
-      return;
-    }
-
-    DCHECK(!build_dir.empty());
-    clang_tidy_flags.SetCompilationDatabasePath(compdb_path);
-    clang_tidy_flags.SetClangArgs(clang_args, build_dir);
+  if (!flags_->is_successful()) {
+    LOG(WARNING) << trace_id_ << " " << flags_->fail_message();
   }
 }
 
@@ -3096,13 +2415,14 @@ bool CompileTask::FindLocalCompilerPath() {
 
   if (!requester_env_.has_local_path() ||
       requester_env_.local_path().empty()) {
-    LOG(ERROR) << "no PATH in requester env." << requester_env_.DebugString();
+    LOG(ERROR) << trace_id_ << " no PATH in requester env."
+               << requester_env_.DebugString();
     AddErrorToResponse(TO_USER,
                        "no PATH in requester env.  Using old gomacc?", true);
     return false;
   }
   if (!requester_env_.has_gomacc_path()) {
-    LOG(ERROR) << "no gomacc path in requester env."
+    LOG(ERROR) << trace_id_ << " no gomacc path in requester env."
                << requester_env_.DebugString();
     AddErrorToResponse(TO_USER,
                        "no gomacc in requester env.  Using old gomacc?", true);
@@ -3546,7 +2866,8 @@ bool CompileTask::MakeWeakRelativeInArgv() {
   // whether ./path/to/output or $TMP/path/to/output.
   // If latter, make the path relative would produce wrong output file.
   if (HasPrefixDir(req_->cwd(), "/tmp") || HasPrefixDir(req_->cwd(), "/var")) {
-    LOG(WARNING) << "GOMA_USE_RELATIVE_PATHS_IN_ARGV=true, but cwd may be "
+    LOG(WARNING) << trace_id_
+                 << " GOMA_USE_RELATIVE_PATHS_IN_ARGV=true, but cwd may be "
                  << "under temp directory: " << req_->cwd() << ". "
                  << "Use original args.";
     orig_flag_dump_ = "";
@@ -3559,7 +2880,7 @@ bool CompileTask::MakeWeakRelativeInArgv() {
       ToCxxCompilerInfo(compiler_info_state_.get()->info()));
   for (size_t i = 0; i < parsed_args.size(); ++i) {
     if (req_->arg(i) != parsed_args[i]) {
-      VLOG(1) << "Arg[" << i << "]: " << req_->arg(i) << " => "
+      VLOG(1) << trace_id_ << " Arg[" << i << "]: " << req_->arg(i) << " => "
               << parsed_args[i];
       req_->set_arg(i, parsed_args[i]);
       changed = true;
@@ -3568,7 +2889,7 @@ bool CompileTask::MakeWeakRelativeInArgv() {
   }
   flag_dump_ = ss.str();
   if (!changed) {
-    VLOG(1) << "GOMA_USE_RELATIVE_PATHS_IN_ARGV=true, "
+    VLOG(1) << trace_id_ << " GOMA_USE_RELATIVE_PATHS_IN_ARGV=true, "
             << "but no argv changed";
     orig_flag_dump_ = "";
   }
@@ -3764,7 +3085,8 @@ void CompileTask::MayFixSubprogramSpec(
   }
   for (const auto& info : compiler_info_state_.get()->info().subprograms()) {
     if (!used_subprogram_name.insert(info.abs_path).second) {
-      LOG(ERROR) << "The same subprogram is added twice.  Ignoring."
+      LOG(ERROR) << trace_id_
+                 << " The same subprogram is added twice.  Ignoring."
                  << " info.abs_path=" << info.abs_path
                  << " info.hash=" << info.hash;
       continue;
@@ -3806,7 +3128,7 @@ struct CompileTask::IncludeProcessorResponseParam {
 };
 
 void CompileTask::StartIncludeProcessor() {
-  VLOG(1) << "StartIncludeProcessor";
+  VLOG(1) << trace_id_ << " StartIncludeProcessor";
   CHECK_EQ(SETUP, state_);
 
   // TODO: DepsCache should be able to support multiple input files,
@@ -3848,7 +3170,7 @@ void CompileTask::StartIncludeProcessor() {
 
 void CompileTask::RunIncludeProcessor(
     std::unique_ptr<IncludeProcessorRequestParam> request_param) {
-  VLOG(1) << "RunIncludeProcessor";
+  VLOG(1) << trace_id_ << " RunIncludeProcessor";
   DCHECK(compiler_info_state_.get() != nullptr);
 
   // Pass ownership temporary to IncludeProcessor thread.
@@ -3905,7 +3227,7 @@ void CompileTask::RunIncludeProcessor(
 
 void CompileTask::RunIncludeProcessorDone(
     std::unique_ptr<IncludeProcessorResponseParam> response_param) {
-  VLOG(1) << "RunIncludeProcessorDone";
+  VLOG(1) << trace_id_ << " RunIncludeProcessorDone";
   DCHECK(BelongsToCurrentThread());
   DCHECK(response_param->file_stat_cache.get() != nullptr);
 
@@ -4224,12 +3546,12 @@ void CompileTask::CheckCommandSpec() {
     std::ostringstream error_message;
     bool set_error = false;
 
-    std::set<string> remote_hashes;
+    absl::flat_hash_set<string> remote_hashes;
     for (const auto& subprog : resp_->result().subprogram()) {
       remote_hashes.insert(subprog.binary_hash());
     }
     for (const auto& subprog : req_->subprogram()) {
-      if (remote_hashes.find(subprog.binary_hash()) != remote_hashes.end()) {
+      if (remote_hashes.contains(subprog.binary_hash())) {
         continue;
       }
       std::ostringstream ss;
@@ -4406,7 +3728,7 @@ void CompileTask::CheckOutputFilename(const string& filename) {
   if (filename[0] == '/') {
     if (HasPrefixDir(filename, service_->tmp_dir()) ||
         HasPrefixDir(filename, "/var")) {
-      VLOG(1) << "Output to temp directory:" << filename;
+      VLOG(1) << trace_id_ << " Output to temp directory:" << filename;
     } else if (service_->use_relative_paths_in_argv()) {
       // If FLAGS_USE_RELATIVE_PATHS_IN_ARGV is false, output path may be
       // absolute path specified by -o or so.
@@ -4414,8 +3736,7 @@ void CompileTask::CheckOutputFilename(const string& filename) {
       Json::Value json;
       DumpToJson(true, &json);
       LOG(ERROR) << trace_id_ << " " << json;
-      LOG(FATAL) << "Absolute output filename:"
-                 << filename;
+      LOG(FATAL) << trace_id_ << " Absolute output filename:" << filename;
     }
   }
 }
@@ -4440,10 +3761,12 @@ void CompileTask::OutputFileTaskFinished(
     return;
   }
   if (!output_file_task->success()) {
-    AddErrorToResponse(TO_LOG,
-                       "Failed to write file blob:" + filename + " (" +
-                       (cache_hit() ? "cached" : "no-cached") + ")",
-                       true);
+    AddErrorToResponse(
+        TO_LOG,
+        "Failed to download file blob:" + filename + " (" +
+            (cache_hit() ? "cached" : "no-cached") +
+            "): http err:" + output_file_task->http_status().err_message,
+        true);
     output_file_success_ = false;
 
     // If it fails to write file, goma has ExecResult in cache but might
@@ -4466,22 +3789,11 @@ void CompileTask::OutputFileTaskFinished(
       << " num_rpc=" << output_file_task->num_rpc()
       << " in_memory=" << output_file_task->IsInMemory() << " in "
       << output_file_time;
-  stats_->add_output_file_time(DurationToIntMs(output_file_time));
   LOG_IF(WARNING,
          output.blob().blob_type() != FileBlob::FILE &&
          output.blob().blob_type() != FileBlob::FILE_META)
       << "Invalid blob type: " << output.blob().blob_type();
-  stats_->add_output_file_size(output.blob().file_size());
-  stats_->output_file_rpc += output_file_task->num_rpc();
-  const HttpClient::Status& http_status = output_file_task->http_status();
-  stats_->add_chunk_resp_size(http_status.resp_size);
-  stats_->output_file_rpc_req_build_time += http_status.req_build_time;
-  stats_->output_file_rpc_req_send_time += http_status.req_send_time;
-  stats_->output_file_rpc_wait_time += http_status.wait_time;
-  stats_->output_file_rpc_resp_recv_time += http_status.resp_recv_time;
-  stats_->output_file_rpc_resp_parse_time += http_status.resp_parse_time;
-  stats_->output_file_rpc_size += http_status.resp_size;
-  stats_->output_file_rpc_raw_size += http_status.raw_resp_size;
+  stats_->AddStatsFromOutputFileTask(*output_file_task);
 }
 
 void CompileTask::MaybeRunOutputFileCallback(int index, bool task_finished) {
@@ -4512,9 +3824,8 @@ bool CompileTask::VerifyOutput(
     const string& local_output_path,
     const string& goma_output_path) {
   CHECK_EQ(FILE_RESP, state_);
-  LOG(INFO) << "Verify Output: "
-            << " local:" << local_output_path
-            << " goma:" << goma_output_path;
+  LOG(INFO) << trace_id_ << " Verify Output: "
+            << " local:" << local_output_path << " goma:" << goma_output_path;
   std::ostringstream error_message;
   static const int kSize = 1024;
   char local_buf[kSize];
@@ -4568,7 +3879,7 @@ bool CompileTask::VerifyOutput(
       AddErrorToResponse(TO_USER, error_message.str(), true);
       return false;
     }
-    VLOG(2) << "len:" << len << "+" << local_len;
+    VLOG(2) << trace_id_ << " len:" << len << "+" << local_len;
   }
   return true;
 }
@@ -4760,7 +4071,7 @@ void CompileTask::SetupSubProcess() {
     req->add_env(env);
   }
   if (local_path_.empty()) {
-    LOG(WARNING) << "Empty PATH: " << req_->DebugString();
+    LOG(WARNING) << trace_id_ << " Empty PATH: " << req_->DebugString();
   } else {
     req->add_env("PATH=" + local_path_);
   }
@@ -4768,7 +4079,7 @@ void CompileTask::SetupSubProcess() {
   req->add_env("TMP=" + service_->tmp_dir());
   req->add_env("TEMP=" + service_->tmp_dir());
   if (pathext_.empty()) {
-    LOG(WARNING) << "Empty PATHEXT: " << req_->DebugString();
+    LOG(WARNING) << trace_id_ << " Empty PATHEXT: " << req_->DebugString();
   } else {
     req->add_env("PATHEXT=" + pathext_);
   }
@@ -4790,7 +4101,8 @@ void CompileTask::RunSubProcess(const string& reason) {
   }
   stats_->set_local_run_reason(reason);
   subproc_->RequestRun();
-  VLOG(1) << "Run " << reason << " " << subproc_->req().DebugString();
+  VLOG(1) << trace_id_ << " Run " << reason << " "
+          << subproc_->req().DebugString();
 }
 
 void CompileTask::KillSubProcess() {
@@ -4924,16 +4236,19 @@ void CompileTask::FinishSubProcess() {
   CHECK(!subproc_stdout_.empty()) << trace_id_ << " state=" << state_;
   ReadFileToString(subproc_stdout_.c_str(), &stdout_buffer);
   remove(subproc_stdout_.c_str());
-  if (fail_fallback_ && local_run_ && orig_stdout != stdout_buffer)
-    stats_->set_goma_error(true);
-  result->set_stdout_buffer(stdout_buffer);
 
   string stderr_buffer;
   CHECK(!subproc_stderr_.empty()) << trace_id_ << " state=" << state_;
   ReadFileToString(subproc_stderr_.c_str(), &stderr_buffer);
   remove(subproc_stderr_.c_str());
-  if (fail_fallback_ && local_run_ && orig_stderr != stderr_buffer)
+
+  if (fail_fallback_ && local_run_ &&
+      !IsSameErrorMessage(orig_stdout, stdout_buffer, orig_stderr,
+                          stderr_buffer)) {
     stats_->set_goma_error(true);
+  }
+
+  result->set_stdout_buffer(stdout_buffer);
   result->set_stderr_buffer(stderr_buffer);
 
   if (verify_output_) {

@@ -89,10 +89,8 @@ bool ParseServiceAccountJson(const std::string& str,
 
 const char kGoogleAuthURI[] =
     "https://accounts.google.com/o/oauth2/auth";
-const char kGoogleTokenURI[] =
-    "https://www.googleapis.com/oauth2/v3/token";
-const char kGoogleTokenInfoURI[] =
-    "https://www.googleapis.com/oauth2/v3/tokeninfo";
+const char kGoogleTokenURI[] = "https://oauth2.googleapis.com/token";
+const char kGoogleTokenInfoURI[] = "https://oauth2.googleapis.com/tokeninfo";
 const char kGoogleTokenAudienceURI[] =
     "https://www.googleapis.com/oauth2/v4/token";
 

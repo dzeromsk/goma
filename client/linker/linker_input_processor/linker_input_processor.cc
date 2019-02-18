@@ -25,6 +25,7 @@
 #include <glog/logging.h>
 #include <glog/stl_logging.h>
 
+#include "absl/base/macros.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "arfile.h"
@@ -150,9 +151,9 @@ bool LinkerInputProcessor::GetInputFilesAndLibraryPath(
 #endif
         break;
       case MACHO_OBJECT_FILE:
-        FALLTHROUGH_INTENDED;
+        ABSL_FALLTHROUGH_INTENDED;
       case ARCHIVE_FILE:
-        FALLTHROUGH_INTENDED;
+        ABSL_FALLTHROUGH_INTENDED;
       case BAD_FILE:
         break;
     }

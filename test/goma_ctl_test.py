@@ -6,7 +6,7 @@
 
 """Tests for goma_ctl."""
 
-
+from __future__ import print_function
 
 import imp
 import json
@@ -15,11 +15,18 @@ import os
 import shutil
 import stat
 import string
-import StringIO
 import sys
 import tempfile
 import time
 import unittest
+
+# TODO: remove this when we deprecate python2.
+if sys.version_info >= (3, 0):
+  import io
+  STRINGIO = io.StringIO
+else:
+  import cStringIO
+  STRINGIO = cStringIO.StringIO
 
 _GOMA_CTL = 'goma_ctl.py'
 
@@ -287,9 +294,9 @@ def _ClearGomaEnv():
       to_delete.append(e)
   for e in to_delete:
     del os.environ[e]
-  if os.environ.has_key('GOMAMODE'):
+  if 'GOMAMODE' in os.environ:
     del os.environ['GOMAMODE']
-  if os.environ.has_key('PLATFORM'):
+  if 'PLATFORM' in os.environ:
     del os.environ['PLATFORM']
 
 
@@ -319,7 +326,7 @@ class GomaCtlTestCommon(unittest.TestCase):
     _ClearGomaEnv()
 
     # suppress stdout and make it available from test.
-    sys.stdout = StringIO.StringIO()
+    sys.stdout = STRINGIO()
 
     mod_name, _ = os.path.splitext(_GOMA_CTL)
     # Copy GOMA client commands to a temporary directory.
@@ -408,10 +415,10 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
   def testSetGomaFlagDefaultValueIfEmptyShouldSetIfEmpty(self):
     flag_test_name = 'FLAG_TEST'
     flag_test_value = 'test'
-    self.assertFalse(os.environ.has_key('GOMA_%s' % flag_test_name))
+    self.assertFalse(('GOMA_%s' % flag_test_name) in os.environ)
     self._module._SetGomaFlagDefaultValueIfEmpty(flag_test_name,
                                                  flag_test_value)
-    self.assertTrue(os.environ.has_key('GOMA_%s' % flag_test_name))
+    self.assertTrue(('GOMA_%s' % flag_test_name) in os.environ)
     self.assertEqual(os.environ['GOMA_%s' % flag_test_name], flag_test_value)
 
   def testSetGomaFlagDefaultValueIfEmptyShouldNotSetIfNotEmpty(self):
@@ -428,34 +435,34 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
 
   def testParseManifestContentsShouldParseOneLine(self):
     parsed = self._module._ParseManifestContents('key=val')
-    self.assertEqual(len(parsed.keys()), 1)
-    self.assertTrue(parsed.has_key('key'))
+    self.assertEqual(len(parsed), 1)
+    self.assertTrue('key' in parsed)
     self.assertEqual(parsed['key'], 'val')
 
   def testParseManifestContentsShouldParseMultipleLines(self):
     parsed = self._module._ParseManifestContents('key0=val0\nkey1=val1')
-    self.assertEqual(len(parsed.keys()), 2)
-    self.assertTrue(parsed.has_key('key0'))
+    self.assertEqual(len(parsed), 2)
+    self.assertTrue('key0' in parsed)
     self.assertEqual(parsed['key0'], 'val0')
-    self.assertTrue(parsed.has_key('key1'))
+    self.assertTrue('key1' in parsed)
     self.assertEqual(parsed['key1'], 'val1')
 
   def testParseManifestContentsShouldShowEmptyValueIfEndWithEqual(self):
     parsed = self._module._ParseManifestContents('key=')
-    self.assertEqual(len(parsed.keys()), 1)
-    self.assertTrue(parsed.has_key('key'))
+    self.assertEqual(len(parsed), 1)
+    self.assertTrue('key' in parsed)
     self.assertEqual(parsed['key'], '')
 
   def testParseManifestContentsShouldParseLineWithMultipleEquals(self):
     parsed = self._module._ParseManifestContents('key=label=value')
-    self.assertEqual(len(parsed.keys()), 1)
-    self.assertTrue(parsed.has_key('key'))
+    self.assertEqual(len(parsed), 1)
+    self.assertTrue('key' in parsed)
     self.assertEqual(parsed['key'], 'label=value')
 
   def testParseManifestContentsShouldIgnoreLineWitoutEquals(self):
     parsed = self._module._ParseManifestContents('key')
-    self.assertEqual(len(parsed.keys()), 0)
-    self.assertFalse(parsed.has_key('key'))
+    self.assertEqual(len(parsed), 0)
+    self.assertFalse('key' in parsed)
 
   def testIsBadVersionReturnsFalseForEmptyBadVersion(self):
     self.assertFalse(self._module._IsBadVersion(1, ''))
@@ -564,8 +571,8 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
             'u3\n'
             'p4\n'
             'n/tmp/foo.txt\n')
-    expected = [{'uid': 1L, 'pid': 2L, 'name': 'localhost:8088'},
-                {'uid': 3L, 'pid': 4L, 'name': '/tmp/foo.txt'}]
+    expected = [{'uid': 1, 'pid': 2, 'name': 'localhost:8088'},
+                {'uid': 3, 'pid': 4, 'name': '/tmp/foo.txt'}]
     parsed = self._module._ParseLsof(test)
     self.assertEqual(parsed, expected)
 
@@ -575,7 +582,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
             'u1\n'
             'p2\n'
             'nlocalhost:8088\n')
-    expected = [{'uid': 1L, 'pid': 2L, 'name': 'localhost:8088'}]
+    expected = [{'uid': 1, 'pid': 2, 'name': 'localhost:8088'}]
     parsed = self._module._ParseLsof(test)
     self.assertEqual(parsed, expected)
 
@@ -586,7 +593,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
             'u1\n'
             'p2\n'
             'nlocalhost:8088\n')
-    expected = [{'uid': 1L, 'pid': 2L, 'name': 'localhost:8088'}]
+    expected = [{'uid': 1, 'pid': 2, 'name': 'localhost:8088'}]
     parsed = self._module._ParseLsof(test)
     self.assertEqual(parsed, expected)
 
@@ -594,7 +601,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
     test = ('u1\n'
             'p2\n'
             'n/tmp/goma.ipc type=STREAM\n')
-    expected = [{'uid': 1L, 'pid': 2L, 'name': '/tmp/goma.ipc'}]
+    expected = [{'uid': 1, 'pid': 2, 'name': '/tmp/goma.ipc'}]
     parsed = self._module._ParseLsof(test)
     self.assertEqual(parsed, expected)
 
@@ -707,7 +714,7 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
 
   def testIsGomaFlagUpdatedShouldReturnFalseIfNoUpdate(self):
     expected = {'GOMA_TEST': 'test'}
-    for key, value in expected.iteritems():
+    for key, value in expected.items():
       os.environ[key] = value
     self.assertFalse(self._module._IsGomaFlagUpdated(expected))
 
@@ -2326,17 +2333,17 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
     env = SpyGomaEnv()
     driver = self._module.GomaDriver(env, FakeGomaBackend())
     orig_goma_tmp_dir = os.environ.get('GOMA_TMP_DIR')
-    self.assertNotEquals(orig_goma_tmp_dir, fake_tmpdir)
+    self.assertNotEqual(orig_goma_tmp_dir, fake_tmpdir)
     driver._CreateGomaTmpDirectory()
     goma_tmp_dir = os.environ.get('GOMA_TMP_DIR')
     if orig_goma_tmp_dir:
       os.environ['GOMA_TMP_DIR'] = orig_goma_tmp_dir
     else:
       del os.environ['GOMA_TMP_DIR']
-    self.assertEquals(env.is_directory_exist, fake_tmpdir)
-    self.assertEquals(env.make_directory, fake_tmpdir)
-    self.assertEquals(env.ensure_directory_owned_by_user, None)
-    self.assertEquals(goma_tmp_dir, fake_tmpdir)
+    self.assertEqual(env.is_directory_exist, fake_tmpdir)
+    self.assertEqual(env.make_directory, fake_tmpdir)
+    self.assertEqual(env.ensure_directory_owned_by_user, None)
+    self.assertEqual(goma_tmp_dir, fake_tmpdir)
 
   def testCreateGomaTmpDirectoryExists(self):
     fake_tmpdir = '/tmp/gomatest_chrome-bot'
@@ -2364,17 +2371,17 @@ class GomaCtlSmallTest(GomaCtlTestCommon):
     env = SpyGomaEnv()
     driver = self._module.GomaDriver(env, FakeGomaBackend())
     orig_goma_tmp_dir = os.environ.get('GOMA_TMP_DIR')
-    self.assertNotEquals(orig_goma_tmp_dir, fake_tmpdir)
+    self.assertNotEqual(orig_goma_tmp_dir, fake_tmpdir)
     driver._CreateGomaTmpDirectory()
     goma_tmp_dir = os.environ.get('GOMA_TMP_DIR')
     if orig_goma_tmp_dir:
       os.environ['GOMA_TMP_DIR'] = orig_goma_tmp_dir
     else:
       del os.environ['GOMA_TMP_DIR']
-    self.assertEquals(env.is_directory_exist, fake_tmpdir)
-    self.assertEquals(env.make_directory, None)
-    self.assertEquals(env.ensure_directory_owned_by_user, fake_tmpdir)
-    self.assertEquals(goma_tmp_dir, fake_tmpdir)
+    self.assertEqual(env.is_directory_exist, fake_tmpdir)
+    self.assertEqual(env.make_directory, None)
+    self.assertEqual(env.ensure_directory_owned_by_user, fake_tmpdir)
+    self.assertEqual(goma_tmp_dir, fake_tmpdir)
 
 
   def testCreateCrashDumpDirectoryShouldNotCreateDirectoryIfExist(self):
@@ -2747,7 +2754,7 @@ class GomaEnvTest(GomaCtlTestCommon):
     env = self._module.GomaEnv()
     cksums = env.LoadChecksum()
     self.assertTrue(cksums)
-    for filename, checksum in cksums.iteritems():
+    for filename, checksum in cksums.items():
       self.assertEqual(env.CalculateChecksum(filename), checksum)
 
   def testIsOldFileShouldReturnTrueForOldFile(self):
@@ -2786,8 +2793,8 @@ class GomaEnvTest(GomaCtlTestCommon):
     self.assertTrue(os.path.isdir(tmpdir))
     if os.name != 'nt':
       st = os.stat(tmpdir)
-      self.assertEquals(st.st_uid, os.geteuid())
-      self.assertEquals((st.st_mode & 077), 0)
+      self.assertEqual(st.st_uid, os.geteuid())
+      self.assertEqual((st.st_mode & 0o77), 0)
     os.rmdir(tmpdir)
 
   def testEnsureDirectoryOwnedByUser(self):
@@ -2799,15 +2806,15 @@ class GomaEnvTest(GomaCtlTestCommon):
       return
     self._module._GetPlatformSpecificTempDirectory = lambda: None
     # test only permissions will not have readable/writable for group/other.
-    os.chmod(tmpdir, 0755)
+    os.chmod(tmpdir, 0o755)
     st = os.stat(tmpdir)
-    self.assertEquals(st.st_uid, os.geteuid())
-    self.assertNotEquals((st.st_mode & 077), 0)
+    self.assertEqual(st.st_uid, os.geteuid())
+    self.assertNotEqual((st.st_mode & 0o77), 0)
     self.assertTrue(env.EnsureDirectoryOwnedByUser(tmpdir))
     self.assertTrue(os.path.isdir(tmpdir))
     st = os.stat(tmpdir)
-    self.assertEquals(st.st_uid, os.geteuid())
-    self.assertEquals((st.st_mode & 077), 0)
+    self.assertEqual(st.st_uid, os.geteuid())
+    self.assertEqual((st.st_mode & 0o77), 0)
     os.rmdir(tmpdir)
 
   def testCreateCacheDirectoryShouldUseDefaultIfNoEnv(self):
@@ -3069,7 +3076,7 @@ class GomaCtlLargeTestCommon(GomaCtlTestCommon):
       driver0._EnsureStopCompilerProxy()
 
     self.assertTrue(after_version)
-    self.assertNotEquals(before_version, after_version)
+    self.assertNotEqual(before_version, after_version)
   # TODO: test not silently updated case.
 
   def testEnsureShouldWorkWithoutFuserCommand(self):
@@ -3244,7 +3251,7 @@ def main():
 
   platform_specific = GetPlatformSpecific(options.platform)
 
-  print 'testdir:%s' % test_dir
+  print('testdir:%s' % test_dir)
   if options.goma_dir:
     goma_ctl_path = os.path.abspath(options.goma_dir)
   else:

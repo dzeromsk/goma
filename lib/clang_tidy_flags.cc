@@ -17,7 +17,7 @@ ClangTidyFlags::ClangTidyFlags(const std::vector<string>& args,
     : CxxFlags(args, cwd), seen_hyphen_hyphen_(false) {
   if (!CompilerFlags::ExpandPosixArgs(cwd, args, &expanded_args_,
                                       &optional_input_filenames_)) {
-    Fail("Unable to expand args", args);
+    Fail("Unable to expand args");
     return;
   }
 

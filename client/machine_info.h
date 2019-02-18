@@ -24,6 +24,10 @@ int64_t GetSystemTotalMemory();
 // If failed obtaining, 0 will be returned.
 int64_t GetConsumingMemoryOfCurrentProcess();
 
+// Gets virtual memory of the current process in bytes.
+// If failed obtaining, 0 will be returned.
+int64_t GetVirtualMemoryOfCurrentProcess();
+
 }  // namespace devtools_goma
 
 #endif  // DEVTOOLS_GOMA_CLIENT_MACHINE_INFO_H_

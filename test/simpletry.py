@@ -8,6 +8,7 @@
 The script uses the production servers.
 """
 
+from __future__ import print_function
 
 import glob
 import imp
@@ -20,7 +21,17 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import urllib2
+try:
+  import urllib.request, urllib.error
+  URLOPEN = urllib.request.urlopen
+  URLREQUEST = urllib.request.Request
+  HTTPERROR = urllib.error.HTTPError
+except ImportError:
+  import urllib2
+  URLOPEN = urllib2.urlopen
+  URLREQUEST = urllib2.Request
+  HTTPERROR = urllib2.HTTPError
+
 
 _GOMA_CTL = 'goma_ctl.py'
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -174,7 +185,7 @@ class SimpleTryTest(unittest.TestCase):
 
       if ach != bch:
         ndiff += 1
-    print '%d bytes differ' % ndiff
+    print('%d bytes differ' % ndiff)
     self.assertEqual(ndiff, 0,
                      msg=('%sobj file should be the same after normalize.'
                           % msg))
@@ -201,10 +212,10 @@ class SimpleTryTest(unittest.TestCase):
     logs = self.GetGomaccLogs()
     for log in logs:
       with open(log) as f:
-        print 'log: %s:' % log
-        print f.read()
-        print
-    self.assertEquals(len(logs), 0)
+        print('log: %s:' % log)
+        print(f.read())
+        print()
+    self.assertEqual(len(logs), 0)
 
   def testClHelp(self):
     self.AssertSuccess([self.gomacc, self.local_cl, '/?'],
@@ -259,20 +270,20 @@ class SimpleTryTest(unittest.TestCase):
     try:
       self.AssertSameFile(['create_pch.obj', 'use_pch.obj'],
                           msg='FAILS_cl_pch.o')
-    except Exception, inst:
-      print 'Known failure %s' % inst
+    except Exception as inst:
+      print('Known failure %s' % inst)
     self.AssertNoGomaccInfo()
 
   def testDisabledShouldWork(self):
     stat_url = 'http://localhost:%s/statz' % (
         os.environ['GOMA_COMPILER_PROXY_PORT'])
-    stat_before = urllib2.urlopen(stat_url).read()
+    stat_before = URLOPEN(stat_url).read()
     os.environ['GOMA_DISABLED'] = 'true'
     self.AssertSuccess([self.gomacc, self.local_cl, '/c', '/Fotest.obj',
                         os.path.join('test', 'hello.c')],
                        msg='remote compile')
     del os.environ['GOMA_DISABLED']
-    stat_after = urllib2.urlopen(stat_url).read()
+    stat_after = URLOPEN(stat_url).read()
     request_line_before = '\n'.join(
         [line for line in stat_before.split('\n') if 'request' in line])
     request_line_after = '\n'.join(
@@ -285,13 +296,13 @@ class SimpleTryTest(unittest.TestCase):
   def testLocalFallbackShouldWork(self):
     stat_url = 'http://localhost:%s/statz' % (
         os.environ['GOMA_COMPILER_PROXY_PORT'])
-    stat_before = urllib2.urlopen(stat_url).read()
+    stat_before = URLOPEN(stat_url).read()
     os.environ['GOMA_FALLBACK_INPUT_FILES'] = os.path.join('test', 'hello.c')
     self.AssertSuccess([self.gomacc, self.local_cl, '/c', '/Fotest.obj',
                         os.path.join('test', 'hello.c')],
                        msg='local fallback')
     del os.environ['GOMA_FALLBACK_INPUT_FILES']
-    stat_after = urllib2.urlopen(stat_url).read()
+    stat_after = URLOPEN(stat_url).read()
     request_line_before = '\n'.join(
         [line for line in stat_before.split('\n') if 'fallback' in line])
     request_line_after = '\n'.join(
@@ -313,10 +324,10 @@ class SimpleTryTest(unittest.TestCase):
         os.environ['GOMA_COMPILER_PROXY_PORT'])
     with open(os.path.join('test', 'badreq.bin'), 'rb') as f:
       req_data = f.read()
-    req = urllib2.Request(url, req_data)
+    req = URLREQUEST(url, req_data)
     req.add_header('Content-Type', 'binary/x-protocol-buffer')
-    with self.assertRaises(urllib2.HTTPError) as cm:
-      urllib2.urlopen(req)
+    with self.assertRaises(HTTPERROR) as cm:
+      URLOPEN(req)
     ec = cm.exception.getcode()
     self.assertEqual(ec, 401, msg=('response code=%d; want=401' % ec))
     self.AssertNoGomaccInfo()
@@ -324,7 +335,7 @@ class SimpleTryTest(unittest.TestCase):
   def testGomaccShouldLog(self):
     os.environ['GOMA_GOMACC_WRITE_LOG_FOR_TESTING'] = 'true'
     self.AssertSuccess([self.gomacc])
-    self.assertEquals(len(self.GetGomaccLogs()), 1)
+    self.assertEqual(len(self.GetGomaccLogs()), 1)
 
   # TODO: write a test for a compiler with a relative path.
 
@@ -390,7 +401,7 @@ class CompilerProxyManager(object):
 
   def __enter__(self):
     self._tmpdir = tempfile.mkdtemp()
-    print 'GOMA_TMP_DIR: %s' % self._tmpdir
+    print('GOMA_TMP_DIR: %s' % self._tmpdir)
     os.environ['GOMA_TMP_DIR'] = self._tmpdir
     os.environ['TEST_TMPDIR'] = self._tmpdir
     os.environ['TMPDIR'] = self._tmpdir
@@ -408,14 +419,15 @@ class CompilerProxyManager(object):
     # 'Global\$GOMA_COMPILER_PROXY_LOCK_FILENAME.$GOMA_COMPILER_PROXY_PORT'
     if self._api_key_file:
       os.environ['GOMA_API_KEY_FILE'] = self._api_key_file
-      print 'Use GOMA_API_KEY_FILE=%s' % self._api_key_file
+      print('Use GOMA_API_KEY_FILE=%s' % self._api_key_file)
     if self._service_account_file:
       os.environ['GOMA_SERVICE_ACCOUNT_JSON_FILE'] = self._service_account_file
-      print 'Use GOMA_SERVICE_ACCOUNT_JSON_FILE=%s' % self._service_account_file
+      print(
+          'Use GOMA_SERVICE_ACCOUNT_JSON_FILE=%s' % self._service_account_file)
 
     self._goma = self._module.GetGomaDriver()
     if self._kill:
-      print 'Kill any remaining compiler proxy'
+      print('Kill any remaining compiler proxy')
       self._goma._env.KillStakeholders()
 
     self._goma._StartCompilerProxy()
@@ -430,9 +442,9 @@ class CompilerProxyManager(object):
       [sys.executable, os.path.join('client', 'diagnose_goma_log.py'),
        '--show-errors', '--show-warnings', '--show-known-warnings-threshold=0'],
       stdout=subprocess.PIPE, stderr=subprocess.STDOUT).communicate()[0]
-    print
-    print diagnose
-    print
+    print()
+    print(diagnose)
+    print()
 
     if self._tmpdir:
       shutil.rmtree(self._tmpdir)
@@ -456,11 +468,11 @@ def _SetupVSEnv():
     if os.path.exists(local_cl):
       return
   except subprocess.CalledProcessError:
-    print 'Cannot find cl.exe in PATH.'
+    print('Cannot find cl.exe in PATH.')
 
   # Cannot find cl.exe in PATH.  Let me set it in depot_tools.
   # The script also set INCLUDE, LIB, PATH at the same time.
-  print 'Going to use cl.exe in depot_tools.'
+  print('Going to use cl.exe in depot_tools.')
   out = subprocess.check_output(['python',
                                  os.path.join(_SCRIPT_DIR, '..', 'build',
                                               'vs_toolchain.py'),
@@ -473,11 +485,11 @@ def _SetupVSEnv():
     matched = vs_path_pattern.search(line)
     if matched:
       vs_path = matched.group(1)
-      print 'vs_path=%s' % vs_path
+      print('vs_path=%s' % vs_path)
     matched = sdk_path_pattern.search(line)
     if matched:
       sdk_path = matched.group(1)
-      print 'sdk_path=%s' % sdk_path
+      print('sdk_path=%s' % sdk_path)
   if not vs_path or not sdk_path:
     raise Error('Do not know proper vs_path or sdk_path.')
   # Since clang-cl.exe generates x64 binary by default, we should use
@@ -488,7 +500,7 @@ def _SetupVSEnv():
     key, value = line.split('=')
     if key.upper() in ('INCLUDE', 'LIB', 'PATH'):
       os.environ[key] = value
-      print 'os.environ[%s] = "%s"' % (key, os.environ[key])
+      print('os.environ[%s] = "%s"' % (key, os.environ[key]))
 
 
 def _FindClangCl():
@@ -518,17 +530,17 @@ def ExecuteTests(goma_dir):
   os.environ['PATH'] = '%s;%s' % (os.environ['PATH'], os.path.dirname(local_cl))
 
   gomacc = os.path.join(goma_dir, 'gomacc.exe')
-  print 'LOCAL_CL=%s' % local_cl
-  print 'GOMACC=%s' % gomacc
+  print('LOCAL_CL=%s' % local_cl)
+  print('GOMACC=%s' % gomacc)
 
   if not local_cl or not os.path.exists(local_cl):
-    print "local_cl not found."
+    print("local_cl not found.")
     return 0x04
   if not os.path.exists(gomacc):
-    print "gomacc not found."
+    print("gomacc not found.")
     return 0x04
 
-  print 'ShowGomaVerify'
+  print('ShowGomaVerify')
   cmd = [gomacc, '--goma-verify-command', local_cl]
   subprocess.call(cmd)
 
@@ -589,7 +601,12 @@ def main():
     exit_code = ExecuteTests(goma_dir)
 
   if options.wait:
-    raw_input('Ready to finish?')
+    try:
+      # Python3 does not have raw_input but python2 input cause error for
+      # empty input.
+      raw_input('Ready to finish?')
+    except NameError:
+      input('Ready to finish?')
 
   if exit_code:
     sys.exit(exit_code)

@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "absl/base/call_once.h"
+#include "absl/base/macros.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/match.h"
 #include "absl/time/clock.h"
@@ -1455,7 +1456,7 @@ int OpenSSLEngine::UpdateStatus(int return_value) {
                          SSL_get_verify_result(ssl_));
         ctx_->Invalidate();
       }
-      FALLTHROUGH_INTENDED;
+      ABSL_FALLTHROUGH_INTENDED;
     default:
       LOG(ERROR) << "ctx:" << ctx_ << ": OpenSSL error"
                  << " ret=" << return_value

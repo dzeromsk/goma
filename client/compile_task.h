@@ -18,6 +18,7 @@
 
 #include "absl/base/call_once.h"
 #include "absl/base/thread_annotations.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/time/time.h"
 #include "basictypes.h"
 #include "compile_service.h"
@@ -47,6 +48,10 @@ class Closure;
 class CompileStats;
 class CompilerFlags;
 class CompilerProxyHistogram;
+class InputFileTask;
+class LocalOutputFileTask;
+struct OutputFileInfo;
+class OutputFileTask;
 
 // CompileTask handles single compile request from gomacc.
 // It basically runs on the same thread it is created, but InputFileTask and
@@ -79,8 +84,8 @@ class CompileTask {
 
   // Inits CompileTask.
   // It takes ownership of rpc, req, resp and done.
-  void Init(CompileService::RpcController* rpc,
-            const ExecReq& req,
+  void Init(RpcController* rpc,
+            std::unique_ptr<ExecReq> req,
             ExecResp* resp,
             OneshotClosure* done);
 
@@ -134,10 +139,6 @@ class CompileTask {
     // including TO_LOG.
     TO_USER,
   };
-  class InputFileTask;
-  class OutputFileTask;
-  struct OutputFileInfo;
-  class LocalOutputFileTask;
   friend class InputFileTask;
   friend class OutputFileTask;
   friend class LocalOutputFileTask;
@@ -161,7 +162,6 @@ class CompileTask {
   // Copies env and requester env from req_, and clear requester env
   // from req_.
   void CopyEnvFromRequest();
-  string GenerateCompilerProxyId() const;
 
   // Initializes compiler flags from the request.
   void InitCompilerFlags();
@@ -336,18 +336,18 @@ class CompileTask {
 
   // RPC between gomacc and compiler proxy.
   // These are vaild until ReplyResponse().
-  CompileService::RpcController* rpc_;
-  ExecResp* rpc_resp_;
+  RpcController* rpc_ = nullptr;
+  ExecResp* rpc_resp_ = nullptr;
   WorkerThread::ThreadId caller_thread_id_;
-  OneshotClosure* done_;
+  OneshotClosure* done_ = nullptr;
 
   std::unique_ptr<CompileStats> stats_;
 
-  int response_code_;
+  int response_code_ = 0;
 
-  State state_;
-  bool abort_;  // local proc finished first.
-  bool finished_;  // remote call finished (no active remote calls).
+  State state_ = INIT;
+  bool abort_ = false;  // local proc finished first.
+  bool finished_ = false;  // remote call finished (no active remote calls).
 
   std::unique_ptr<ExecReq> req_;
   CommandSpec command_spec_;
@@ -357,16 +357,16 @@ class CompileTask {
   RequesterEnv requester_env_;
 
   std::unique_ptr<CompilerFlags> flags_;
-  bool linking_;
-  bool precompiling_;
+  bool linking_ = false;
+  bool precompiling_ = false;
 
-  CompilerTypeSpecific* compiler_type_specific_;
+  CompilerTypeSpecific* compiler_type_specific_ = nullptr;
 
   // gomacc_pid_:
   //   gomacc_pid_ == SubprocessState::kInvalidPid if gomacc not running.
-  int gomacc_pid_;
+  int gomacc_pid_ = SubProcessState::kInvalidPid;
   // true if a connection to gomacc is lost, and the task is canceled.
-  bool canceled_;
+  bool canceled_ = false;
 
   string orig_flag_dump_;
   string flag_dump_;
@@ -382,18 +382,18 @@ class CompileTask {
   // |system_library_paths_| is used only when linking_ == true.
   std::vector<string> system_library_paths_;
   // list of interleave uploaded files_to confirm the mechanism works fine.
-  std::unordered_set<string> interleave_uploaded_files_;
+  absl::flat_hash_set<string> interleave_uploaded_files_;
 
   std::unique_ptr<ExecResp> resp_;
   std::unique_ptr<ExecResp> exec_resp_;
 
-  std::vector<string> exec_output_file_;
+  std::vector<string> exec_output_files_;
   std::vector<string> exec_error_message_;
   // exit_status_ is an exit status of remote goma compilation.
   // if this is 0, remote goma compilation might have finished successfully,
   // or might not be executed.
   // in other words, if this is not 0, remote goma compilation failed.
-  int exit_status_;
+  int exit_status_ = 0;
   string stdout_;
   string stderr_;
 
@@ -403,15 +403,15 @@ class CompileTask {
   // HttpRPC stt for ExecRequest.
   std::unique_ptr<HttpRPC::Status> http_rpc_status_;
 
-  WorkerThread::CancelableClosure* delayed_setup_subproc_;
+  WorkerThread::CancelableClosure* delayed_setup_subproc_ = nullptr;
   // local subprocess
   string local_path_;
   // PATHEXT environment variable in ExecReq for Windows.
   string pathext_;
   // subproc_ == NULL; subprocess is not ready to run or already finished.
   // subproc_ != NULL; subprocess is ready to run or running.
-  SubProcessTask* subproc_;
-  SubProcessReq::Weight subproc_weight_;
+  SubProcessTask* subproc_ = nullptr;
+  SubProcessReq::Weight subproc_weight_ = SubProcessReq::LIGHT_WEIGHT;
   // subproc_exit_status_ is an exit status of local compilation.
   // if this is 0, local compilation might have finished successfully,
   // might not be executed, or might have been killed because of fast goma.
@@ -419,21 +419,21 @@ class CompileTask {
   // Note that local compilation might have been failed because of goma
   // if goma failed to setup env, cwd to run local compiler.
   // TODO: can we detect this kind of error?
-  int subproc_exit_status_;
+  int subproc_exit_status_ = 0;
   string subproc_stdout_;
   string subproc_stderr_;
   // request fallback when exec call failed. initialized with
   // requester_env_.fallback(), but might be changed for hermetic fallback.
-  bool want_fallback_;
-  bool should_fallback_;  // do fallback because of setup failures etc.
-  bool verify_output_;
-  bool fail_fallback_;
-  bool local_run_;
-  bool local_killed_;
-  bool depscache_used_;
-  bool gomacc_revision_mismatched_;
+  bool want_fallback_ = false;
+  bool should_fallback_ = false;  // do fallback because of setup failures etc.
+  bool verify_output_ = false;
+  bool fail_fallback_ = false;
+  bool local_run_ = false;
+  bool local_killed_ = false;
+  bool depscache_used_ = false;
+  bool gomacc_revision_mismatched_ = false;
   // Mark this true in Done.
-  bool replied_;
+  bool replied_ = false;
 
   // Timers
   SimpleTimer handler_timer_;
@@ -448,19 +448,19 @@ class CompileTask {
   string resp_cache_key_;
 
   // Input file process.
-  OneshotClosure* input_file_callback_;
-  int num_input_file_task_;
-  bool input_file_success_;
+  OneshotClosure* input_file_callback_ = nullptr;
+  int num_input_file_task_ = 0;
+  bool input_file_success_ = false;
 
   // Output file process.
-  OneshotClosure* output_file_callback_;
+  OneshotClosure* output_file_callback_  = nullptr;
   std::vector<OutputFileInfo> output_file_;
-  int num_output_file_task_;
-  bool output_file_success_;
+  int num_output_file_task_ = 0;
+  bool output_file_success_ = false;
 
   // Local output file process.
-  OneshotClosure* local_output_file_callback_;
-  int num_local_output_file_task_;
+  OneshotClosure* local_output_file_callback_ = nullptr;
+  int num_local_output_file_task_ = 0;
 
   // DepsCache
   DepsCache::Identifier deps_identifier_;
@@ -471,7 +471,7 @@ class CompileTask {
   std::string local_output_cache_key_;
 
   mutable Lock refcnt_mu_;
-  int refcnt_ GUARDED_BY(refcnt_mu_);
+  int refcnt_ GUARDED_BY(refcnt_mu_) = 0;
 
   PlatformThreadId thread_id_;
 

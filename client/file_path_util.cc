@@ -275,7 +275,8 @@ bool IsLocalCompilerPathValid(const string& trace_id,
 }
 
 void RemoveDuplicateFiles(const std::string& cwd,
-                          std::set<std::string>* filenames) {
+                          std::set<std::string>* filenames,
+                          std::vector<std::string>* removed_files) {
   absl::flat_hash_map<std::string, std::string> path_map;
   path_map.reserve(filenames->size());
 
@@ -299,8 +300,11 @@ void RemoveDuplicateFiles(const std::string& cwd,
         (filename.size() == existing_filename.size() &&
          filename < existing_filename)) {
       unique_files.erase(existing_filename);
+      removed_files->push_back(existing_filename);
       unique_files.insert(filename);
       p.first->second = filename;
+    } else {
+      removed_files->push_back(filename);
     }
   }
 

@@ -42,29 +42,48 @@ int64_t GetSystemTotalMemory() {
   MEMORYSTATUSEX status;
   status.dwLength = sizeof(status);
   if (!GlobalMemoryStatusEx(&status)) {
-    fprintf(stderr, "GlobalMemoryStatusEx failed: %lu\n", GetLastError());
+    LOG(ERROR) << "GlobalMemoryStatusEx failed";
+    LOG_SYSRESULT(GetLastError());
     return 0;
   }
 
   return status.ullTotalPhys;
 }
 
-int64_t GetConsumingMemoryOfCurrentProcess() {
+static bool GetProcessMemoryCounters(PROCESS_MEMORY_COUNTERS* pmc) {
   DWORD process_id = GetCurrentProcessId();
 
   ScopedFd process(OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, process_id));
   if (!process.valid()) {
-    PLOG(ERROR) << "OpenProcess failed";
-    return 0;
+    LOG(ERROR) << "OpenProcess failed";
+    LOG_SYSRESULT(GetLastError());
+    return false;
   }
 
+  if (!GetProcessMemoryInfo(process.handle(), pmc, sizeof(*pmc))) {
+    LOG(ERROR) << "GetProcessMemoryInfo failed";
+    LOG_SYSRESULT(GetLastError());
+    return false;
+  }
+  return true;
+}
+
+int64_t GetConsumingMemoryOfCurrentProcess() {
   PROCESS_MEMORY_COUNTERS pmc;
-  if (!GetProcessMemoryInfo(process.handle(), &pmc, sizeof(pmc))) {
-    PLOG(ERROR) << "GetProcessMemoryInfo failed";
+  if (!GetProcessMemoryCounters(&pmc)) {
     return 0;
   }
 
   return pmc.WorkingSetSize;
+}
+
+int64_t GetVirtualMemoryOfCurrentProcess() {
+  PROCESS_MEMORY_COUNTERS pmc;
+  if (!GetProcessMemoryCounters(&pmc)) {
+    return 0;
+  }
+
+  return pmc.PagefileUsage;
 }
 
 #elif defined(__linux__)
@@ -95,35 +114,56 @@ int64_t GetSystemTotalMemory() {
   return page_size * num_pages;
 }
 
-int64_t GetConsumingMemoryOfCurrentProcess() {
+static bool ReadStatm(int64_t* vm_size, int64_t* vm_rss) {
   // Reads /proc/self/statm
   // The second column is the number of pages for resident.
 
   const int64_t page_size = sysconf(_SC_PAGESIZE);
   if (page_size < 0) {
     PLOG(ERROR) << "sysconf(_SC_PAGESIZE) failed";
-    return 0;
+    return false;
   }
 
   ScopedFd fd(ScopedFd::OpenForRead("/proc/self/statm"));
   if (!fd.valid()) {
     PLOG(ERROR) << "Opening /proc/self/statm failed";
-    return 0;
+    return false;
   }
 
   char buf[1024];
-  if (fd.Read(buf, 1024) < 0) {
+  ssize_t read_len;
+  if ((read_len = fd.Read(buf, 1024)) < 0) {
     PLOG(ERROR) << "Reading /proc/self/statm failed";
-    return 0;
+    return false;
   }
 
-  int num_pages;
-  if (sscanf(buf, "%*d %d", &num_pages) != 1) {
-    LOG(ERROR) << "Data from /proc/self/statm is not in expected form";
-    return 0;
+  int size;
+  int resident;
+  if (sscanf(buf, "%d %d", &size, &resident) != 2) {
+    LOG(ERROR) << "Data from /proc/self/statm is not in expected form:"
+               << absl::string_view(buf, read_len);
+    return false;
   }
 
-  return num_pages * page_size;
+  *vm_size = size * page_size;
+  *vm_rss = resident * page_size;
+  return true;
+}
+
+int64_t GetConsumingMemoryOfCurrentProcess() {
+  int64_t vm_size, vm_rss;
+  if (!ReadStatm(&vm_size, &vm_rss)) {
+    return 0;
+  }
+  return vm_rss;
+}
+
+int64_t GetVirtualMemoryOfCurrentProcess() {
+  int64_t vm_size, vm_rss;
+  if (!ReadStatm(&vm_size, &vm_rss)) {
+    return 0;
+  }
+  return vm_size;
 }
 
 #elif defined(__MACH__)
@@ -157,28 +197,45 @@ int64_t GetSystemTotalMemory() {
   return size;
 }
 
-int64_t GetConsumingMemoryOfCurrentProcess() {
+static bool GetProcTaskInfo(struct proc_taskinfo* taskinfo) {
   const pid_t pid = Getpid();
 
-  struct proc_taskinfo taskinfo;
-  int infosize = proc_pidinfo(pid, PROC_PIDTASKINFO, 0,
-                              &taskinfo, sizeof(taskinfo));
+  int infosize =
+      proc_pidinfo(pid, PROC_PIDTASKINFO, 0, taskinfo, sizeof(*taskinfo));
   if (infosize < 0) {
     PLOG(ERROR) << "proc_pidinfo failed";
-    return 0;
+    return false;
   }
 
   // According to this blog,
   // http://vinceyuan.blogspot.jp/2011/12/wrong-info-from-procpidinfo.html
   // we have to check proc_pidinfo returning value. Sometimes proc_pidinfo
   // returns too few bytes.
-  if (infosize < sizeof(taskinfo)) {
+  if (infosize < sizeof(*taskinfo)) {
     LOG(ERROR) << "proc_pidinfo returned too few bytes " << infosize
-               << " (expected " << sizeof(taskinfo) << ")";
+               << " (expected " << sizeof(*taskinfo) << ")";
+    return false;
+  }
+
+  return true;
+}
+
+int64_t GetConsumingMemoryOfCurrentProcess() {
+  struct proc_taskinfo taskinfo;
+  if (!GetProcTaskInfo(&taskinfo)) {
     return 0;
   }
 
   return taskinfo.pti_resident_size;
+}
+
+int64_t GetVirtualMemoryOfCurrentProcess() {
+  struct proc_taskinfo taskinfo;
+  if (!GetProcTaskInfo(&taskinfo)) {
+    return 0;
+  }
+
+  return taskinfo.pti_virtual_size;
 }
 
 #else

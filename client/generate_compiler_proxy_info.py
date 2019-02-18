@@ -12,6 +12,8 @@ User-agents will help going through the server logs when debugging
 and the console will help users to make a better bug report.
 """
 
+from __future__ import print_function
+
 
 
 import datetime
@@ -58,15 +60,15 @@ def GetRevisionNumber():
         rev = f.read().strip()
         if re.match(r'[0-9a-f]+@\d+', rev):
           return rev
-        print 'revision seems not match the pattern: %s' % rev
-    except IOError, ex:
-      print 'cannot open revision number file: %s' % ex
+        print('revision seems not match the pattern: %s' % rev)
+    except IOError as ex:
+      print('cannot open revision number file: %s' % ex)
   # <commit hash>@<committer date unix timestamp>
   git_hash_output = os.popen('git log -1 --pretty=format:%H@%ct', 'r')
   git_hash = git_hash_output.read().strip()
   if git_hash != "":
     return git_hash
-  print 'Could not get CL information, falling back to unknown.'
+  print('Could not get CL information, falling back to unknown.')
   return 'unknown'
 
 
@@ -111,9 +113,9 @@ static const char kBuiltRevisionString[] = "%(revision)s";
       'revision': GetRevisionNumber(),
       })
     fp.close()
-  except Exception, ex:
+  except Exception as ex:
     os.remove(info_file)
-    print 'Failed to generate %s: %s' % (info_file, ex)
+    print('Failed to generate %s: %s' % (info_file, ex))
     sys.exit(1)
 
 

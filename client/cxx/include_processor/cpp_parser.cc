@@ -525,6 +525,7 @@ void CppParser::ProcessIncludeInternal(const CppDirectiveIncludeBase& d) {
                      << " from " << input()->filepath()
                      << " [dir:" << input()->directory()
                      << " index:" << input()->include_dir_index() << "]";
+        disabled_ = true;
         return;
       }
       if (d.type() == CppDirectiveType::DIRECTIVE_IMPORT) {
@@ -555,6 +556,7 @@ void CppParser::ProcessIncludeInternal(const CppDirectiveIncludeBase& d) {
                      << " from " << input()->filepath()
                      << " [dir:" << input()->directory()
                      << " index:" << input()->include_dir_index() << "]";
+        disabled_ = true;
         return;
       }
       if (d.type() == CppDirectiveType::DIRECTIVE_IMPORT) {
@@ -601,6 +603,7 @@ void CppParser::ProcessIncludeInternal(const CppDirectiveIncludeBase& d) {
                      << " from " << input()->filepath()
                      << " [dir:" << input()->directory()
                      << " index:" << input()->include_dir_index() << "]";
+        disabled_ = true;
         return;
       }
       if (d.type() == CppDirectiveType::DIRECTIVE_IMPORT) {
@@ -628,6 +631,7 @@ void CppParser::ProcessIncludeInternal(const CppDirectiveIncludeBase& d) {
                      << " from " << input()->filepath()
                      << " [dir:" << input()->directory()
                      << " index:" << input()->include_dir_index() << "]";
+        disabled_ = true;
         return;
       }
       if (d.type() == CppDirectiveType::DIRECTIVE_IMPORT) {

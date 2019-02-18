@@ -9,8 +9,10 @@
 
 #include <json/json.h>
 
+#include "absl/base/macros.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "task/output_file_task.h"
 #include "time_util.h"
 #include "util.h"
 
@@ -83,6 +85,55 @@ CompileStats::CompileStats()
       output_file_rpc_raw_size(0) {}
 
 CompileStats::~CompileStats() {
+}
+
+// static
+ExecLog_CacheSource CompileStats::GetCacheSourceFromExecResp(
+    const ExecResp& resp) {
+  if (!resp.has_cache_hit()) {
+    // for old backends.
+    return ExecLog::UNKNOWN_CACHE;
+  }
+  switch (resp.cache_hit()) {
+    case ExecResp::NO_CACHE:
+      return ExecLog::UNKNOWN_CACHE;
+    case ExecResp::MEM_CACHE:
+      return ExecLog::MEM_CACHE;
+    case ExecResp::STORAGE_CACHE:
+      return ExecLog::STORAGE_CACHE;
+    case ExecResp::LOCAL_OUTPUT_CACHE:
+      return ExecLog::LOCAL_OUTPUT_CACHE;
+  }
+  return ExecLog::UNKNOWN_CACHE;
+}
+
+// static
+ExecLog_NetworkFailureType CompileStats::GetNetworkFailureTypeFromHttpStatus(
+    const HttpClient::Status& status) {
+  if (!status.enabled) {
+    return ExecLog::DISABLED;
+  } else if (status.err == 0) {
+    return ExecLog::NO_NETWORK_ERROR;
+  } else {  // i.e. status.err != 0.
+    switch (status.state) {
+      case HttpClient::Status::INIT:
+        ABSL_FALLTHROUGH_INTENDED;
+      case HttpClient::Status::PENDING:
+        return ExecLog::CONNECT_FAILED;
+      case HttpClient::Status::SENDING_REQUEST:
+        return ExecLog::SEND_FAILED;
+      case HttpClient::Status::REQUEST_SENT:
+        return ExecLog::TIMEDOUT_AFTER_SEND;
+      case HttpClient::Status::RECEIVING_RESPONSE:
+        return ExecLog::RECEIVE_FAILED;
+      case HttpClient::Status::RESPONSE_RECEIVED:
+        if (status.http_return_code != 200) {
+          return ExecLog::BAD_HTTP_STATUS_CODE;
+        }
+        break;
+    }
+  }
+  return ExecLog::UNKNOWN_NETWORK_ERROR;
 }
 
 string CompileStats::GetMajorFactorInfo() const {
@@ -167,10 +218,26 @@ void CompileStats::AddStatsFromHttpStatus(const HttpClient::Status& status) {
 void CompileStats::AddStatsFromExecResp(const ExecResp& response) {
 }
 
+void CompileStats::AddStatsFromOutputFileTask(const OutputFileTask& task) {
+  add_output_file_time(DurationToIntMs(task.timer().GetDuration()));
+  add_output_file_size(task.output().blob().file_size());
+  output_file_rpc += task.num_rpc();
+
+  const HttpClient::Status& http_status = task.http_status();
+  add_chunk_resp_size(http_status.resp_size);
+  output_file_rpc_req_build_time += http_status.req_build_time;
+  output_file_rpc_req_send_time += http_status.req_send_time;
+  output_file_rpc_wait_time += http_status.wait_time;
+  output_file_rpc_resp_recv_time += http_status.resp_recv_time;
+  output_file_rpc_resp_parse_time += http_status.resp_parse_time;
+  output_file_rpc_size += http_status.resp_size;
+  output_file_rpc_raw_size += http_status.raw_resp_size;
+}
+
 void CompileStats::DumpToJson(Json::Value* json,
                               DumpDetailLevel detail_level) const {
   // This field needs to be strictly in milliseconds so that it can be sorted.
-  StoreDurationToJsonIfNotZero("time", this->handler_time, json,
+  StoreDurationToJsonIfNotZero("duration", this->handler_time, json,
                                &FormatDurationInMilliseconds);
 
   if (LocalCacheHit()) {

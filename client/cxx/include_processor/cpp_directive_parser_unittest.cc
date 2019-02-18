@@ -4,6 +4,7 @@
 
 #include "cpp_directive_parser.h"
 
+#include "absl/base/macros.h"
 #include "absl/strings/string_view.h"
 #include "basictypes.h"
 #include "cpp_parser.h"
@@ -88,7 +89,7 @@ TEST_F(CppDirectiveParserTest, Parse) {
     }
 
     auto ds = Parse(s);
-    ASSERT_EQ(arraysize(testcases), ds->size());
+    ASSERT_EQ(ABSL_ARRAYSIZE(testcases), ds->size());
     for (size_t i = 0; i < ds->size(); ++i) {
       EXPECT_EQ(testcases[i].type, (*ds)[i]->type()) << i;
       EXPECT_EQ(i + 1, (*ds)[i]->position()) << testcases[i].text;
@@ -104,7 +105,7 @@ TEST_F(CppDirectiveParserTest, Parse) {
     }
 
     auto ds = Parse(s);
-    ASSERT_EQ(arraysize(testcases), ds->size());
+    ASSERT_EQ(ABSL_ARRAYSIZE(testcases), ds->size());
     for (size_t i = 0; i < ds->size(); ++i) {
       EXPECT_EQ(testcases[i].type, (*ds)[i]->type()) << i;
       EXPECT_EQ(i + 1, (*ds)[i]->position()) << testcases[i].text;

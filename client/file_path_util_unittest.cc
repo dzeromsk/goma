@@ -277,11 +277,13 @@ TEST(FilePathUtilTest, RemoveDuplicateFiles) {
     // different filepath
     std::set<std::string> filenames{file::JoinPath(kRootDir, "foo", "bar.cc"),
                                     file::JoinPath(kRootDir, "foo", "baz.cc")};
-    RemoveDuplicateFiles("", &filenames);
+    std::vector<std::string> removed;
+    RemoveDuplicateFiles("", &filenames, &removed);
 
     std::set<std::string> expected{file::JoinPath(kRootDir, "foo", "bar.cc"),
                                    file::JoinPath(kRootDir, "foo", "baz.cc")};
     EXPECT_EQ(filenames, expected);
+    EXPECT_TRUE(removed.empty());
   }
 
   {
@@ -292,13 +294,20 @@ TEST(FilePathUtilTest, RemoveDuplicateFiles) {
         file::JoinPath(absl::AsciiStrToLower(kRootDir), "FOO"),
         file::JoinPath(absl::AsciiStrToLower(kRootDir), "foO"),
     };
-    RemoveDuplicateFiles("", &filenames);
+    std::vector<std::string> removed;
+    RemoveDuplicateFiles("", &filenames, &removed);
 #ifdef _WIN32
     // Windows: case-insensitive, use the case variation of the first non-unique
     // Windows path that was encountered, based on case-sensitive ordering of
     // strings within std::set.
     std::set<std::string> expected{
         file::JoinPath(kRootDir, "Foo"),
+    };
+    std::vector<std::string> expected_removed{
+        file::JoinPath(kRootDir, "fOO"),
+        file::JoinPath(kRootDir, "fOo"),
+        file::JoinPath(absl::AsciiStrToLower(kRootDir), "FOO"),
+        file::JoinPath(absl::AsciiStrToLower(kRootDir), "foO"),
     };
 #else
     // non-Windows: different filepath if case is not same.
@@ -309,18 +318,26 @@ TEST(FilePathUtilTest, RemoveDuplicateFiles) {
         file::JoinPath(absl::AsciiStrToLower(kRootDir), "FOO"),
         file::JoinPath(absl::AsciiStrToLower(kRootDir), "foO"),
     };
+    std::vector<std::string> expected_removed;
 #endif  // _WIN32
     EXPECT_EQ(filenames, expected);
+    EXPECT_EQ(removed, expected_removed);
   }
 
   {
     // same filepath when JoinPathRespectAbsolute
     std::set<std::string> filenames{"bar.cc",
                                     file::JoinPath(kRootDir, "foo", "bar.cc")};
-    RemoveDuplicateFiles(file::JoinPath(kRootDir, "foo"), &filenames);
+    std::vector<std::string> removed;
+    RemoveDuplicateFiles(file::JoinPath(kRootDir, "foo"), &filenames,
+                         &removed);
 
     std::set<std::string> expected{"bar.cc"};
+    std::vector<std::string> expected_removed{
+      file::JoinPath(kRootDir, "foo", "bar.cc"),
+    };
     EXPECT_EQ(filenames, expected);
+    EXPECT_EQ(removed, expected_removed);
   }
 
   {
@@ -328,10 +345,16 @@ TEST(FilePathUtilTest, RemoveDuplicateFiles) {
     std::set<std::string> filenames{
         file::JoinPath("..", "bar.cc"),
         file::JoinPath(kRootDir, "foo", "baz", "..", "bar.cc")};
-    RemoveDuplicateFiles(file::JoinPath(kRootDir, "foo", "baz"), &filenames);
+    std::vector<std::string> removed;
+    RemoveDuplicateFiles(file::JoinPath(kRootDir, "foo", "baz"), &filenames,
+                         &removed);
 
     std::set<std::string> expected{file::JoinPath("..", "bar.cc")};
+    std::vector<std::string> expected_removed {
+        file::JoinPath(kRootDir, "foo", "baz", "..", "bar.cc"),
+    };
     EXPECT_EQ(filenames, expected);
+    EXPECT_EQ(removed, expected_removed);
   }
 
   {
@@ -339,34 +362,42 @@ TEST(FilePathUtilTest, RemoveDuplicateFiles) {
     std::set<std::string> filenames{
         file::JoinPath(kRootDir, "foo", "baz", "..", "bar.cc"),
         file::JoinPath(kRootDir, "foo", "bar.cc")};
-    RemoveDuplicateFiles("", &filenames);
+    std::vector<std::string> removed;
+    RemoveDuplicateFiles("", &filenames, &removed);
 
     std::set<std::string> expected{
         file::JoinPath(kRootDir, "foo", "baz", "..", "bar.cc"),
         file::JoinPath(kRootDir, "foo", "bar.cc")};
     EXPECT_EQ(filenames, expected);
+    EXPECT_TRUE(removed.empty());
   }
 
   {
     // different filepath when JoinPathRespectAbsolute
     std::set<std::string> filenames{file::JoinPath("baz", "..", "bar.cc"),
                                     file::JoinPath(kRootDir, "foo", "bar.cc")};
-    RemoveDuplicateFiles(file::JoinPath(kRootDir, "foo"), &filenames);
+    std::vector<std::string> removed;
+    RemoveDuplicateFiles(file::JoinPath(kRootDir, "foo"), &filenames,
+                         &removed);
 
     std::set<std::string> expected{file::JoinPath("baz", "..", "bar.cc"),
                                    file::JoinPath(kRootDir, "foo", "bar.cc")};
     EXPECT_EQ(filenames, expected);
+    EXPECT_TRUE(removed.empty());
   }
 
   {
     // different filepath when JoinPathRespectAbsolute
     std::set<std::string> filenames{file::JoinPath("..", "bar.cc"),
                                     file::JoinPath(kRootDir, "foo", "bar.cc")};
-    RemoveDuplicateFiles(file::JoinPath(kRootDir, "foo", "baz"), &filenames);
+    std::vector<std::string> removed;
+    RemoveDuplicateFiles(file::JoinPath(kRootDir, "foo", "baz"), &filenames,
+                         &removed);
 
     std::set<std::string> expected{file::JoinPath("..", "bar.cc"),
                                    file::JoinPath(kRootDir, "foo", "bar.cc")};
     EXPECT_EQ(filenames, expected);
+    EXPECT_TRUE(removed.empty());
   }
 
   {
@@ -386,12 +417,17 @@ TEST(FilePathUtilTest, RemoveDuplicateFiles) {
         file::JoinPath("a", "bar.cc"),
     };
     ASSERT_EQ(file::JoinPath(kRootDir, "a", "a", "bar.cc"), *filenames.begin());
-    RemoveDuplicateFiles(file::JoinPath(kRootDir, "a"), &filenames);
+    std::vector<std::string> removed;
+    RemoveDuplicateFiles(file::JoinPath(kRootDir, "a"), &filenames, &removed);
 
     std::set<std::string> expected{
         file::JoinPath("a", "bar.cc"),
     };
+    std::vector<std::string> expected_removed{
+        file::JoinPath(kRootDir, "a", "a", "bar.cc"),
+    };
     EXPECT_EQ(filenames, expected);
+    EXPECT_EQ(removed, expected_removed);
   }
 }
 

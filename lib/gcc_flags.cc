@@ -64,7 +64,7 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
       has_emit_module_(false) {
   if (!CompilerFlags::ExpandPosixArgs(cwd, args, &expanded_args_,
                                       &optional_input_filenames_)) {
-    Fail("Unable to expand args", args);
+    Fail("Unable to expand args");
     return;
   }
   bool has_at_file = !optional_input_filenames_.empty();
@@ -367,7 +367,7 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
     }
   } else if (mode_ != LINK && input_filenames_.size() > 1) {
     string buf = absl::StrJoin(input_filenames_, ", ");
-    Fail("multiple input file names: " + buf, args);
+    Fail("multiple input file names: " + buf);
   }
 
   if (!llvm_options.empty()) {
@@ -463,7 +463,7 @@ GCCFlags::GCCFlags(const std::vector<string>& args, const string& cwd)
   std::copy(includes.begin(), includes.end(), back_inserter(root_includes_));
 
   if (print_file_name) {
-    Fail("not supported on remote", args);
+    Fail("not supported on remote");
   }
 
   if (flag_x->seen()) {

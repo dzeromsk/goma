@@ -27,7 +27,9 @@ void CompilerInfo::SubprogramInfo::FromData(
   info->abs_path = info_data.abs_path();
   info->user_specified_path = info_data.user_specified_path();
   info->hash = info_data.hash();
-  GetFileStatFromData(info_data.file_stat(), &info->file_stat);
+  if (info_data.has_file_stat()) {
+    GetFileStatFromData(info_data.file_stat(), &info->file_stat);
+  }
 }
 
 string CompilerInfo::SubprogramInfo::DebugString() const {
@@ -46,7 +48,9 @@ CompilerInfo::ResourceInfo CompilerInfo::ResourceInfo::FromData(
   info.name = info_data.name();
   info.type = info_data.type();
   info.hash = info_data.hash();
-  GetFileStatFromData(info_data.file_stat(), &info.file_stat);
+  if (info_data.has_file_stat()) {
+    GetFileStatFromData(info_data.file_stat(), &info.file_stat);
+  }
   info.is_executable = info_data.is_executable();
   info.symlink_path = info_data.symlink_path();
   return info;
@@ -123,8 +127,12 @@ string CompilerInfo::DebugString() const {
 CompilerInfo::CompilerInfo(std::unique_ptr<CompilerInfoData> data)
     : data_(std::move(data)) {
   CHECK(data_.get());
-  GetFileStatFromData(data_->local_compiler_stat(), &local_compiler_stat_);
-  GetFileStatFromData(data_->real_compiler_stat(), &real_compiler_stat_);
+  if (data_->has_local_compiler_stat()) {
+    GetFileStatFromData(data_->local_compiler_stat(), &local_compiler_stat_);
+  }
+  if (data_->has_real_compiler_stat()) {
+    GetFileStatFromData(data_->real_compiler_stat(), &real_compiler_stat_);
+  }
 
   for (const auto& f : data_->additional_flags()) {
     additional_flags_.push_back(f);

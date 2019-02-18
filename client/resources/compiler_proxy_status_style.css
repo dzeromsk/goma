@@ -132,8 +132,8 @@ header h1 span {
   width: 7ex;
   text-align: right;
 }
-.task-summary-time {
-  width: 7ex;
+.task-summary-duration {
+  width: 10ex;
   text-align: right;
 }
 .task-summary-pid {
@@ -156,7 +156,7 @@ header h1 span {
 .task-summary-subproc-state {
   width: 16ex;
 }
-.task-summary-flag {
+.task-summary-command {
   width: 60%;
   overflow: hidden;
 }

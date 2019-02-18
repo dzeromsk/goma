@@ -38,14 +38,14 @@ CompilerFlags::CompilerFlags(const std::vector<string>& args, string cwd)
 }
 
 // TODO: wtf
-void CompilerFlags::Fail(const string& msg, const std::vector<string>& args) {
-  fail_message_ = "Flag parsing failed: " + msg + "\n";
-  fail_message_ += "ARGS:\n";
-  for (const auto& arg : args) {
-    fail_message_ += " " + arg;
-  }
-  fail_message_ += "\n";
+void CompilerFlags::Fail(const string& msg) {
+  std::stringstream ss;
+  ss << "Flag parsing failed: " + msg + "\n";
+  ss << "ARGS:\n";
+  ss << absl::StrJoin(args_, " ") << "\n";
+
   is_successful_ = false;
+  fail_message_ = ss.str();
 }
 
 // static

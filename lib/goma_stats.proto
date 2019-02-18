@@ -143,6 +143,9 @@ message OutputStats {
 message MemoryStats {
   // Memory consumed by compiler_proxy when stats was taken.
   optional int64 consuming = 1;
+  // Virtual memory size of compiler_proxy when stats was taken.
+  // Note: virtual cannot be used in C++ pb.  It is renamed to virtual_.
+  optional int64 virtual_memory_size = 2;
 }
 
 // Statistics about compiler_proxy time.

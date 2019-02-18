@@ -282,12 +282,10 @@ def _GetEnvMatchedCondition(candidates, condition, default_value):
 def _GetTempDirectory():
   """Get temp directory.
 
-  It should match the logic with GetTempDirectory in client/mypath.cc.
-
   Returns:
     a directory name.
   """
-  candidates = ['TEST_TMPDIR', 'TMPDIR', 'TMP']
+  candidates = ['TMPDIR', 'TMP']
   return _GetEnvMatchedCondition(candidates, os.path.isdir, '/tmp')
 
 

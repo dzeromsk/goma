@@ -12,6 +12,7 @@
 #include <intrin.h>
 #endif
 
+#include "absl/base/macros.h"
 #include "absl/strings/ascii.h"
 #include "compiler_specific.h"
 #include "glog/logging.h"
@@ -191,7 +192,7 @@ bool CppTokenizer::NextTokenFrom(CppInputStream* stream,
         }
         // Non-ended single quotation is valid in preprocessor.
         // e.g. 'A will be PUNCTUATOR '\'' and IDENTIFIER('A).
-        FALLTHROUGH_INTENDED;
+        ABSL_FALLTHROUGH_INTENDED;
       default:
         if (c == '_'  || c == '$' || absl::ascii_isalpha(c)) {
           *token = ReadIdentifier(stream, cur);

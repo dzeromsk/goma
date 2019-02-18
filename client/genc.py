@@ -10,6 +10,8 @@ Usage:
  % genc.py file.txt # generates file.c and file.h
 """
 
+from __future__ import print_function
+
 
 
 import optparse
@@ -60,9 +62,9 @@ extern const char %(symbol)s_start[];
        'size': size,
        'symbol': symbol})
     out.close()
-  except Exception, ex:
+  except Exception as ex:
     os.remove(header_file)
-    print 'Failed to generate %s: %s' % (header_file, ex)
+    print('Failed to generate %s: %s' % (header_file, ex))
     sys.exit(1)
 
   c_file = name + '.c'
@@ -79,9 +81,9 @@ const char %(symbol)s_start[] = {
     dst.write('};\n')
     src.close()
     dst.close()
-  except Exception, ex:
+  except Exception as ex:
     os.remove(c_file)
-    print 'Failed to generate %s: %s' % (c_file, ex)
+    print('Failed to generate %s: %s' % (c_file, ex))
     sys.exit(1)
 
 

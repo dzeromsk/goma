@@ -107,6 +107,9 @@ class CompilerFlags {
     return unknown_flags_;
   }
 
+  // Set an error indicating that flag parsing failed.
+  void Fail(const string& msg);
+
   // Dump arguments for debugging.
   string DebugString() const;
 
@@ -129,14 +132,12 @@ class CompilerFlags {
   };
 
   CompilerFlags(const std::vector<string>& args, string cwd);
-  // A utility function to indicate parsing was failed.
-  void Fail(const string& msg, const std::vector<string>& args);
 
   // Command line arguments. @rsp file isn't expanded.
   // e.g.
   // ["gcc", "-c", "foo.cc"]
   // ["clang-cl", "@foo.rsp", "/c", "foo.cc"]
-  std::vector<string> args_;
+  const std::vector<string> args_;
   // Expanded command line arguments if the command line contains @rsp.
   // arguments. If @rsp does not exist, this can be empty.
   // e.g.
