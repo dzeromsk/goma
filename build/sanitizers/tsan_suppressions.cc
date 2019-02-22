@@ -14,6 +14,8 @@
 char kTSanDefaultSuppressions[] =
   "race:third_party/glog/src/vlog_is_on.cc\n"
   "race:third_party/glog/src/raw_logging.cc\n"
+  // b/124806470
+  "race:third_party/abseil/src/absl/base/internal/spinlock.h\n"
   // goma_fetch sometimes show data race in buildbot, which we cannot reproduce
   // on our local machine (b/74301421).
   "race:PollEvents\n"

@@ -217,7 +217,6 @@ class CppIncludeProcessorPosixTest : public testing::Test {
     VLOG(1) << cis.get()->info().DebugString();
 
     CppIncludeProcessor processor;
-    processor.set_enable_clang_modules(true);
     std::set<string> files;
     FileStatCache file_stat_cache;
     ASSERT_TRUE(processor.GetIncludeFiles(
@@ -445,6 +444,49 @@ TEST_F(CppIncludeProcessorPosixTest, stdcpredef) {
 
   // stdc-predef.h should be included.
   EXPECT_EQ(1U, files.size());
+}
+
+TEST_F(CppIncludeProcessorPosixTest, stdcpredef_missing) {
+  const string& bare_gcc = "/usr/bin/g++";
+  const string& source_file = CreateTmpFile("", "foo.cc");
+
+  std::vector<string> args;
+  args.push_back(bare_gcc);
+  args.push_back("-I.");
+  args.push_back("-c");
+  args.push_back(source_file);
+
+  std::unique_ptr<CompilerFlags> flags(
+      CompilerFlagsParser::MustNew(args, tmpdir_util_->tmpdir()));
+  std::unique_ptr<CompilerInfoData> data(
+      CreateCompilerInfoWithArgs(*flags, bare_gcc, env_));
+
+  data->set_name("g++");
+  data->set_version("g++ (Ubuntu 4.8.2-19ubuntu1) 4.8.2");
+  data->mutable_cxx()->set_predefined_macros(
+      "#define __GNUC__ 4\n"
+      "#define __GNUC_MINOR__ 8\n");
+
+  // clear all include directories so that /usr/include/stdc-predef.h is not
+  // included.
+  data->mutable_cxx()->mutable_quote_include_paths()->Clear();
+  data->mutable_cxx()->mutable_system_include_paths()->Clear();
+  data->mutable_cxx()->mutable_cxx_system_include_paths()->Clear();
+  data->mutable_cxx()->mutable_system_framework_paths()->Clear();
+
+  CxxCompilerInfo compiler_info(std::move(data));
+
+  CppIncludeProcessor processor;
+  std::set<string> files;
+  FileStatCache file_stat_cache;
+
+  // Don't fail even if stdc-predef.h is missing.
+  ASSERT_TRUE(processor.GetIncludeFiles(source_file, tmpdir_util_->tmpdir(),
+                                        *flags, compiler_info, &files,
+                                        &file_stat_cache));
+
+  // stdc-predef.h should not be included.
+  EXPECT_EQ(0U, files.size());
 }
 
 TEST_F(CppIncludeProcessorPosixTest, ffreestanding) {

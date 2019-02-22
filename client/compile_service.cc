@@ -736,13 +736,13 @@ void CompileService::DumpStats(std::ostringstream* ss) {
   (*ss) << " fallback_in_setup:" << std::endl
         << "  parse_fail=" << fallback_in_setup.failed_to_parse_flags()
         << " no_remote=" << fallback_in_setup.no_remote_compile_supported()
-        << " http_disabled=" << fallback_in_setup.http_disabled()
-        << std::endl
+        << " http_disabled=" << fallback_in_setup.http_disabled() << std::endl
         << "  compiler_info_fail="
         << fallback_in_setup.fail_to_get_compiler_info()
         << " compiler_disabled=" << fallback_in_setup.compiler_disabled()
         << " requested_by_user=" << fallback_in_setup.requested_by_user()
-        << std::endl;
+        << " update_required_files="
+        << fallback_in_setup.failed_to_update_required_files() << std::endl;
   (*ss) << " local:"
         << " run=" << gstats.request_stats().local().run()
         << " killed=" << gstats.request_stats().local().killed()
@@ -1566,6 +1566,8 @@ void CompileService::DumpCommonStatsUnlocked(GomaStats* stats) {
         num_forced_fallback_in_setup_[kCompilerDisabled]);
     fallback->set_requested_by_user(
         num_forced_fallback_in_setup_[kRequestedByUser]);
+    fallback->set_failed_to_update_required_files(
+        num_forced_fallback_in_setup_[KFailToUpdateRequiredFiles]);
     FileStats* files = stats->mutable_file_stats();
     files->set_requested(num_file_requested_);
     files->set_uploaded(num_file_uploaded_);

@@ -1,8 +1,0 @@
-Files under this directory is copied from chromium's src/third_party/yasm,
-and modified for goma.
-
-Modifications for goma:
-- *.gn and *.gni are changed to be used as goma's GN rule.
-  e.g. {,no_}goma_code instead of {,no_}_chromium_code
-       os == "win" instead of is_win.
-- removed unused configs.

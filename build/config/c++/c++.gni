@@ -1,3 +1,4 @@
 # libc++abi needs to be exported from executables to be picked up by shared
 # libraries on certian instrumented builds.
 export_libcxxabi_from_executables = false
+libcxx_is_shared = false

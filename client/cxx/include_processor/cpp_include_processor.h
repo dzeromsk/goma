@@ -26,14 +26,7 @@ class GCCFlags;
 
 class CppIncludeProcessor {
  public:
-  CppIncludeProcessor()
-      : enable_clang_modules_(default_enable_clang_modules_) {}
-
-  static void SetDefaultEnableClangModules(bool default_enable_clang_modules) {
-    default_enable_clang_modules_ = default_enable_clang_modules;
-  }
-  void set_enable_clang_modules(bool enable) { enable_clang_modules_ = enable; }
-  bool enable_clang_modules() { return enable_clang_modules_; }
+  CppIncludeProcessor() = default;
 
   // Enumerates all include files. When FileStats are created for them,
   // we cache them in |file_stat_cache| so that we can reuse them later,
@@ -64,10 +57,7 @@ class CppIncludeProcessor {
                             std::set<string>* include_files,
                             FileStatCache* file_stat_cache) const;
 
-  static bool default_enable_clang_modules_;
-
   CppParser cpp_parser_;
-  bool enable_clang_modules_;
 
   friend class CppIncludeProcessorTest;
 

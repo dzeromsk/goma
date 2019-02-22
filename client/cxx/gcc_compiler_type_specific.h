@@ -15,6 +15,10 @@ class GCCCompilerTypeSpecific : public CxxCompilerTypeSpecific {
   GCCCompilerTypeSpecific(const GCCCompilerTypeSpecific&) = delete;
   void operator=(const GCCCompilerTypeSpecific&) = delete;
 
+  bool RemoteCompileSupported(const string& trace_id,
+                              const CompilerFlags& flags,
+                              bool verify_output) const override;
+
   std::unique_ptr<CompilerInfoData> BuildCompilerInfoData(
       const CompilerFlags& flags,
       const string& local_compiler_path,
@@ -28,6 +32,16 @@ class GCCCompilerTypeSpecific : public CxxCompilerTypeSpecific {
       FileStatCache* file_stat_cache) override;
 
   bool SupportsDepsCache(const CompilerFlags& flags) const override;
+
+  static void SetEnableGchHack(bool enable_gch_hack) {
+    enable_gch_hack_ = enable_gch_hack;
+  }
+  static void SetEnableRemoteLink(bool enable_remote_link) {
+    enable_remote_link_ = enable_remote_link;
+  }
+  static void SetEnableRemoteClangModules(bool enable_remote_clang_modules) {
+    enable_remote_clang_modules_ = enable_remote_clang_modules;
+  }
 
  private:
   GCCCompilerTypeSpecific() = default;
@@ -43,6 +57,10 @@ class GCCCompilerTypeSpecific : public CxxCompilerTypeSpecific {
   GCCCompilerInfoBuilder compiler_info_builder_;
 
   friend class CompilerTypeSpecificCollection;
+
+  static bool enable_gch_hack_;
+  static bool enable_remote_link_;
+  static bool enable_remote_clang_modules_;
 };
 
 }  // namespace devtools_goma

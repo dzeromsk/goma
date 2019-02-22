@@ -303,6 +303,19 @@ config("no_optimize") {
   }
 }
 
+config("optimize_max") {
+  # This is for nasm.
+  configs = [ ":optimize" ]
+}
+
+config("default_optimization") {
+  if (is_debug) {
+    configs = [ ":no_optimize" ]
+  } else {
+    configs = [ ":optimize" ]
+  }
+}
+
 # rtti -------------------------------------------------------------------
 config("rtti") {
   if (os == "win") {
@@ -459,6 +472,14 @@ config("no_chromium_code") {
   # This is warning suppression config used by libc++/libc++abi.
   if (is_clang) {
     cflags_cc = [ "-Wno-implicit-fallthrough" ]
+  }
+
+  if (os == "win") {
+    defines = [
+      # These are for nasm.
+      "_CRT_NONSTDC_NO_WARNINGS",
+      "_CRT_SECURE_NO_WARNINGS",
+    ]
   }
 }
 

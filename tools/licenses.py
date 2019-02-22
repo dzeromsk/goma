@@ -91,7 +91,7 @@ def main():
       continue
     license = FindLicense(args.third_party_dir, d)
     if not license:
-      raise Exception('license find not found in {}'.format(d))
+      raise Exception('license file not found in {}'.format(d))
     result = AddLicenseFile(result, d, license)
 
   with open(args.output_file, 'w') as f:

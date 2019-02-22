@@ -25,6 +25,7 @@
 #include "compilerz_script.h"
 #include "compilerz_style.h"
 #include "counterz.h"
+#include "cxx/gcc_compiler_type_specific.h"
 #include "cxx/include_processor/cpp_directive_optimizer.h"
 #include "cxx/include_processor/cpp_include_processor.h"
 #include "cxx/include_processor/cpp_macro.h"
@@ -270,7 +271,6 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
   service_.SetLocalRunDelay(absl::Milliseconds(FLAGS_LOCAL_RUN_DELAY_MSEC));
   service_.SetMaxSumOutputSize(FLAGS_MAX_SUM_OUTPUT_SIZE_IN_MB * 1024 * 1024);
   service_.SetStoreLocalRunOutput(FLAGS_STORE_LOCAL_RUN_OUTPUT);
-  service_.SetEnableRemoteLink(FLAGS_ENABLE_REMOTE_LINK);
   service_.SetShouldFailForUnsupportedCompilerFlag(
       FLAGS_FAIL_FOR_UNSUPPORTED_COMPILER_FLAGS);
   service_.SetTmpDir(tmpdir_);
@@ -321,7 +321,9 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
     LOG(INFO) << "memory tracker disabled";
   }
 
-  CppIncludeProcessor::SetDefaultEnableClangModules(
+  GCCCompilerTypeSpecific::SetEnableGchHack(FLAGS_ENABLE_GCH_HACK);
+  GCCCompilerTypeSpecific::SetEnableRemoteLink(FLAGS_ENABLE_REMOTE_LINK);
+  GCCCompilerTypeSpecific::SetEnableRemoteClangModules(
       FLAGS_ENABLE_REMOTE_CLANG_MODULES);
 
   InitialPing();

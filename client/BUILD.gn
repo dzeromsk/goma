@@ -479,7 +479,7 @@ static_library("compiler_proxy_lib") {
     "//client/linker/linker_input_processor:linker_input_processor_lib",
     "//client/linker/linker_input_processor:thinlto_import_processor_lib",
     "//lib:compiler_flag_type_specific",
-    "//third_party:minizip",
+    "//third_party:zlib",
     "//third_party/abseil",
     "//third_party/boringssl",
     "//third_party/chromium_base:cpu",
@@ -675,7 +675,7 @@ static_library("ioutil_lib") {
     ":common",
     "//lib",
     "//third_party:glog",
-    "//third_party:minizip",
+    "//third_party:zlib",
   ]
 }
 

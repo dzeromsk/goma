@@ -63,7 +63,10 @@ class GCCFlags : public CxxFlags {
   bool has_resource_dir() const { return !resource_dir_.empty(); }
   bool has_wrapper() const { return has_wrapper_; }
   bool has_fplugin() const { return has_fplugin_; }
-  bool is_precompiling_header() const { return is_precompiling_header_; }
+  bool is_linking() const override { return mode_ == GCCFlags::LINK; }
+  bool is_precompiling_header() const override {
+    return is_precompiling_header_;
+  }
   bool is_stdin_input() const { return is_stdin_input_; }
 
   bool has_fmodules() const { return has_fmodules_; }

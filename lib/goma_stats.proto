@@ -90,7 +90,7 @@ message LocalCompileStats {
 }
 
 // Statistics on forced local fallbacks in setup step.
-// NEXT ID TO USE: 7
+// NEXT ID TO USE: 8
 message FallbackInSetupStats {
   // Number of fallbacks caused by failures to parse command line flags.
   optional int64 failed_to_parse_flags = 1;
@@ -104,6 +104,8 @@ message FallbackInSetupStats {
   optional int64 compiler_disabled = 5;
   // Number of fallbacks requested by the user.
   optional int64 requested_by_user = 6;
+  // Number of fallbacks caused by failures to update required files.
+  optional int64 failed_to_update_required_files = 7;
 }
 
 // Statistics of files used for remote compile.

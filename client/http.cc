@@ -1086,9 +1086,9 @@ bool HttpClient::IsHealthyRecently() {
 
   UpdateStatusCodeHistoryUnlocked();
 
-  return bad_status_num_in_recent_http_ <=
-      recent_http_status_code_.size() *
-      options_.network_error_threshold_percent / 100;
+  return bad_status_num_in_recent_http_ * 100 <=
+         recent_http_status_code_.size() *
+             options_.network_error_threshold_percent;
 }
 
 bool HttpClient::IsHealthy() const {

@@ -83,6 +83,11 @@ class CompilerFlags {
   // compiler_proxy to goma server.
   virtual bool IsServerImportantEnv(const char* env) const = 0;
 
+  // The compiler command is a link operation.
+  virtual bool is_linking() const { return false; }
+  // The compiler command is precompiling a header.
+  virtual bool is_precompiling_header() const { return false; }
+
   // Copy client important environment variables from |envp| to |out_envs|.
   void GetClientImportantEnvs(const char** envp,
                               std::vector<string>* out_envs) const;

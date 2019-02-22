@@ -135,6 +135,9 @@ class CppParser {
     return true;
   }
 
+  bool disabled() const { return disabled_; }
+  void ClearDisabled() { disabled_ = false; }
+
   int total_files() const { return total_files_; }
   int skipped_files() const { return skipped_files_; }
 

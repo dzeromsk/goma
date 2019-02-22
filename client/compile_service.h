@@ -77,6 +77,7 @@ class CompileService {
     kFailToGetCompilerInfo,
     kCompilerDisabled,
     kRequestedByUser,
+    KFailToUpdateRequiredFiles,
 
     kNumForcedFallbackReasonInSetup,
   };
@@ -258,10 +259,6 @@ class CompileService {
     store_local_run_output_ = store_local_run_output;
   }
   bool store_local_run_output() const { return store_local_run_output_; }
-  void SetEnableRemoteLink(bool enable_remote_link) {
-    enable_remote_link_ = enable_remote_link;
-  }
-  bool enable_remote_link() const { return enable_remote_link_; }
 
   void SetShouldFailForUnsupportedCompilerFlag(bool f) {
     should_fail_for_unsupported_compiler_flag_ = f;
@@ -497,6 +494,9 @@ class CompileService {
   bool need_to_send_content_ = false;
   absl::Duration new_file_threshold_duration_;
   std::vector<absl::Duration> timeouts_;
+  // TODO: moving enable_gch_hack to compiler specific place.
+  //                    The code using the flag scatters in compile_task.
+  //                    It is difficult to omit all the use case in one CL.
   bool enable_gch_hack_;
   bool use_relative_paths_in_argv_ = false;
   bool send_expected_outputs_ = false;
@@ -517,7 +517,6 @@ class CompileService {
   bool local_run_for_failed_input_ = false;
   absl::Duration local_run_delay_;
   bool store_local_run_output_ = false;
-  bool enable_remote_link_ = false;
   bool should_fail_for_unsupported_compiler_flag_ = false;
   string tmp_dir_;
 

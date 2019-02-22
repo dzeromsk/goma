@@ -6,15 +6,52 @@
 
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_split.h"
 #include "absl/strings/strip.h"
 #include "glog/logging.h"
+#include "lib/file_helper.h"
 #include "path.h"
 
-#ifdef __linux__
 #include <unistd.h>
-#endif
 
 namespace devtools_goma {
+
+namespace {
+
+bool IsKnownClangInChroot(absl::string_view local_compiler_path) {
+  return local_compiler_path == "/usr/bin/clang" ||
+         local_compiler_path == "/usr/bin/clang++" ||
+         local_compiler_path == "/usr/bin/x86_64-cros-linux-gnu-clang" ||
+         local_compiler_path == "/usr/bin/x86_64-cros-linux-gnu-clang++";
+}
+
+bool ParseEnvdPath(absl::string_view envd_path, string* path) {
+  // content is like
+  //
+  // ```
+  // PATH="/usr/x86_64-pc-linux-gnu/x86_64-cros-linux-gnu/gcc-bin/4.9.x"
+  // ROOTPATH="/usr/x86_64-pc-linux-gnu/x86_64-cros-linux-gnu/gcc-bin/4.9.x"
+  // ```
+
+  string content;
+  if (!ReadFileToString(envd_path, &content)) {
+    LOG(ERROR) << "failed to open/read " << envd_path;
+    return false;
+  }
+
+  for (absl::string_view line :
+       absl::StrSplit(content, absl::ByAnyChar("\r\n"), absl::SkipEmpty())) {
+    if (absl::ConsumePrefix(&line, "PATH=\"") &&
+        absl::ConsumeSuffix(&line, "\"")) {
+      *path = string(line);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+}  // anonymous namespace
 
 // static
 bool ChromeOSCompilerInfoBuilderHelper::IsSimpleChromeClangCommand(
@@ -98,9 +135,7 @@ bool ChromeOSCompilerInfoBuilderHelper::EstimateClangMajorVersion(
 // static
 bool ChromeOSCompilerInfoBuilderHelper::IsClangInChrootEnv(
     absl::string_view local_compiler_path) {
-#ifdef __linux__
-  if (!(local_compiler_path == "/usr/bin/clang" ||
-        local_compiler_path == "/usr/bin/clang++")) {
+  if (!IsKnownClangInChroot(local_compiler_path)) {
     return false;
   }
 
@@ -110,11 +145,6 @@ bool ChromeOSCompilerInfoBuilderHelper::IsClangInChrootEnv(
   }
 
   return true;
-#else
-  // chromeos chroot should be Linux. So the other platform should not be
-  // chromeos chroot env.
-  return false;
-#endif
 }
 
 // static
@@ -122,7 +152,6 @@ bool ChromeOSCompilerInfoBuilderHelper::CollectChrootClangResources(
     absl::string_view local_compiler_path,
     absl::string_view real_compiler_path,
     std::vector<string>* resource_paths) {
-#ifdef __linux__
   constexpr absl::string_view lib_dir = "/usr/lib64";
 
   int version;
@@ -132,18 +161,58 @@ bool ChromeOSCompilerInfoBuilderHelper::CollectChrootClangResources(
     return false;
   }
 
-  // TODO: Use lld to list the libraries?
+  // TODO: Currently support only target = x86_64.
+  // for target=arm, we need to use other resources.
+  // check local_compiler_path, and if compiler name looks like arm,
+  // we have to use arm-like resources.
   resource_paths->push_back(
       file::JoinPath(lib_dir, absl::StrCat("libLLVM-", version, "svn.so")));
   resource_paths->push_back(file::JoinPath(lib_dir, "libc++.so.1"));
   resource_paths->push_back(file::JoinPath(lib_dir, "libc++abi.so.1"));
   resource_paths->push_back(file::JoinPath(lib_dir, "libffi.so.6"));
   resource_paths->push_back(file::JoinPath(lib_dir, "libxml2.so.2"));
+  resource_paths->push_back("/etc/env.d/gcc/.NATIVE");
+  resource_paths->push_back("/etc/env.d/05gcc-x86_64-cros-linux-gnu");
+
+  string path_from_envd;
+  if (!ParseEnvdPath("/etc/env.d/05gcc-x86_64-cros-linux-gnu",
+                     &path_from_envd)) {
+    return false;
+  }
+
+  if (local_compiler_path == "/usr/bin/x86_64-cros-linux-gnu-clang") {
+    // Actually /usr/bin/clang is called.
+    // /usr/x86_64-pc-linux-gnu/x86_64-cros-linux-gnu/gcc-bin/4.9.x/x86_64-cros-linux-gnu-clang
+    // is wrapper.
+    resource_paths->push_back("/usr/bin/clang");
+    resource_paths->push_back(
+        file::JoinPath(path_from_envd, "x86_64-cros-linux-gnu-clang"));
+  } else if (local_compiler_path == "/usr/bin/x86_64-cros-linux-gnu-clang++") {
+    // Actually /usr/bin/clang++ is called, and /usr/bin/clang can also be
+    // called. The latter 2 binaries are both wrapper.
+    resource_paths->push_back("/usr/bin/clang");
+    resource_paths->push_back("/usr/bin/clang++");
+    resource_paths->push_back(
+        file::JoinPath(path_from_envd, "x86_64-cros-linux-gnu-clang"));
+    resource_paths->push_back(
+        file::JoinPath(path_from_envd, "x86_64-cros-linux-gnu-clang++"));
+  }
 
   return true;
-#else
-  return false;
-#endif
+}
+
+// static
+void ChromeOSCompilerInfoBuilderHelper::SetAdditionalFlags(
+    absl::string_view local_compiler_path,
+    google::protobuf::RepeatedPtrField<std::string>* additional_flags) {
+  if (local_compiler_path == "/usr/bin/x86_64-cros-linux-gnu-clang" ||
+      local_compiler_path == "/usr/bin/x86_64-cros-linux-gnu-clang++") {
+    // Wrapper tries to set up ccache, but it's meaningless in goma.
+    // we have to set -noccache.
+    // TODO: chromeos toolchain should have -noccache by default
+    // if goma is enabled.
+    additional_flags->Add("-noccache");
+  }
 }
 
 }  // namespace devtools_goma

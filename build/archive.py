@@ -244,12 +244,13 @@ def main():
       shutil.copy(pdb, distname)
     for f in ('.vpython', 'goma_auth.py', 'goma_ctl.py', 'goma_ctl.bat',
               'diagnose_goma_log.py', 'compiler_proxy.sym', 'sha256.json',
-              'gomacc.sym'):
+              'gomacc.sym', 'LICENSE'):
       shutil.copy(f, distname)
   else:
     for f in ('.vpython', 'gomacc', 'compiler_proxy', 'goma_fetch',
               'report_env.sh', 'diagnose_goma_log.py', 'compiler_proxy.sym',
-              'goma_auth.py', 'goma_ctl.py', 'sha256.json', 'gomacc.sym'):
+              'goma_auth.py', 'goma_ctl.py', 'sha256.json', 'gomacc.sym',
+              'LICENSE'):
       shutil.copy(f, distname)
     CreatePlatformGomacc(distname, options.platform)
     InstallPlatformFiles(distname, options.platform)

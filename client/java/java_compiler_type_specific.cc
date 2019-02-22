@@ -10,6 +10,15 @@
 
 namespace devtools_goma {
 
+bool JavaCompilerTypeSpecific::RemoteCompileSupported(
+    const string& trace_id,
+    const CompilerFlags& flags,
+    bool verify_output) const {
+  LOG(INFO) << trace_id << " force fallback to avoid running java program in"
+            << " goma backend";
+  return false;
+}
+
 std::unique_ptr<CompilerInfoData>
 JavaCompilerTypeSpecific::BuildCompilerInfoData(
     const CompilerFlags& flags,
@@ -34,6 +43,22 @@ JavaCompilerTypeSpecific::RunIncludeProcessor(
 }
 
 // ----------------------------------------------------------------------
+
+bool JavacCompilerTypeSpecific::RemoteCompileSupported(
+    const string& trace_id,
+    const CompilerFlags& flags,
+    bool verify_output) const {
+  const JavacFlags& javac_flag = static_cast<const JavacFlags&>(flags);
+  // TODO: remove following code when goma backend get ready.
+  // Force fallback a compile request with -processor (b/38215808)
+  if (!javac_flag.processors().empty()) {
+    LOG(INFO) << trace_id
+              << " force fallback to avoid running annotation processor in"
+              << " goma backend (b/38215808)";
+    return false;
+  }
+  return true;
+}
 
 std::unique_ptr<CompilerInfoData>
 JavacCompilerTypeSpecific::BuildCompilerInfoData(

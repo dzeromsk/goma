@@ -15,6 +15,10 @@ class JavaCompilerTypeSpecific : public CompilerTypeSpecific {
   JavaCompilerTypeSpecific(const JavaCompilerTypeSpecific&) = delete;
   void operator=(const JavaCompilerTypeSpecific&) = delete;
 
+  bool RemoteCompileSupported(const string& trace_id,
+                              const CompilerFlags& flags,
+                              bool verify_output) const override;
+
   std::unique_ptr<CompilerInfoData> BuildCompilerInfoData(
       const CompilerFlags& flags,
       const string& local_compiler_path,
@@ -41,6 +45,10 @@ class JavacCompilerTypeSpecific : public CompilerTypeSpecific {
  public:
   JavacCompilerTypeSpecific(const JavacCompilerTypeSpecific&) = delete;
   void operator=(const JavacCompilerTypeSpecific&) = delete;
+
+  bool RemoteCompileSupported(const string& trace_id,
+                              const CompilerFlags& flags,
+                              bool verify_output) const override;
 
   std::unique_ptr<CompilerInfoData> BuildCompilerInfoData(
       const CompilerFlags& flags,

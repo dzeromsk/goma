@@ -15,6 +15,12 @@ class ClangTidyCompilerTypeSpecific : public CxxCompilerTypeSpecific {
   ClangTidyCompilerTypeSpecific(const ClangTidyCompilerTypeSpecific&) = delete;
   void operator=(const ClangTidyCompilerTypeSpecific&) = delete;
 
+  bool RemoteCompileSupported(const string& trace_id,
+                              const CompilerFlags& flags,
+                              bool verify_output) const override {
+    return true;
+  }
+
   std::unique_ptr<CompilerInfoData> BuildCompilerInfoData(
       const CompilerFlags& flags,
       const string& local_compiler_path,

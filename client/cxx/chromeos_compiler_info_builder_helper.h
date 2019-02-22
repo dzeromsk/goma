@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "prototmp/compiler_info_data.pb.h"
 
 using std::string;
 
@@ -39,6 +40,10 @@ class ChromeOSCompilerInfoBuilderHelper {
   static bool CollectChrootClangResources(absl::string_view local_compiler_path,
                                           absl::string_view real_compiler_path,
                                           std::vector<string>* resource_paths);
+
+  static void SetAdditionalFlags(
+      absl::string_view local_compiler_path,
+      google::protobuf::RepeatedPtrField<std::string>* additional_flags);
 };
 
 }  // namespace devtools_goma

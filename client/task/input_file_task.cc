@@ -13,6 +13,18 @@
 
 namespace devtools_goma {
 
+namespace {
+
+// For file sizes no larger than this limit, embed it in the request instead of
+// uploading separately.
+constexpr size_t kLargeFileThreshold = 2 * 1024 * 1024UL;  // 2MB
+
+// For file sizes smaller than this limit, embed it in the request even if only
+// the hash key was requested.
+constexpr size_t kTinyFileThreshold = 512;
+
+}  // anonymous namespace
+
 // static
 InputFileTask* InputFileTask::NewInputFileTask(
     WorkerThreadManager* wm,
@@ -93,7 +105,7 @@ void InputFileTask::Run(CompileTask* task, OneshotClosure* closure) {
   }
 
   if (need_to_upload_content(hash_key)) {
-    if (need_hash_only_ || file_stat_.size > 2 * 1024 * 1024) {
+    if (need_hash_only_ || file_stat_.size > kLargeFileThreshold) {
       // upload in side channel.
       LOG(INFO) << task->trace_id() << "(" << num_tasks() << " tasks)"
                 << " upload:" << filename_ << " size:" << file_stat_.size
@@ -109,8 +121,8 @@ void InputFileTask::Run(CompileTask* task, OneshotClosure* closure) {
                 << " reason:" << upload_reason(hash_key);
       success_ = blob_uploader_->Embed();
     }
-  } else if (file_stat_.size < 512) {
-    // For small size of file blob, embed it even if the copmile task
+  } else if (file_stat_.size < kTinyFileThreshold) {
+    // For small size of file blob, embed it even if the compile task
     // requested hash key only.
     LOG(INFO) << task->trace_id() << " (" << num_tasks() << " tasks)"
               << " embed:" << filename_ << " size:" << file_stat_.size
@@ -224,7 +236,7 @@ bool InputFileTask::need_to_compute_key() const {
     // we'll calculate hash key during uploading.
     return false;
   }
-  return file_stat_.size >= 512;
+  return file_stat_.size >= kTinyFileThreshold;
 }
 
 bool InputFileTask::need_to_upload_content(absl::string_view hash_key) const {

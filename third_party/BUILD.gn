@@ -218,54 +218,6 @@ static_library("gtest_main") {
   configs += [ "//build/config/compiler:no_goma_code" ]
 }
 
-config("minizip_config") {
-  defines = [ "ZLIB_CONST" ]
-  include_dirs = [
-    "//third_party/zlib",
-    "//third_party/zlib/contrib",
-  ]
-}
-static_library("minizip") {
-  sources = [
-    "zlib/adler32.c",
-    "zlib/contrib/minizip/ioapi.c",
-    "zlib/contrib/minizip/ioapi.h",
-    "zlib/contrib/minizip/unzip.c",
-    "zlib/contrib/minizip/unzip.h",
-    "zlib/crc32.c",
-    "zlib/deflate.c",
-    "zlib/gzlib.c",
-    "zlib/gzwrite.c",
-    "zlib/infback.c",
-    "zlib/inffast.c",
-    "zlib/inflate.c",
-    "zlib/inftrees.c",
-    "zlib/trees.c",
-    "zlib/zconf.h",
-    "zlib/zlib.h",
-    "zlib/zutil.c",
-  ]
-  include_dirs = [ "//third_party/zlib/contrib/minizip" ]
-  defines = [ "USE_FILE32API" ]
-  public_configs = [ ":minizip_config" ]
-  if (os == "win") {
-    cflags = [
-      "/wd4013",  # "open" etc undefined; assuming extern returning int
-      "/wd4244",  # conversion from "ZPOS64_T" to "long", possible loss of data
-    ]
-    sources += [ "zlib/contrib/minizip/iowin32.c" ]
-  }
-  if (is_posix) {
-    cflags = [
-      "-includeunistd.h",  # for lseek, write and close.
-      "-Wno-shift-negative-value",  # inflateMark returns -1 << 16.
-    ]
-  }
-
-  configs -= [ "//build/config/compiler:goma_code" ]
-  configs += [ "//build/config/compiler:no_goma_code" ]
-}
-
 config("liblzma_config") {
   include_dirs = [ "xz/src/liblzma/api" ]
 }
@@ -440,4 +392,153 @@ if (enable_lzma) {
       }
     }
   }
+}
+
+# copied from zlib's BUILD.gn and modified for Goma.
+# TODO: remove this if dependency issue has been fixed.
+
+# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+config("zlib_config") {
+  defines = [ "ZLIB_CONST" ]
+  include_dirs = [
+    "//third_party/zlib",
+    "//third_party/zlib/contrib",
+  ]
+}
+
+static_library("zlib_x86_simd") {
+  if (!is_ios && (current_cpu == "x86" || current_cpu == "x64")) {
+    sources = [
+      "zlib/crc_folding.c",
+
+      # Added followings to mitigate gn check failure.
+      "zlib/deflate.h",
+      "zlib/fill_window_sse.c",
+      "zlib/zlib.h",
+      "zlib/zutil.h",
+    ]
+    if (!is_win || is_clang) {
+      cflags = [
+        "-msse4.2",
+        "-mpclmul",
+      ]
+    }
+  } else {
+    sources = [
+      "zlib/simd_stub.c",
+    ]
+  }
+
+  configs -= [ "//build/config/compiler:goma_code" ]
+  configs += [ "//build/config/compiler:no_goma_code" ]
+}
+
+config("zlib_warnings") {
+  if (is_clang && !is_ios && (current_cpu == "x86" || current_cpu == "x64")) {
+    cflags = [ "-Wno-incompatible-pointer-types" ]
+  }
+}
+
+static_library("zlib") {
+  if (!is_win) {
+    # Don't stomp on "libzlib" on other platforms.
+    output_name = "chrome_zlib"
+  }
+
+  sources = [
+    "zlib/adler32.c",
+    "zlib/compress.c",
+    "zlib/crc32.c",
+    "zlib/crc32.h",
+    "zlib/deflate.c",
+    "zlib/deflate.h",
+    "zlib/gzclose.c",
+    "zlib/gzguts.h",
+    "zlib/gzlib.c",
+    "zlib/gzread.c",
+    "zlib/gzwrite.c",
+    "zlib/infback.c",
+    "zlib/inffast.c",
+    "zlib/inffast.h",
+    "zlib/inffixed.h",
+    "zlib/inflate.c",
+    "zlib/inflate.h",
+    "zlib/inftrees.c",
+    "zlib/inftrees.h",
+    "zlib/names.h",
+    "zlib/trees.c",
+    "zlib/trees.h",
+    "zlib/uncompr.c",
+    "zlib/x86.h",
+    "zlib/zconf.h",
+    "zlib/zlib.h",
+    "zlib/zutil.c",
+    "zlib/zutil.h",
+  ]
+
+  if (!is_ios && (current_cpu == "x86" || current_cpu == "x64")) {
+    sources += [ "zlib/x86.c" ]
+  }
+
+  configs -= [ "//build/config/compiler:goma_code" ]
+  configs += [
+    "//build/config/compiler:no_goma_code",
+
+    # Must be after no_chromium_code for warning flags to be ordered correctly.
+    ":zlib_warnings",
+  ]
+
+  public_configs = [ ":zlib_config" ]
+  deps = [
+    ":zlib_x86_simd",
+  ]
+}
+
+config("minizip_warnings") {
+  visibility = [ ":*" ]
+  if (is_clang) {
+    # zlib uses `if ((a == b))` for some reason.
+    cflags = [ "-Wno-parentheses-equality" ]
+  }
+}
+
+static_library("minizip") {
+  sources = [
+    "zlib/contrib/minizip/ioapi.c",
+    "zlib/contrib/minizip/ioapi.h",
+    "zlib/contrib/minizip/iowin32.c",
+    "zlib/contrib/minizip/iowin32.h",
+    "zlib/contrib/minizip/unzip.c",
+    "zlib/contrib/minizip/unzip.h",
+    "zlib/contrib/minizip/zip.c",
+    "zlib/contrib/minizip/zip.h",
+  ]
+
+  if (!is_win) {
+    sources -= [
+      "zlib/contrib/minizip/iowin32.c",
+      "zlib/contrib/minizip/iowin32.h",
+    ]
+  }
+  if (is_mac || is_ios || is_android) {
+    # Mac, Android and the BSDs don't have fopen64, ftello64, or fseeko64. We
+    # use fopen, ftell, and fseek instead on these systems.
+    defines = [ "USE_FILE32API" ]
+  }
+
+  deps = [
+    ":zlib",
+  ]
+
+  configs -= [ "//build/config/compiler:goma_code" ]
+  configs += [
+    "//build/config/compiler:no_goma_code",
+
+    # Must be after no_chromium_code for warning flags to be ordered correctly.
+    ":minizip_warnings",
+  ]
+  public_configs = [ ":zlib_config" ]
 }

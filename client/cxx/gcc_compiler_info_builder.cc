@@ -6,7 +6,6 @@
 
 #include "absl/strings/match.h"
 #include "autolock_timer.h"
-#include "chromeos_compiler_info_builder_helper.h"
 #include "clang_compiler_info_builder_helper.h"
 #include "counterz.h"
 #include "gcc_flags.h"
@@ -16,6 +15,10 @@
 #include "path.h"
 #include "path_resolver.h"
 #include "util.h"
+
+#ifdef __linux__
+#include "chromeos_compiler_info_builder_helper.h"
+#endif
 
 #ifdef _WIN32
 #include "posix_helper_win.h"
@@ -352,6 +355,8 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     NaClCompilerInfoBuilderHelper::CollectNaClClangResources(
         local_compiler_path, flags.cwd(), &resource_paths_to_collect);
   }
+
+#ifdef __linux__
   if (ChromeOSCompilerInfoBuilderHelper::IsSimpleChromeClangCommand(
           local_compiler_path, data->real_compiler_path())) {
     if (!ChromeOSCompilerInfoBuilderHelper::CollectSimpleChromeClangResources(
@@ -378,7 +383,11 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
                  << " real_compiler_path=" << data->real_compiler_path();
       return;
     }
+
+    ChromeOSCompilerInfoBuilderHelper::SetAdditionalFlags(
+        local_compiler_path, data->mutable_additional_flags());
   }
+#endif  // __linux__
 
   absl::flat_hash_set<string> visited_paths;
   for (const auto& resource_path : resource_paths_to_collect) {

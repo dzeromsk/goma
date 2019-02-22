@@ -31,6 +31,11 @@ class CompilerTypeSpecific {
 
   virtual ~CompilerTypeSpecific() = default;
 
+  // Returns true if remote compile is supported.
+  virtual bool RemoteCompileSupported(const string& trace_id,
+                                      const CompilerFlags& flags,
+                                      bool verify_output) const = 0;
+
   // Builds CompilerInfoData.
   virtual std::unique_ptr<CompilerInfoData> BuildCompilerInfoData(
       const CompilerFlags& flags,

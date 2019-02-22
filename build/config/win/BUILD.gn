@@ -30,6 +30,14 @@ config("winver") {
   ]
 }
 
+config("release_crt") {
+  # This is for nasm.
+}
+
+config("default_crt") {
+  # This is for nasm.
+}
+
 # Linker flags for Windows SDK setup, this is applied only to EXEs and DLLs.
 config("sdk_link") {
   if (cpu_arch == "x64") {

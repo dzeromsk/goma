@@ -88,6 +88,7 @@ default_compiler_configs = [
   "//build/config/compiler:compiler",
   "//build/config/compiler:default_include_dirs",
   "//build/config/compiler:goma_code",
+  "//build/config/compiler:default_optimization",
 
   # libc++/libc++abi requires a config whose name is 'chromium_code'.
   "//build/config/compiler:chromium_code",
@@ -99,10 +100,7 @@ default_compiler_configs = [
   "//build/config/sanitizers:default_sanitizer_flags",
 ]
 if (is_debug) {
-  default_compiler_configs += [
-    "//build/config:debug",
-    "//build/config/compiler:no_optimize",
-  ]
+  default_compiler_configs += [ "//build/config:debug" ]
 
   if (os == "win" && use_incremental_link) {
     # Note: we don't make "incremental_linking" on when is_debug=false, because
@@ -111,10 +109,7 @@ if (is_debug) {
     default_compiler_configs += [ "//build/config/win:incremental_linking" ]
   }
 } else {
-  default_compiler_configs += [
-    "//build/config:release",
-    "//build/config/compiler:optimize",
-  ]
+  default_compiler_configs += [ "//build/config:release" ]
 
   if (os == "win" && !use_link_time_optimization) {
     # When !is_debug && !use_link_time_optimization, /INCREMENTAL works.
@@ -188,6 +183,7 @@ if (os == "win") {
     "//build/config/win:rand_s",
     "//build/config/win:sdk_link",
     "//build/config/win:console",
+    "//build/config/win:default_crt",
   ]
   default_compiler_configs += win_configs
 }

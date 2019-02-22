@@ -38,18 +38,18 @@ config("no_asm_config") {
 
 all_sources = crypto_sources + ssl_sources
 
-# Windows' assembly is built with Yasm. The other platforms use the platform
-# assembler.
-if (os == "win") {
-  import("//third_party/yasm/yasm_assemble.gni")
-  yasm_assemble("boringssl_asm") {
+# Windows' assembly is built with NASM. The other platforms use the platform
+# assembler. Exclude Windows ARM64 because NASM targets x86 and x64 only.
+if (os == "win" && !is_msan) {
+  import("//third_party/nasm/nasm_assemble.gni")
+  nasm_assemble("boringssl_asm") {
     if (cpu_arch == "x64") {
       sources = crypto_sources_win_x86_64
     } else if (cpu_arch == "x86") {
       sources = crypto_sources_win_x86
     }
     if (!is_debug) {
-      yasm_flags = [ "-DNDEBUG" ]
+      nasm_flags = [ "-DNDEBUG" ]
     }
   }
 } else {

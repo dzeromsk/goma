@@ -50,6 +50,8 @@ class VCFlags : public CxxFlags {
 
   const string& implicit_macros() const { return implicit_macros_; }
 
+  // TODO: check flags_->is_linking() etc.
+
   static bool IsClangClCommand(absl::string_view arg);
   static bool IsVCCommand(absl::string_view arg);
   static string GetCompilerName(absl::string_view arg);

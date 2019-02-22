@@ -29,6 +29,21 @@ namespace {
 
 constexpr int kCompileTaskId = 1234;
 
+std::unique_ptr<ExecReq> CreateExecReqForTest() {
+  auto req = absl::make_unique<ExecReq>();
+  req->add_arg("clang");
+  req->add_arg("foo.cc");
+  req->add_arg("-o");
+  req->add_arg("foo");
+  req->set_cwd("/home/user/code/chromium/src");
+
+  auto input = req->add_input();
+  input->set_filename("foo.cc");
+  input->set_hash_key("abcdef");
+
+  return req;
+}
+
 class DummyHttpHandler : public ThreadpoolHttpServer::HttpHandler {
  public:
   ~DummyHttpHandler() override = default;
@@ -112,7 +127,7 @@ class CompileTaskTest : public ::testing::Test {
         absl::make_unique<RpcController>(http_server_request_.get());
 
     compile_task_ = new CompileTask(compile_service_.get(), kCompileTaskId);
-    auto req = absl::make_unique<ExecReq>(exec_request_);
+    auto req = CreateExecReqForTest();
     compile_task_->Init(rpc_controller_.get(), std::move(req), &exec_response_,
                         nullptr);
   }
@@ -161,7 +176,8 @@ TEST_F(CompileTaskTest, DumpToJsonWithoutRunning) {
   Json::Value json;
   compile_task()->DumpToJson(false, &json);
 
-  EXPECT_EQ(4, json.getMemberNames().size()) << json.toStyledString();
+  EXPECT_EQ(5, json.getMemberNames().size()) << json.toStyledString();
+  EXPECT_TRUE(json.isMember("command"));
   EXPECT_TRUE(json.isMember("elapsed"));
   EXPECT_TRUE(json.isMember("id"));
   EXPECT_TRUE(json.isMember("state"));

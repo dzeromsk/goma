@@ -247,7 +247,7 @@ static_library("protobuf_lite") {
 
   public_configs = [
     ":protobuf_config",
-    "//third_party:minizip_config",
+    "//third_party:zlib_config",
 
     # TODO: crbug.com/167187 fix size_t to int truncations.
     "//build/config/compiler:no_size_t_to_int_warning",
@@ -364,14 +364,14 @@ static_library("protobuf_full") {
   }
   public_configs = [
     ":protobuf_config",
-    "//third_party:minizip_config",
+    "//third_party:zlib_config",
 
     # TODO: crbug.com/167187 fix size_t to int truncations.
     "//build/config/compiler:no_size_t_to_int_warning",
   ]
 
   deps = [
-    "//third_party:minizip",
+    "//third_party:zlib",
   ]
 
   cflags = protobuf_lite_cflags

@@ -357,8 +357,6 @@ class CompileTask {
   RequesterEnv requester_env_;
 
   std::unique_ptr<CompilerFlags> flags_;
-  bool linking_ = false;
-  bool precompiling_ = false;
 
   CompilerTypeSpecific* compiler_type_specific_ = nullptr;
 
@@ -379,7 +377,7 @@ class CompileTask {
   std::unique_ptr<FileStatCache> input_file_stat_cache_;
   std::unique_ptr<FileStatCache> output_file_stat_cache_;
 
-  // |system_library_paths_| is used only when linking_ == true.
+  // |system_library_paths_| is used only when flags_->is_linking() == true.
   std::vector<string> system_library_paths_;
   // list of interleave uploaded files_to confirm the mechanism works fine.
   absl::flat_hash_set<string> interleave_uploaded_files_;

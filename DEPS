@@ -19,9 +19,9 @@ deps = {
      Var('chromium_git') + '/external/github.com/google/googletest.git' + '@' +
          '2fe3bd994b3189899d93f1d5a881e725e046fdc2',
 
-     # zlib 1.2.8
+     # zlib
      "client/third_party/zlib":
-     "https://goma.googlesource.com/zlib.git@50893291621658f355bc5b4d450a8d06a563053d",
+     "https://chromium.googlesource.com/chromium/src/third_party/zlib@1337da5314a9716c0653301cceeb835d17fd7ea4",
 
      # xz v5.2.0
      "client/third_party/xz":
@@ -42,22 +42,22 @@ deps = {
      # google-breakpad
      "client/third_party/breakpad/breakpad":
      Var("chromium_git") + "/breakpad/breakpad.git@" +
-         "54fa71efbe50fb2b58096d871575b59e12edba6d",
+         "a0e078365d0515f4ffdfc3389d92b2c062f62132",
 
      # lss
      "client/third_party/lss":
      Var("chromium_git") + "/linux-syscall-support.git@" +
          "a89bf7903f3169e6bc7b8efc10a73a7571de21cf",
 
-     # chrome's patched-yasm
-     "client/third_party/yasm/source/patched-yasm":
-     Var("chromium_git") + "/chromium/deps/yasm/patched-yasm.git@" +
-         "b98114e18d8b9b84586b10d24353ab8616d4c5fc",
+     # nasm
+     "client/third_party/nasm":
+     Var("chromium_git") + "/chromium/deps/nasm.git@" +
+         "ae8e4ca1c64c861de419c93385a0fc66a39141e2",
 
      # chromium's buildtools containing libc++, libc++abi, clang_format and gn.
      "client/buildtools":
-     Var("chromium_git") + "/chromium/buildtools@" +
-         "24ebce4578745db15274e180da1938ebc1358243",
+     Var("chromium_git") + "/chromium/src/buildtools@" +
+         "6b05562fca005bb3c7131fece22cc5530938b7d8",
 
      # libFuzzer
      "client/third_party/libFuzzer/src":
@@ -95,6 +95,12 @@ deps = {
 }
 
 hooks = [
+     # Update the Windows toolchain if necessary. Must run before 'clang' below.
+     {
+       'name': 'win_toolchain',
+       'pattern': '.',
+       'action': ['python', 'client/build/vs_toolchain.py', 'update'],
+     },
      {
        "name": "clang",
        "pattern": ".",
@@ -186,12 +192,6 @@ hooks = [
                      '--bucket', 'chromium-clang-format',
                      '-s', 'client/buildtools/linux64/clang-format.sha1',
          ],
-     },
-     # Update the Windows toolchain if necessary.
-     {
-       'name': 'win_toolchain',
-       'pattern': '.',
-       'action': ['python', 'client/build/vs_toolchain.py', 'update'],
      },
      # Update the Mac toolchain if necessary.
      {

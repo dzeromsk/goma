@@ -89,7 +89,7 @@ function makeFlagSummary(flag) {
  * @return {string} task status
  */
 function taskStatus(task) {
-  // There is a case that `canceled` exists but `exit` or `http` does not
+  // There is a case that `canceled` exists but `exit` or `http_status` does not
   // exists. So handle this earlier.
   if (task['canceled']) {
     return 'cancel';
@@ -105,8 +105,8 @@ function taskStatus(task) {
     if (task['exit'] != 0) {
       success = false;
     }
-  } else if ('http' in task) {
-    if (task['http'] != 200) {
+  } else if ('http_status' in task) {
+    if (task['http_status'] != 200) {
       success = false;
     }
   }
@@ -115,7 +115,10 @@ function taskStatus(task) {
     return 'client-error'
   }
   if (task['goma_error']) {
-    if (task['http'] != 200) {
+    if (!('http_status' in task)) {
+      return 'conftestfailure'
+    }
+    if (task['http_status'] != 200) {
       return 'http-error';
     }
     return 'backend-error'

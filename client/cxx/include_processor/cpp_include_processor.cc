@@ -103,9 +103,6 @@ IncludeItem TryInclude(const string& cwd,
 
 }  // anonymous namespace
 
-// static
-bool CppIncludeProcessor::default_enable_clang_modules_;
-
 class IncludePathsObserver : public CppParser::IncludeObserver {
  public:
   IncludePathsObserver(std::string cwd,
@@ -639,16 +636,26 @@ bool CppIncludeProcessor::GetIncludeFiles(const string& filename,
       // -ffreestanding, otherwise stdc-predef.h's header guard will be
       // defined and this will be a no-op.
 
-      // TODO: Some environment might not have stdc-predef.h
-      // (e.g. android). In that case, IncludeProcess currently emit WARNING,
-      // but it's ignoreable. It would be better to suppress such warning.
+      // Some environment might not have stdc-predef.h (e.g. android).
+      // If cpp_parser tries including a missing file, it is considered as
+      // a hard error. So, we have to check it exists or not.
+      // gcc-4 does not have __has_include (it's from gcc-5, IIRC,
+      // see https://gcc.gnu.org/gcc-5/changes.html#c-family),
+      // but we have to try to include stdc-predef.h.
+      // So, here, we try to include stdc-predef.h anyway, and clear the error
+      // if an error has occured.
+      // See b/124756380.
       const string stdc_predef_input(
           "#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 8)\n"
           "#include <stdc-predef.h>\n"
           "#endif\n");
       cpp_parser_.AddStringInput(stdc_predef_input, "(stdc-predef)");
+      bool prev_disabled = cpp_parser_.disabled();
       if (!cpp_parser_.ProcessDirectives()) {
-        LOG(ERROR) << "failed to handle stdc-predef";
+        LOG(WARNING) << "failed to handle stdc-predef";
+        if (!prev_disabled) {
+          cpp_parser_.ClearDisabled();
+        }
       }
       // Since base_file_ will be updated in the last AddStringInput, we need
       // to clear it. Otherwise, test will fail.
@@ -691,11 +698,6 @@ bool CppIncludeProcessor::GetIncludeFiles(const string& filename,
   if (compiler_flags.type() == CompilerFlagType::Gcc) {
     const GCCFlags& flags = static_cast<const GCCFlags&>(compiler_flags);
     if (flags.has_fmodules()) {
-      if (!enable_clang_modules()) {
-        LOG(WARNING) << "-fmodules support is not enabled in compiler_proxy";
-        return false;
-      }
-
       if (!AddClangModulesFiles(flags, current_directory, include_files,
                                 file_stat_cache)) {
         return false;

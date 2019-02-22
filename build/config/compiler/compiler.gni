@@ -1,0 +1,6 @@
+# Copyright (c) 2019 Google Inc. All Rights Reserved.
+
+# TODO: move gn args to here like Chromium do.
+
+import("//build/config/sanitizers/sanitizers.gni")
+import("//build/toolchain/toolchain.gni")

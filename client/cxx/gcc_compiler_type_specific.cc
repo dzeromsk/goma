@@ -7,8 +7,49 @@
 #include "glog/logging.h"
 #include "linker/linker_input_processor/linker_input_processor.h"
 #include "linker/linker_input_processor/thinlto_import_processor.h"
+#include "path.h"
 
 namespace devtools_goma {
+
+bool GCCCompilerTypeSpecific::RemoteCompileSupported(const string& trace_id,
+                                                     const CompilerFlags& flags,
+                                                     bool verify_output) const {
+  const GCCFlags& gcc_flag = static_cast<const GCCFlags&>(flags);
+  if (gcc_flag.is_stdin_input()) {
+    LOG(INFO) << trace_id << " force fallback."
+              << " cannot use stdin as input in goma backend.";
+    return false;
+  }
+  if (gcc_flag.has_wrapper()) {
+    LOG(INFO) << trace_id << " force fallback. -wrapper is not supported";
+    return false;
+  }
+  if (!verify_output && gcc_flag.mode() == GCCFlags::PREPROCESS) {
+    LOG(INFO) << trace_id
+              << " force fallback. preprocess is usually light-weight.";
+    return false;
+  }
+  if (!enable_gch_hack_ && gcc_flag.is_precompiling_header()) {
+    LOG(INFO) << trace_id
+              << " force fallback. gch hack is not enabled and precompiling.";
+    return false;
+  }
+  if (!enable_remote_link_ && gcc_flag.is_linking()) {
+    LOG(INFO) << trace_id << " force fallback linking.";
+    return false;
+  }
+  if (!enable_remote_clang_modules_ && gcc_flag.has_fmodules()) {
+    LOG(INFO) << trace_id << " force fallback -fmodules";
+    return false;
+  }
+  absl::string_view ext = file::Extension(gcc_flag.input_filenames()[0]);
+  if (ext == "s" || ext == "S") {
+    LOG(INFO) << trace_id
+              << " force fallback. assembler should be light-weight.";
+    return false;
+  }
+  return true;
+}
 
 std::unique_ptr<CompilerInfoData>
 GCCCompilerTypeSpecific::BuildCompilerInfoData(
@@ -99,5 +140,14 @@ GCCCompilerTypeSpecific::RunLinkIncludeProcessor(
   result.system_library_paths = std::move(system_library_paths);
   return result;
 }
+
+// static
+bool GCCCompilerTypeSpecific::enable_gch_hack_;
+
+// static
+bool GCCCompilerTypeSpecific::enable_remote_link_;
+
+// static
+bool GCCCompilerTypeSpecific::enable_remote_clang_modules_;
 
 }  // namespace devtools_goma
