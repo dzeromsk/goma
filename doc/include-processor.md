@@ -9,9 +9,10 @@ This document is based on
 
 ## Purpose of C/C++ IncludeProcessor
 
-The purpose of C/C++ IncludeProcessor is to list all necessary included files.
-For example, if `#include <foo.h>` is found, "foo.h" is listed as an
-include file.
+The purpose of C/C++ IncludeProcessor is to locate and list all necessary
+included files. For example, if `#include <foo.h>` would be found by the
+toolchain's real preprocessor in "some/include/dir/", then
+"some/include/dir/foo.h" should appear in the list.
 
 ```c++
 #include <foo.h>
