@@ -36,7 +36,12 @@
 typedef unsigned int uid_t;
 typedef unsigned int gid_t;
 typedef unsigned long pid_t;
-typedef unsigned int mode_t;
+// mode_t is usually unsigned integer on Linux or Mac,
+// however, _open() and _chmod() use int instead of mode_t.
+// So we're using int here.
+// ref:
+// https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/chmod-wchmod?view=vs-2017
+typedef int mode_t;
 typedef int ssize_t;
 
 #if defined (_MSC_VER) && (_MSC_VER < 1600)

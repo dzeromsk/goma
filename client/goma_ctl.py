@@ -56,7 +56,7 @@ _DEFAULT_ENV = [
     ('LOG_CLEAN_INTERVAL', str(24 * 60 * 60)),
     ]
 _DEFAULT_NO_SSL_ENV = [
-    ('STUBBY_PROXY_PORT', '80'),
+    ('SERVER_PORT', '80'),
     ]
 _MAX_COOLDOWN_WAIT = 10  # seconds to wait for compiler_proxy to shutdown.
 _COOLDOWN_SLEEP = 1  # seconds to each wait for compiler_proxy to shutdown.

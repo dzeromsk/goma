@@ -468,7 +468,7 @@ class CompileService {
 
   std::unique_ptr<ExecServiceClient> exec_service_client_;
   std::unique_ptr<MultiFileStore> multi_file_store_;
-  std::unique_ptr<FileServiceBlobClient> blob_client_;
+  std::unique_ptr<BlobClient> blob_client_;
 
   std::unique_ptr<CompilerTypeSpecificCollection>
       compiler_type_specific_collection_;
@@ -563,6 +563,7 @@ class CompileService {
   int num_file_requested_ = 0;
   int num_file_uploaded_ = 0;
   int num_file_missed_ = 0;
+  int num_file_dropped_ = 0;
   int num_file_output_ = 0;
   int num_file_rename_output_ = 0;
   int num_file_output_buf_ GUARDED_BY(buf_mu_) = 0;

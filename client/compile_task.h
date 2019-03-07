@@ -28,6 +28,7 @@
 #include "deps_cache.h"
 #include "file_stat.h"
 #include "file_stat_cache.h"
+#include "goma_blob.h"
 #include "gtest/gtest_prod.h"
 #include "http_rpc.h"
 #include "simple_timer.h"
@@ -50,7 +51,6 @@ class CompilerFlags;
 class CompilerProxyHistogram;
 class InputFileTask;
 class LocalOutputFileTask;
-struct OutputFileInfo;
 class OutputFileTask;
 
 // CompileTask handles single compile request from gomacc.
@@ -147,6 +147,8 @@ class CompileTask {
   struct ContentOutputParam;
   struct IncludeProcessorRequestParam;
   struct IncludeProcessorResponseParam;
+
+  using OutputFileInfo = BlobClient::Downloader::OutputFileInfo;
 
   ~CompileTask();
 
@@ -452,7 +454,7 @@ class CompileTask {
 
   // Output file process.
   OneshotClosure* output_file_callback_  = nullptr;
-  std::vector<OutputFileInfo> output_file_;
+  std::vector<OutputFileInfo> output_file_infos_;
   int num_output_file_task_ = 0;
   bool output_file_success_ = false;
 

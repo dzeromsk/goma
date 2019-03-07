@@ -38,9 +38,32 @@ bool GCCCompilerTypeSpecific::RemoteCompileSupported(const string& trace_id,
     LOG(INFO) << trace_id << " force fallback linking.";
     return false;
   }
-  if (!enable_remote_clang_modules_ && gcc_flag.has_fmodules()) {
-    LOG(INFO) << trace_id << " force fallback -fmodules";
-    return false;
+  if (gcc_flag.has_fmodules()) {
+    if (!enable_remote_clang_modules_) {
+      LOG(INFO) << trace_id << " force fallback -fmodules.";
+      return false;
+    }
+    // -Xclang -emit-module is not supported yet. Do fallback.
+    // b/24956317
+    if (gcc_flag.has_emit_module()) {
+      LOG(INFO) << trace_id << " force fallback -emit-module."
+                << " -Xclang -emit-module is not supported yet.";
+      return false;
+    }
+    // Without uploading the module cache, performance become worse than
+    // local.  However, there might not be easy way to identify that?
+    // b/123546938
+    if (gcc_flag.has_fimplicit_module_maps()) {
+      LOG(INFO) << trace_id << " force fallback implicit clang module maps.";
+      return false;
+    }
+    // Since there is no easy way to identify the cache to upload,
+    // we also do not allow -fmodule-map-file used for compile in remote.
+    // b/123546938
+    if (!gcc_flag.clang_module_map_file().empty()) {
+      LOG(INFO) << trace_id << " force fallback -fmodule-map-file.";
+      return false;
+    }
   }
   absl::string_view ext = file::Extension(gcc_flag.input_filenames()[0]);
   if (ext == "s" || ext == "S") {

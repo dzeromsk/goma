@@ -54,7 +54,7 @@ bn_mul_mont_gather5:
 	andq	$-1024,%r10
 
 
-#
+
 
 
 
@@ -487,7 +487,6 @@ bn_mul4x_mont_gather5:
 	leaq	(%r9,%r9,2),%r10
 	negq	%r9
 
-##############################################################
 
 
 
@@ -495,7 +494,8 @@ bn_mul4x_mont_gather5:
 
 
 
-#
+
+
 	leaq	-320(%rsp,%r9,2),%r11
 	movq	%rsp,%rbp
 	subq	%rdi,%r11
@@ -1122,13 +1122,13 @@ bn_power5:
 	negq	%r9
 	movq	(%r8),%r8
 
-##############################################################
 
 
 
 
 
-#
+
+
 	leaq	-320(%rsp,%r9,2),%r11
 	movq	%rsp,%rbp
 	subq	%rdi,%r11
@@ -1168,15 +1168,15 @@ bn_power5:
 	movq	%r9,%r10
 	negq	%r9
 
-##############################################################
-
-#
 
 
 
 
 
-#
+
+
+
+
 	movq	%r8,32(%rsp)
 	movq	%rax,40(%rsp)
 .cfi_escape	0x0f,0x05,0x77,0x28,0x06,0x23,0x08
@@ -1235,14 +1235,14 @@ bn_power5:
 bn_sqr8x_internal:
 __bn_sqr8x_internal:
 .cfi_startproc	
-##############################################################
-
-#
 
 
 
-#
-##############################################################
+
+
+
+
+
 
 
 
@@ -2106,13 +2106,13 @@ bn_from_mont8x:
 	negq	%r9
 	movq	(%r8),%r8
 
-##############################################################
 
 
 
 
 
-#
+
+
 	leaq	-320(%rsp,%r9,2),%r11
 	movq	%rsp,%rbp
 	subq	%rdi,%r11
@@ -2152,15 +2152,15 @@ bn_from_mont8x:
 	movq	%r9,%r10
 	negq	%r9
 
-##############################################################
-
-#
 
 
 
 
 
-#
+
+
+
+
 	movq	%r8,32(%rsp)
 	movq	%rax,40(%rsp)
 .cfi_escape	0x0f,0x05,0x77,0x28,0x06,0x23,0x08
@@ -2274,7 +2274,6 @@ bn_mulx4x_mont_gather5:
 	negq	%r9
 	movq	(%r8),%r8
 
-##############################################################
 
 
 
@@ -2282,7 +2281,8 @@ bn_mulx4x_mont_gather5:
 
 
 
-#
+
+
 	leaq	-320(%rsp,%r9,2),%r11
 	movq	%rsp,%rbp
 	subq	%rdi,%r11
@@ -2318,7 +2318,6 @@ bn_mulx4x_mont_gather5:
 	ja	.Lmulx4x_page_walk
 .Lmulx4x_page_walk_done:
 
-##############################################################
 
 
 
@@ -2329,7 +2328,8 @@ bn_mulx4x_mont_gather5:
 
 
 
-#
+
+
 	movq	%r8,32(%rsp)
 	movq	%rax,40(%rsp)
 .cfi_escape	0x0f,0x05,0x77,0x28,0x06,0x23,0x08
@@ -2809,13 +2809,13 @@ bn_powerx5:
 	negq	%r9
 	movq	(%r8),%r8
 
-##############################################################
 
 
 
 
 
-#
+
+
 	leaq	-320(%rsp,%r9,2),%r11
 	movq	%rsp,%rbp
 	subq	%rdi,%r11
@@ -2855,9 +2855,6 @@ bn_powerx5:
 	movq	%r9,%r10
 	negq	%r9
 
-##############################################################
-
-#
 
 
 
@@ -2865,7 +2862,10 @@ bn_powerx5:
 
 
 
-#
+
+
+
+
 	pxor	%xmm0,%xmm0
 .byte	102,72,15,110,207
 .byte	102,72,15,110,209
@@ -2926,22 +2926,6 @@ bn_powerx5:
 bn_sqrx8x_internal:
 __bn_sqrx8x_internal:
 .cfi_startproc	
-##################################################################
-
-#
-
-
-
-#
-##################################################################
-
-
-
-
-
-
-
-#
 
 
 
@@ -2958,7 +2942,23 @@ __bn_sqrx8x_internal:
 
 
 
-#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2990,7 +2990,7 @@ __bn_sqrx8x_internal:
 	jnz	.Lsqrx8x_zero
 
 	movq	0(%rsi),%rdx
-#xor	%r9,%r9
+
 	xorq	%r10,%r10
 	xorq	%r11,%r11
 	xorq	%r12,%r12
@@ -3107,7 +3107,7 @@ __bn_sqrx8x_internal:
 	movq	%r14,%rdx
 	adoxq	%rbx,%r11
 	adcxq	%r12,%r11
-#adox	%rbp,%rax
+
 	adcxq	%rbp,%rax
 
 	mulxq	%r15,%r14,%rbx
@@ -3146,7 +3146,7 @@ __bn_sqrx8x_internal:
 	movq	%rax,16+8(%rsp)
 	movq	%rdi,24+8(%rsp)
 
-#lea	8*8(%rdi),%rdi
+
 	xorl	%eax,%eax
 	jmp	.Lsqrx8x_loop
 
@@ -3269,7 +3269,7 @@ __bn_sqrx8x_internal:
 	adoxq	%r11,%r11
 	movq	16(%rdi),%r12
 	movq	24(%rdi),%r13
-#jmp	.Lsqrx4x_shift_n_add
+
 
 .align	32
 .Lsqrx4x_shift_n_add:
@@ -3334,7 +3334,7 @@ __bn_sqrx8x_reduction:
 	movq	32+8(%rsp),%rbx
 	movq	48+8(%rsp),%rdx
 	leaq	-64(%rbp,%r9,1),%rcx
-#lea	48+8(%rsp,%r9,2),%rdi
+
 	movq	%rcx,0+8(%rsp)
 	movq	%rdi,8+8(%rsp)
 
@@ -3548,7 +3548,7 @@ __bn_postx4x_internal:
 	movq	%rcx,%r9
 	negq	%rax
 	sarq	$3+2,%rcx
-#lea	48+8(%rsp,%r9),%rdi
+
 .byte	102,72,15,126,202
 .byte	102,72,15,126,206
 	decq	%r12
@@ -3621,9 +3621,9 @@ bn_gather5:
 .cfi_startproc	
 .LSEH_begin_bn_gather5:
 
-.byte	0x4c,0x8d,0x14,0x24			#lea    (%rsp),%r10
+.byte	0x4c,0x8d,0x14,0x24
 .cfi_def_cfa_register	%r10
-.byte	0x48,0x81,0xec,0x08,0x01,0x00,0x00	#sub	src/crypto/fipsmodule/bn/asm/x86_64-mont5.plx108,%rsp
+.byte	0x48,0x81,0xec,0x08,0x01,0x00,0x00
 	leaq	.Linc(%rip),%rax
 	andq	$-16,%rsp
 

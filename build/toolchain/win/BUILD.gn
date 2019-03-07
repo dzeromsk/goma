@@ -46,6 +46,8 @@ if (current_toolchain == default_toolchain) {
                 configuration_name,
                 target_cpu,
               ])
+
+  exec_script("copy_msdia.py", [ rebase_path(root_build_dir) ])
 }
 
 # Parameters:

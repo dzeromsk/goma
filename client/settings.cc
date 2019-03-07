@@ -78,12 +78,13 @@ string ApplySettings(const string& settings_server,
       HttpClient::Options o;
       o.InitFromURL(resp.settings().endpoint_url());
       LOG(INFO) << "endpoint url=" << resp.settings().endpoint_url()
-                << " STUBBY_PROXY_IP_ADDRESS=" << o.dest_host_name
-                << " STUBBY_PROXY_PORT=" << o.dest_port
-                << " USE_SSL=" << o.use_ssl
+                << " SERVER_HOST=" << o.dest_host_name
+                << " SERVER_PORT=" << o.dest_port << " USE_SSL=" << o.use_ssl
                 << " URL_PATH_PREFIX=" << o.url_path_prefix;
-      FLAGS_STUBBY_PROXY_IP_ADDRESS = o.dest_host_name;
-      FLAGS_STUBBY_PROXY_PORT = o.dest_port;
+      FLAGS_SERVER_HOST = o.dest_host_name;
+      FLAGS_SERVER_PORT = o.dest_port;
+      FLAGS_STUBBY_PROXY_IP_ADDRESS = "";
+      FLAGS_STUBBY_PROXY_PORT = -1;
       FLAGS_USE_SSL = o.use_ssl;
       FLAGS_URL_PATH_PREFIX = o.url_path_prefix;
     }

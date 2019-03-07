@@ -108,8 +108,18 @@ void InitHttpClientOptions(HttpClient::Options* http_options) {
   SetHttpProxyFromEnv(http_options);
 
   // fields that would be updated by InitFromURL.
-  http_options->dest_host_name = FLAGS_STUBBY_PROXY_IP_ADDRESS;
-  http_options->dest_port = FLAGS_STUBBY_PROXY_PORT;
+  http_options->dest_host_name = FLAGS_SERVER_HOST;
+  http_options->dest_port = FLAGS_SERVER_PORT;
+  if (FLAGS_STUBBY_PROXY_IP_ADDRESS != "") {
+    LOG(ERROR) << "GOMA_STUBBY_PROXY_IP_ADDRESS is deprecated. "
+               << "use GOMA_SERVER_HOST instead.";
+    http_options->dest_host_name = FLAGS_STUBBY_PROXY_IP_ADDRESS;
+  }
+  if (FLAGS_STUBBY_PROXY_PORT > 0) {
+    LOG(ERROR) << "GOMA_STUBBY_PROXY_PORT is deprecated. "
+               << "use GOMA_SERVER_PORT instead.";
+    http_options->dest_port = FLAGS_STUBBY_PROXY_PORT;
+  }
   http_options->use_ssl = FLAGS_USE_SSL;
   http_options->url_path_prefix = FLAGS_URL_PATH_PREFIX;
 

@@ -221,8 +221,7 @@ void CompileService::SetMultiFileStore(
 
 void CompileService::SetFileServiceHttpClient(
     std::unique_ptr<FileServiceHttpClient> file_service) {
-  blob_client_ = absl::make_unique<FileServiceBlobClient>(
-      std::move(file_service));
+  blob_client_ = absl::make_unique<FileBlobClient>(std::move(file_service));
 }
 
 BlobClient* CompileService::blob_client() const {
@@ -376,6 +375,8 @@ void CompileService::CompileTaskDone(CompileTask* task) {
         SumRepeatedInt32(task->stats().num_uploading_input_file());
     num_file_missed_ +=
         SumRepeatedInt32(task->stats().num_missing_input_file());
+    num_file_dropped_ +=
+        SumRepeatedInt32(task->stats().num_dropped_input_file());
 
     if (task->local_run()) {
       ++num_exec_local_run_;
@@ -627,6 +628,7 @@ void CompileService::DumpToJson(Json::Value* json, absl::Time after) {
     num_file["requested"] = num_file_requested_;
     num_file["uploaded"] = num_file_uploaded_;
     num_file["missed"] = num_file_missed_;
+    num_file["dropped"] = num_file_dropped_;
     (*json)["num_file"] = std::move(num_file);
   }
 
@@ -755,7 +757,7 @@ void CompileService::DumpStats(std::ostringstream* ss) {
         << " requested=" << gstats.file_stats().requested()
         << " uploaded=" << gstats.file_stats().uploaded()
         << " missed=" << gstats.file_stats().missed()
-        << std::endl;
+        << " dropped=" << gstats.file_stats().dropped() << std::endl;
   (*ss) << "outputs:"
         << " files=" << gstats.output_stats().files()
         << " rename=" << gstats.output_stats().rename()
@@ -1572,6 +1574,7 @@ void CompileService::DumpCommonStatsUnlocked(GomaStats* stats) {
     files->set_requested(num_file_requested_);
     files->set_uploaded(num_file_uploaded_);
     files->set_missed(num_file_missed_);
+    files->set_dropped(num_file_dropped_);
     OutputStats* outputs = stats->mutable_output_stats();
     outputs->set_files(num_file_output_);
     outputs->set_rename(num_file_rename_output_);

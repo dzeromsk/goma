@@ -6,7 +6,10 @@
 #ifndef DEVTOOLS_GOMA_BASE_OPTIONS_H_
 #define DEVTOOLS_GOMA_BASE_OPTIONS_H_
 
+#include <sys/types.h>
+
 #include "absl/strings/string_view.h"
+#include "config_win.h"
 #include "status.h"
 
 namespace file {
@@ -18,15 +21,15 @@ class Options {
   Options(const Options&) = default;
 
   // can be used from CreateDir only
-  int creation_mode() const { return creation_mode_; }
+  mode_t creation_mode() const { return creation_mode_; }
 
   int overwrite() const { return overwrite_; }
 
-  int creation_mode_ = 0;
+  mode_t creation_mode_ = 0;
   bool overwrite_ = false;
 
   friend Options Defaults();
-  friend Options CreationMode(int mode);
+  friend Options CreationMode(mode_t mode);
   friend Options Overwrite();
 
   friend util::Status CreateDir(absl::string_view path, const Options& options);
@@ -36,8 +39,7 @@ class Options {
 };
 
 Options Defaults();
-// TODO: Use mode_t? It does not exist on Win, though...
-Options CreationMode(int mode);
+Options CreationMode(mode_t mode);
 Options Overwrite();
 
 }  // namespace file

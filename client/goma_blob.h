@@ -15,7 +15,6 @@ namespace devtools_goma {
 
 class ExecReq_Input;
 class ExecResult_Output;
-class FileBlob;
 class FileServiceClient;
 class RequesterInfo;
 
@@ -63,6 +62,35 @@ class BlobClient {
   // Downloader downloads file blob from server to client.
   class Downloader {
    public:
+    // Describes the output of a file download operation. The file data can be
+    // downloaded to either a file (|tmp_file_name| != "") or stored directly in
+    // |content|.
+    struct OutputFileInfo {
+      // actual output filename.
+      string filename;
+      // file mode/permission.
+      int mode = 0666;
+
+      size_t size = 0;
+
+      // tmp_filename is filename written by OutputFileTask.
+      // tmp_filename may be the same as output filename (when !need_rename), or
+      // rename it to real output filename in CommitOutput().
+      // if tmp file was not written in OutputFileTask, because it holds content
+      // in content field, tmp_filename will be "".
+      string tmp_filename;
+
+      // hash_key is hash of output filename. It will be stored in file hash
+      // cache once output file is committed.
+      // TODO: fix this to support cas digest.
+      string hash_key;
+
+      // content is output content.
+      // it is used to hold output content in memory while output file task.
+      // it will be used iff tmp_filename == "".
+      string content;
+    };
+
     virtual ~Downloader() = default;
 
     Downloader(Downloader&&) = delete;
@@ -70,16 +98,10 @@ class BlobClient {
     Downloader& operator=(const Downloader&) = delete;
     Downloader& operator=(Downloader&&) = delete;
 
-    // Downloads file content specified by output
-    // into filename with mode.
+    // Downloads file content specified by |output| into the destination sink
+    // defined by |sink|.
     virtual bool Download(const ExecResult_Output& output,
-                          const std::string& filename,
-                          int mode) = 0;
-
-    // Downloads file contents specified by output
-    // into buffer.
-    virtual bool DownloadInBuffer(const ExecResult_Output& output,
-                                  std::string* buffer) = 0;
+                          OutputFileInfo* sink) = 0;
 
     virtual int num_rpc() const = 0;
     virtual const HttpClient::Status& http_status() const = 0;
@@ -110,19 +132,12 @@ class BlobClient {
   BlobClient() = default;
 };
 
-// FileServiceBlobClient is BlobClient using FileServiceHttpClient.
-class FileServiceBlobClient : public BlobClient {
+// FileBlobClient is a BlobClient that handles FileBlobs.
+class FileBlobClient : public BlobClient {
  public:
-  explicit FileServiceBlobClient(
-      std::unique_ptr<FileServiceHttpClient> file_service_client)
-      : BlobClient(),
-        file_service_(std::move(file_service_client)) {
-  }
-  ~FileServiceBlobClient() override = default;
-
-  FileServiceHttpClient* file_service() const {
-    return file_service_.get();
-  }
+  explicit FileBlobClient(
+      std::unique_ptr<FileServiceHttpClient> file_service_client);
+  ~FileBlobClient() override = default;
 
   std::unique_ptr<BlobClient::Uploader> NewUploader(
       std::string filename,
@@ -134,7 +149,10 @@ class FileServiceBlobClient : public BlobClient {
       std::string trace_id) override;
 
  private:
-  std::unique_ptr<FileServiceHttpClient> file_service_;
+  // For handling FileBlobs in FileService over HTTP.
+  std::unique_ptr<FileServiceHttpClient> file_service_client_;
+
+  // TODO: Add BlobClients for other types of FileBlob handling.
 };
 
 }  // namespace devtools_goma

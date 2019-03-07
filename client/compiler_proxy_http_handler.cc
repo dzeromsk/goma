@@ -168,6 +168,17 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
       }
     }
   }
+  // TODO: clean up flags.
+  //                    I believe we do not need three flags for the feature.
+  if (FLAGS_ARBITRARY_TOOLCHAIN_SUPPORT) {
+#ifdef __MACH__
+    LOG(FATAL)
+        << "arbitrary toolchain support feature is not available on mac.";
+#endif
+    FLAGS_SEND_EXPECTED_OUTPUTS = true;
+    FLAGS_SEND_COMPILER_BINARY_AS_INPUT = true;
+    FLAGS_USE_USER_SPECIFIED_PATH_FOR_SUBPROGRAMS = true;
+  }
   HttpClient::Options http_options;
   InitHttpClientOptions(&http_options);
   http_options.network_error_margin = network_error_margin;
@@ -223,10 +234,8 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
   multi_store_options.check_interval =
       absl::Milliseconds(FLAGS_MULTI_STORE_PENDING_MS);
   service_.SetMultiFileStore(absl::make_unique<MultiFileStore>(
-
       service_.http_rpc(), "/s", multi_store_options, wm));
   service_.SetFileServiceHttpClient(absl::make_unique<FileServiceHttpClient>(
-
       service_.http_rpc(), "/s", "/l", service_.multi_file_store()));
   if (FLAGS_PROVIDE_INFO)
     service_.SetLogServiceClient(absl::make_unique<LogServiceClient>(
@@ -240,18 +249,11 @@ CompilerProxyHttpHandler::CompilerProxyHttpHandler(string myname,
       absl::Seconds(FLAGS_COMPILER_PROXY_NEW_FILE_THRESHOLD));
   service_.SetEnableGchHack(FLAGS_ENABLE_GCH_HACK);
   service_.SetUseRelativePathsInArgv(FLAGS_USE_RELATIVE_PATHS_IN_ARGV);
-  service_.SetSendExpectedOutputs(FLAGS_SEND_EXPECTED_OUTPUTS ||
-                                  FLAGS_ARBITRARY_TOOLCHAIN_SUPPORT);
+  service_.SetSendExpectedOutputs(FLAGS_SEND_EXPECTED_OUTPUTS);
   service_.SetCommandCheckLevel(FLAGS_COMMAND_CHECK_LEVEL);
-  service_.SetSendCompilerBinaryAsInput(FLAGS_SEND_COMPILER_BINARY_AS_INPUT ||
-                                        FLAGS_ARBITRARY_TOOLCHAIN_SUPPORT);
+  service_.SetSendCompilerBinaryAsInput(FLAGS_SEND_COMPILER_BINARY_AS_INPUT);
   service_.SetUseUserSpecifiedPathForSubprograms(
-      FLAGS_USE_USER_SPECIFIED_PATH_FOR_SUBPROGRAMS ||
-      FLAGS_ARBITRARY_TOOLCHAIN_SUPPORT);
-#ifdef __MACH__
-  LOG_IF(FATAL, FLAGS_ARBITRARY_TOOLCHAIN_SUPPORT)
-      << "arbitrary toolchain support feature is not available on mac.";
-#endif
+      FLAGS_USE_USER_SPECIFIED_PATH_FOR_SUBPROGRAMS);
   if (FLAGS_HERMETIC == "off") {
     service_.SetHermetic(false);
   } else if (FLAGS_HERMETIC == "fallback") {

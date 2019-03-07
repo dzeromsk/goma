@@ -7,12 +7,12 @@
 #include "callback.h"
 #include "compile_task.h"
 #include "glog/logging.h"
+#include "goma_data_util.h"
 #include "prototmp/goma_data.pb.h"
 #include "worker_thread_manager.h"
 
 namespace devtools_goma {
 
-// Doesn't take ownership of |info|.
 OutputFileTask::OutputFileTask(
     WorkerThreadManager* wm,
     std::unique_ptr<BlobClient::Downloader> blob_downloader,
@@ -39,16 +39,10 @@ OutputFileTask::~OutputFileTask() {
 
 void OutputFileTask::Run(OneshotClosure* closure) {
   VLOG(1) << task_->trace_id() << " output " << info_->filename;
-  if (info_->tmp_filename.empty()) {
-    success_ = blob_downloader_->DownloadInBuffer(output_, &info_->content);
-  } else {
-    // TODO: We might want to restrict paths this program may write?
-    success_ =
-        blob_downloader_->Download(output_, info_->tmp_filename, info_->mode);
-  }
+  success_ = blob_downloader_->Download(output_, info_);
   if (success_) {
     // TODO: fix to support cas digest.
-    info_->hash_key = FileServiceClient::ComputeHashKey(output_.blob());
+    info_->hash_key = ComputeFileBlobHashKey(output_.blob());
   } else {
     LOG(WARNING) << task_->trace_id() << " "
                  << (task_->cache_hit() ? "cached" : "no-cached")

@@ -8,6 +8,7 @@
 #include "compiler_specific.h"
 #include "file_helper.h"
 #include "glog/logging.h"
+#include "goma_data_util.h"
 MSVC_PUSH_DISABLE_WARNING_FOR_PROTO()
 #include "prototmp/goma_data.pb.h"
 MSVC_POP_WARNING()
@@ -26,7 +27,7 @@ bool FileServiceDumpClient::StoreFile(
   for (const auto& b : req->blob()) {
     FileBlob* blob = req_->add_blob();
     *blob = b;
-    resp->add_hash_key(FileServiceClient::ComputeHashKey(*blob));
+    resp->add_hash_key(ComputeFileBlobHashKey(*blob));
   }
   return true;
 }

@@ -8,6 +8,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/strip.h"
+#include "elf_util.h"
 #include "glog/logging.h"
 #include "lib/file_helper.h"
 #include "path.h"
@@ -70,6 +71,7 @@ bool ChromeOSCompilerInfoBuilderHelper::IsSimpleChromeClangCommand(
 
 // static
 bool ChromeOSCompilerInfoBuilderHelper::CollectSimpleChromeClangResources(
+    const string& cwd,
     absl::string_view local_compiler_path,
     absl::string_view real_compiler_path,
     std::vector<string>* resource_paths) {
@@ -91,21 +93,29 @@ bool ChromeOSCompilerInfoBuilderHelper::CollectSimpleChromeClangResources(
         file::JoinPath(local_compiler_dir, absl::StrCat("clang-", version)));
   }
 
-  const string lib_dir = file::JoinPath(local_compiler_dir, "..", "..", "lib");
-
-  resource_paths->push_back(file::JoinPath(lib_dir, "ld-linux-x86-64.so.2"));
-  resource_paths->push_back(
-      file::JoinPath(lib_dir, absl::StrCat("libLLVM-", version, "svn.so")));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libc++.so.1"));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libc++abi.so.1"));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libm.so.6"));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libc.so.6"));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libffi.so.6"));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libz.so.1"));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libdl.so.2"));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libtinfo.so.5"));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libpthread.so.0"));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libxml2.so.2"));
+  // Please see --library-path argument in simple Chrome's clang wrapper.
+  const std::vector<string> search_paths = {
+      file::JoinPath(local_compiler_dir, "..", "..", "lib"),
+      file::JoinPath(local_compiler_dir, "..", "lib64"),
+  };
+  // TODO: use relative path real_compiler_path and simplify.
+  // Since real_compiler_path is absolute path, we cannot use that here.
+  const string compiler_path = file::JoinPath(
+      local_compiler_dir, absl::StrCat("clang-", version, ".elf"));
+  // Since the shell script wrapper has --inhibit-rpath '',
+  // we should ignore RPATH and RUNPATH specified in ELF.
+  ElfDepParser edp(cwd, search_paths, true);
+  absl::flat_hash_set<string> deps;
+  if (!edp.GetDeps(compiler_path, &deps)) {
+    LOG(ERROR) << "failed to get library dependencies."
+               << " cwd=" << cwd
+               << " local_compiler_path=" << local_compiler_path
+               << " real_compiler_path=" << real_compiler_path;
+    return false;
+  }
+  for (const auto& path : deps) {
+    resource_paths->push_back(path);
+  }
 
   return true;
 }
@@ -119,6 +129,7 @@ bool ChromeOSCompilerInfoBuilderHelper::EstimateClangMajorVersion(
 
   absl::string_view filename = file::Basename(real_compiler_path);
   if (!absl::ConsumePrefix(&filename, "clang-")) {
+    LOG(INFO) << "not start with clang-:" << filename;
     return false;
   }
   // If this has .elf, remove that.
@@ -126,6 +137,7 @@ bool ChromeOSCompilerInfoBuilderHelper::EstimateClangMajorVersion(
   absl::ConsumeSuffix(&filename, ".elf");
 
   if (!absl::SimpleAtoi(filename, version)) {
+    LOG(INFO) << "not an integer:" << filename;
     return false;
   }
 

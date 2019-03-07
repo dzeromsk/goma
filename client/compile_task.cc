@@ -23,6 +23,7 @@
 #include <google/protobuf/text_format.h>
 #include <json/json.h>
 
+#include "absl/algorithm/container.h"
 #include "absl/base/call_once.h"
 #include "absl/base/macros.h"
 #include "absl/memory/memory.h"
@@ -46,6 +47,7 @@
 #include "compiler_type_specific_collection.h"
 #include "cxx/include_processor/cpp_include_processor.h"
 #include "cxx/include_processor/include_file_utils.h"
+#include "file_data_output.h"
 #include "file_dir.h"
 #include "file_hash_cache.h"
 #include "file_helper.h"
@@ -70,6 +72,7 @@
 #include "path.h"
 #include "path_resolver.h"
 #include "path_util.h"
+#include "rand_util.h"
 #include "rpc_controller.h"
 #include "simple_timer.h"
 #include "subprocess_task.h"
@@ -565,7 +568,7 @@ void CompileTask::Start() {
 
 CompileTask::~CompileTask() {
   CHECK_EQ(0, refcnt_);
-  CHECK(output_file_.empty());
+  CHECK(output_file_infos_.empty());
 }
 
 bool CompileTask::BelongsToCurrentThread() const {
@@ -820,10 +823,54 @@ void CompileTask::ProcessFileRequest() {
         FROM_HERE, closure, WorkerThread::PRIORITY_LOW);
 }
 
+namespace {
+
+// ShrinkExecReq returns the number of content drop.
+int ShrinkExecReq(absl::string_view trace_id, ExecReq* req) {
+  // Drop embedded content randomly if it is larger than 32MiB +
+  // 2MB (max chunk size).
+  // TODO: size limit is still configurable.
+  size_t total_embedded_size = 0;
+  constexpr size_t kEmbeddedThreshold = 32 * 1024 * 1024;  // 32MiB;
+  int cleared = 0;
+
+  absl::c_shuffle(*req->mutable_input(), MyCryptographicSecureRNG());
+  for (auto& input : *req->mutable_input()) {
+    if (total_embedded_size >= kEmbeddedThreshold) {
+      input.clear_content();
+      LOG(INFO) << trace_id << " embed:" << input.filename()
+                << " content cleared";
+      ++cleared;
+      continue;
+    }
+
+    if (input.has_content() && input.content().has_content()) {
+      total_embedded_size += input.content().content().size();
+    }
+  }
+
+  absl::c_sort(*req->mutable_input(),
+               [](const ExecReq_Input& a, const ExecReq_Input& b) {
+                 return a.filename() < b.filename();
+               });
+  return cleared;
+}
+
+}  // namespace
+
 void CompileTask::ProcessFileRequestDone() {
   VLOG(1) << trace_id_ << " file req done";
   CHECK(BelongsToCurrentThread());
   CHECK_EQ(FILE_REQ, state_);
+
+  {
+    int dropped = ShrinkExecReq(trace_id_, req_.get());
+    if (dropped > 0) {
+      *stats_->mutable_num_uploading_input_file()->rbegin() -= dropped;
+      stats_->add_num_dropped_input_file(dropped);
+    }
+  }
+
   const absl::Duration fileload_run_time = file_request_timer_.GetDuration();
   stats_->add_include_fileload_run_time(DurationToIntMs(fileload_run_time));
   stats_->include_fileload_run_time += fileload_run_time;
@@ -1285,7 +1332,7 @@ void CompileTask::ProcessFileResponse() {
 
   exec_output_files_.clear();
   ClearOutputFile();
-  output_file_.resize(resp_->result().output_size());
+  output_file_infos_.resize(resp_->result().output_size());
   SetOutputFileCallback();
   std::vector<OneshotClosure*> closures;
   for (int i = 0; i < resp_->result().output_size(); ++i) {
@@ -1299,10 +1346,10 @@ void CompileTask::ProcessFileResponse() {
     if (service_->enable_gch_hack() && absl::EndsWith(filename, ".gch"))
       filename += ".goma";
 
-    OutputFileInfo* output_info = &output_file_[i];
+    auto* output_info = &output_file_infos_[i];
     output_info->filename = filename;
     bool try_acquire_output_buffer = want_in_memory_output;
-    if (FileServiceClient::IsValidFileBlob(resp_->result().output(i).blob())) {
+    if (IsValidFileBlob(resp_->result().output(i).blob())) {
       output_info->size = resp_->result().output(i).blob().file_size();
     } else {
       LOG(ERROR) << trace_id_ << " output is invalid:"
@@ -1462,14 +1509,14 @@ void CompileTask::ProcessFileResponseDone() {
   if (verify_output_) {
     CHECK(subproc_ == nullptr);
     CHECK(delayed_setup_subproc_ == nullptr);
-    for (const auto& info : output_file_) {
+    for (const auto& info : output_file_infos_) {
       const string& filename = info.filename;
       const string& tmp_filename = info.tmp_filename;
       if (!VerifyOutput(filename, tmp_filename)) {
         output_file_success_ = false;
       }
     }
-    output_file_.clear();
+    output_file_infos_.clear();
     ProcessFinished("verify done");
     return;
   }
@@ -1675,17 +1722,16 @@ void CompileTask::RenameCallback(RenameParam* param, string* err) {
 }
 
 struct CompileTask::ContentOutputParam {
-  ContentOutputParam() : info(nullptr) {}
   string filename;
-  OutputFileInfo* info;
+  OutputFileInfo* info = nullptr;
 };
 
 void CompileTask::ContentOutputCallback(
     ContentOutputParam* param, string* err) {
   err->clear();
   remove(param->filename.c_str());
-  std::unique_ptr<FileServiceClient::Output> fout(
-      FileServiceClient::FileOutput(param->filename, param->info->mode));
+  std::unique_ptr<FileDataOutput> fout(
+      FileDataOutput::NewFileOutput(param->filename, param->info->mode));
   if (!fout->IsValid()) {
     std::ostringstream ss;
     ss << "open for write error:" << param->filename;
@@ -1880,7 +1926,7 @@ void CompileTask::CommitOutput(bool use_remote) {
   std::vector<string> output_bases;
   bool has_obj = false;
 
-  for (auto& info : output_file_) {
+  for (auto& info : output_file_infos_) {
     SimpleTimer timer;
     const string& filename = info.filename;
     const string& tmp_filename = info.tmp_filename;
@@ -1994,9 +2040,8 @@ void CompileTask::CommitOutput(bool use_remote) {
     } else if (flags_->type() == CompilerFlagType::Javac && ext == "class") {
       has_obj = true;
     }
-
   }
-  output_file_.clear();
+  output_file_infos_.clear();
 
   // TODO: For clang-tidy, maybe we don't need to output
   // no obj warning?
@@ -3811,22 +3856,22 @@ bool CompileTask::VerifyOutput(
 }
 
 void CompileTask::ClearOutputFile() {
-  for (auto& iter : output_file_) {
-    if (!iter.content.empty()) {
+  for (auto& info : output_file_infos_) {
+    if (!info.content.empty()) {
       LOG(INFO) << trace_id_ << " clear output, but content is not empty";
-      service_->ReleaseOutputBuffer(iter.size, &iter.content);
+      service_->ReleaseOutputBuffer(info.size, &info.content);
       continue;
     }
     // Remove if we wrote tmp file for the output.
     // Don't remove filename, which is the actual output filename,
     // and local run might have output to the file.
-    const string& filename = iter.filename;
-    const string& tmp_filename = iter.tmp_filename;
+    const string& filename = info.filename;
+    const string& tmp_filename = info.tmp_filename;
     if (!tmp_filename.empty() && tmp_filename != filename) {
       remove(tmp_filename.c_str());
     }
   }
-  output_file_.clear();
+  output_file_infos_.clear();
 }
 
 // ----------------------------------------------------------------
@@ -4366,7 +4411,7 @@ string CompileTask::DumpRequest() const {
       message += absl::StrCat(
           "DumpRequest failed to create fileblob: ", input_filename, "\n");
     } else {
-      input->set_hash_key(FileServiceClient::ComputeHashKey(input->content()));
+      input->set_hash_key(ComputeFileBlobHashKey(input->content()));
       if (!fs.Dump(file::JoinPath(task_request_dir, input->hash_key()))) {
         LOG(ERROR) << trace_id_ << " DumpRequest failed to store fileblob:"
                    << input_filename

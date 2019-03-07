@@ -674,9 +674,10 @@ GomaTaskView.prototype = {
       $('<td class="task-summary-http-status">').text(task.http_status).appendTo(tr);
       $('<td class="task-summary-subproc-pid">').text(task.subproc_pid).appendTo(tr);
       $('<td class="task-summary-subproc-state">').text(task.subproc_state).appendTo(tr);
-      // TODO: Show full command when a cursor is hovered?
-      // It will take a big area, though... b/24883527
-      $('<td class="task-summary-command">').text(makeFlagSummary(task.command)).appendTo(tr);
+      $('<td class="task-summary-command">')
+        .text(makeFlagSummary(task.command))
+        .attr('title', task.command)
+        .appendTo(tr);
       $('<td class="task-summary-major-factor">').text(task.major_factor).appendTo(tr);
 
       tr.click((function(taskId) {

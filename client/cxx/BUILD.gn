@@ -78,6 +78,25 @@ if (is_linux) {
     ]
 
     deps = [
+      ":elf_util_lib",
+      "//third_party:glog",
+    ]
+
+    public_deps = [
+      "//base",
+      "//client:compiler_info_lib",
+      "//third_party/abseil",
+    ]
+  }
+
+  static_library("elf_util_lib") {
+    sources = [
+      "elf_util.cc",
+      "elf_util.h",
+    ]
+
+    deps = [
+      "//client:common",
       "//third_party:glog",
     ]
 
@@ -262,6 +281,19 @@ if (is_linux) {
 
     deps = [
       ":chromeos_compiler_info_builder_helper_lib",
+      "//build/config:exe_and_shlib_deps",
+      "//client:goma_test_lib",
+    ]
+  }
+
+  executable("elf_util_unittest") {
+    testonly = true
+    sources = [
+      "elf_util_unittest.cc",
+    ]
+
+    deps = [
+      ":elf_util_lib",
       "//build/config:exe_and_shlib_deps",
       "//client:goma_test_lib",
     ]

@@ -10,7 +10,7 @@ Options Defaults() {
   return Options();
 }
 
-Options CreationMode(int mode) {
+Options CreationMode(mode_t mode) {
   Options opt;
   opt.creation_mode_ = mode;
   return opt;

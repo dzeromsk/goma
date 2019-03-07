@@ -186,11 +186,21 @@ GOMA_DEFINE_string(ASSERT_SETTINGS,
                    "",
                    "Assert settings name matches with this value, "
                    "if specified.");
-#define DEFAULT_STUBBY_PROXY_IP_ADDRESS "goma.chromium.org"
-GOMA_DEFINE_string(STUBBY_PROXY_IP_ADDRESS, DEFAULT_STUBBY_PROXY_IP_ADDRESS,
-                   "The IP address or hostname of the goma server");
-GOMA_DEFINE_int32(STUBBY_PROXY_PORT, 443,
-                  "The port of the stubby proxy, or GFE.");
+#define DEFAULT_SERVER_HOST "goma.chromium.org"
+GOMA_DEFINE_string(SERVER_HOST,
+                   DEFAULT_SERVER_HOST,
+                   "The hostname or IP address of goma server");
+GOMA_DEFINE_int32(SERVER_PORT, 443, "The port of the goma server.");
+// deprecated STUBBY_PROXY name. use SERVER above instead.
+// TODO: remove this in VERSION=173 or so.
+GOMA_DEFINE_string(STUBBY_PROXY_IP_ADDRESS,
+                   "",
+                   "The IP address or hostname of the goma server, "
+                   "for backward compatibility");
+GOMA_DEFINE_int32(STUBBY_PROXY_PORT,
+                  0,
+                  "The port of the goma server, "
+                  "for backward compatibility");
 GOMA_DEFINE_string(URL_PATH_PREFIX, "/cxx-compiler-service",
                    "The HTTP RPC URL path prefix.");
 GOMA_DEFINE_string(COMPILER_PROXY_LISTEN_ADDR, "localhost",

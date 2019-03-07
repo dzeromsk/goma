@@ -24,6 +24,7 @@ using std::string;
 namespace devtools_goma {
 
 class FileBlob;
+class FileDataOutput;
 class StoreFileReq;
 class StoreFileResp;
 class LookupFileReq;
@@ -55,35 +56,6 @@ class FileServiceClient {
    private:
     DISALLOW_COPY_AND_ASSIGN(AsyncTask);
   };
-  // TODO: provide Input too.
-  // Output is an abstract interface of output from FileServiceClient.
-  class Output {
-   public:
-    Output() {}
-    virtual ~Output() {}
-    // IsValid returns true if this output is valid to use.
-    virtual bool IsValid() const = 0;
-    // WriteAt writes content at offset in output.
-    virtual bool WriteAt(off_t offset, const string& content) = 0;
-    // Close closes the output.
-    virtual bool Close() = 0;
-    // ToString returns string representation of this output. e.g. filename.
-    virtual string ToString() const = 0;
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Output);
-  };
-
-  // FileOutput returns Output for filename.
-  static std::unique_ptr<Output> FileOutput(const string& filename, int mode);
-  // StringOutput returns Output into buf.
-  // It doesn't take ownership of buf.
-  // *buf will have output size when Close().
-  // Note that, unlike sparse file in unix, it will not modify data in a hole,
-  // if the hole exists. This class won't create any sparse file, so may not
-  // need to worry about this.
-  // If you care, pass empty buf (StringOutput will
-  // allocate enough space), or zero-cleared preallocated buf.
-  static std::unique_ptr<Output> StringOutput(const string& name, string* buf);
 
   FileServiceClient()
       : reader_factory_(FileReaderFactory::GetInstance()) {}
@@ -128,13 +100,7 @@ class FileServiceClient {
   // file service.
   // Returns true on success, false on error.  output will be closed in
   // this method.
-  bool OutputFileBlob(const FileBlob& blob, Output* output);
-
-  // Checks |blob| is valid.
-  static bool IsValidFileBlob(const FileBlob& blob);
-
-  // Compute hash key of |blob|.
-  static string ComputeHashKey(const FileBlob& blob);
+  bool OutputFileBlob(const FileBlob& blob, FileDataOutput* output);
 
   virtual std::unique_ptr<AsyncTask<StoreFileReq, StoreFileResp>>
   NewAsyncStoreFileTask() = 0;
@@ -162,11 +128,11 @@ class FileServiceClient {
 
   bool OutputLookupFileResp(const LookupFileReq& req,
                             const LookupFileResp& resp,
-                            Output* output);
+                            FileDataOutput* output);
   bool FinishLookupFileTask(
       std::unique_ptr<AsyncTask<LookupFileReq, LookupFileResp>> task,
-      Output* output);
-  bool OutputFileChunks(const FileBlob& blob, Output* output);
+      FileDataOutput* output);
+  bool OutputFileChunks(const FileBlob& blob, FileDataOutput* output);
 
   DISALLOW_COPY_AND_ASSIGN(FileServiceClient);
 };

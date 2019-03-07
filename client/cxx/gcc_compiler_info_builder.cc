@@ -8,6 +8,7 @@
 #include "autolock_timer.h"
 #include "clang_compiler_info_builder_helper.h"
 #include "counterz.h"
+#include "env_flags.h"
 #include "gcc_flags.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
@@ -23,6 +24,10 @@
 #ifdef _WIN32
 #include "posix_helper_win.h"
 #endif  // _WIN32
+
+// TODO: remove this when SEND_COMPILER_BINARY_AS_INPUT become
+//                    default behavior.
+GOMA_DECLARE_bool(SEND_COMPILER_BINARY_AS_INPUT);
 
 namespace devtools_goma {
 
@@ -360,9 +365,12 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
   if (ChromeOSCompilerInfoBuilderHelper::IsSimpleChromeClangCommand(
           local_compiler_path, data->real_compiler_path())) {
     if (!ChromeOSCompilerInfoBuilderHelper::CollectSimpleChromeClangResources(
-            local_compiler_path, data->real_compiler_path(),
+            flags.cwd(), local_compiler_path, data->real_compiler_path(),
             &resource_paths_to_collect)) {
-      AddErrorMessage("failed to add simple chrome resources", data);
+      // HACK: we should not affect people not using ATS.
+      if (FLAGS_SEND_COMPILER_BINARY_AS_INPUT) {
+        AddErrorMessage("failed to add simple chrome resources", data);
+      }
       LOG(ERROR)
           << "failed to add simple chrome resources: local_compiler_path="
           << local_compiler_path
@@ -375,8 +383,11 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
     if (!ChromeOSCompilerInfoBuilderHelper::CollectChrootClangResources(
             local_compiler_path, data->real_compiler_path(),
             &resource_paths_to_collect)) {
-      AddErrorMessage("failed to add chromeos chroot env clang resources",
-                      data);
+      // HACK: we should not affect people not using ATS.
+      if (FLAGS_SEND_COMPILER_BINARY_AS_INPUT) {
+        AddErrorMessage("failed to add chromeos chroot env clang resources",
+                        data);
+      }
       LOG(ERROR) << "failed to add chromeos chroot env clang resources: "
                     "local_compiler_path="
                  << local_compiler_path
@@ -429,8 +440,12 @@ bool GCCCompilerInfoBuilder::AddResourceAsExecutableBinaryInternal(
   if (!CompilerInfoBuilder::ResourceInfoFromPath(
           gcc_flags.cwd(), resource_path, CompilerInfoData::EXECUTABLE_BINARY,
           &r)) {
-    AddErrorMessage(
-        "failed to get GCC resource info for " + resource_path, data);
+    // HACK: we should not affect people not using ATS.
+    if (FLAGS_SEND_COMPILER_BINARY_AS_INPUT) {
+      AddErrorMessage("failed to get GCC resource info for " + resource_path,
+                      data);
+    }
+    LOG(ERROR) << "failed to get GCC resource info for " << resource_path;
     return false;
   }
 

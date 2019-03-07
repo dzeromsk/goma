@@ -23,6 +23,7 @@ class ChromeOSCompilerInfoBuilderHelper {
 
   // Collects simple chrome toolchain resources for Arbitrary Toolchain Support.
   static bool CollectSimpleChromeClangResources(
+      const string& cwd,
       absl::string_view local_compiler_path,
       absl::string_view real_compiler_path,
       std::vector<string>* resource_paths);

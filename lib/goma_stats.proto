@@ -120,6 +120,9 @@ message FileStats {
   // the backend returns the list of missing hashes.  This field represents
   // number of hashes missed.
   optional int64 missed = 3;
+
+  // Number of file content dropped by ShrinkExecReq.
+  optional int64 dropped = 4;
 }
 
 // Statistics of output files.

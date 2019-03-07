@@ -5,9 +5,9 @@
 proto_out_dir = "prototmp"
 generate_compiler_proxy_info = "generate_compiler_proxy_info.py"
 
+import("//build/util/lastchange.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
 import("//third_party/protobuf/proto_library.gni")
-import("//build/util/lastchange.gni")
 
 group("client") {
   deps = [
@@ -49,7 +49,6 @@ static_library("common") {
     "mypath_helper.h",
     "simple_timer.cc",
     "simple_timer.h",
-    "spawner.h",
     "util.cc",
     "util.h",
   ]
@@ -113,6 +112,7 @@ static_library("oauth2_lib") {
 
 static_library("subprocess_lib") {
   sources = [
+    "spawner.h",
     "subprocess.cc",
     "subprocess.h",
   ]
@@ -327,6 +327,12 @@ static_library("compiler_proxy_lib") {
   sources = [
     "auto_updater.cc",
     "auto_updater.h",
+    "blob/file_blob_downloader.cc",
+    "blob/file_blob_downloader.h",
+    "blob/file_service_blob_downloader.cc",
+    "blob/file_service_blob_downloader.h",
+    "blob/file_service_blob_uploader.cc",
+    "blob/file_service_blob_uploader.h",
     "compilation_database_reader.cc",
     "compilation_database_reader.h",
     "compile_service.cc",
@@ -502,6 +508,7 @@ static_library("compiler_proxy_lib") {
     "//client/resources:gen_compilerz_style",
     "//client/resources:gen_legend_help",
     "//lib",
+    "//lib:goma_data_util",
     "//lib:goma_file",
     "//lib:goma_hash",
     "//lib:goma_stats_proto",

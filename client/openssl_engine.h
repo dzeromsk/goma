@@ -71,7 +71,7 @@ class OpenSSLContext {
     return last_error_;
   }
   size_t ref_cnt() { return ref_cnt_; }
-  SSL* NewSSL(bool* session_reused);
+  SSL* NewSSL();
   void DeleteSSL(SSL* ssl);
   void RecordSession(SSL* ssl);
   void Invalidate();
@@ -172,7 +172,6 @@ class OpenSSLEngine : public TLSEngine {
   bool want_write_;
   bool recycled_;
   bool need_self_verify_;
-  bool need_to_store_session_;
   OpenSSLContext* ctx_;  // OpenSSLEngineCache has ownership.
 
   enum SSL_ENGINE_STATE { BEFORE_INIT, IN_CONNECT, READY } state_;

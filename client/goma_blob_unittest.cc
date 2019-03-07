@@ -76,12 +76,7 @@ class ExampleBlobClient : public BlobClient {
     ~Downloader() override = default;
 
     bool Download(const ExecResult_Output& output,
-                  const std::string& filename,
-                  int mode) override {
-      return true;
-    }
-    bool DownloadInBuffer(const ExecResult_Output& output,
-                          string* buffer) override {
+                  OutputFileInfo* buffer) override {
       return true;
     }
 
@@ -190,9 +185,14 @@ TEST(BlobClient, ExampleDownload) {
   FileBlob* blob = output.mutable_blob();
   blob->set_blob_type(FileBlob::FILE);
   blob->set_content("");
-  EXPECT_TRUE(downloader->Download(output, "/path/to/output_file", 0644));
-  string buffer;
-  EXPECT_TRUE(downloader->DownloadInBuffer(output, &buffer));
+
+  BlobClient::Downloader::OutputFileInfo info_file;
+  info_file.tmp_filename = "/path/to/output_file";
+  info_file.mode = 0644;
+  EXPECT_TRUE(downloader->Download(output, &info_file));
+
+  BlobClient::Downloader::OutputFileInfo info_string;
+  EXPECT_TRUE(downloader->Download(output, &info_string));
 }
 
 }  // namespace devtools_goma

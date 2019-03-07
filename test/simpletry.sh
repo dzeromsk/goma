@@ -214,7 +214,7 @@ if [ "$GOMATEST_USE_RUNNING_COMPILER_PROXY" = ""  ]; then
     export GOMA_COMPILER_PROXY_LOCK_FILENAME=$tmpdir/goma_compiler_proxy.lock
     # Test uses SSL by default.
     export GOMA_USE_SSL=true
-    export GOMA_STUBBY_PROXY_PORT=443
+    export GOMA_SERVER_PORT=443
   fi
   (cd /tmp && ${GOMA_COMPILER_PROXY_BINARY} & )
   update_compiler_proxy_port $(dirname $GOMA_COMPILER_PROXY_BINARY) 10

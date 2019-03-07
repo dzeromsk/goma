@@ -133,7 +133,7 @@ string GetHumanReadableSSLInfo(const SSL* ssl) {
   ss << " cipher:"
      << " name=" << SSL_CIPHER_get_name(cipher)
      << " bits=" << SSL_CIPHER_get_bits(cipher, nullptr)
-     << " version=" << SSL_CIPHER_get_version(cipher);
+     << " version=" << SSL_get_version(ssl);
   uint16_t curve_id = SSL_get_curve_id(ssl);
   if (curve_id != 0) {
     ss << " curve=" << SSL_get_curve_name(curve_id);
@@ -155,6 +155,7 @@ class OpenSSLSessionCache {
 
     DCHECK(cache_);
     SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_CLIENT);
+    SSL_CTX_sess_set_new_cb(ctx, NewSessionCallBack);
     SSL_CTX_sess_set_remove_cb(ctx, RemoveSessionCallBack);
   }
 
@@ -162,27 +163,6 @@ class OpenSSLSessionCache {
   static bool SetCachedSession(SSL_CTX* ctx, SSL* ssl) {
     DCHECK(cache_);
     return cache_->SetCachedSessionInternal(ctx, ssl);
-  }
-
-  static void RecordSession(SSL* ssl) {
-    DCHECK(cache_);
-    DCHECK(ssl);
-    SSL_SESSION* sess = SSL_get1_session(ssl);
-    SSL_CTX* ctx = SSL_get_SSL_CTX(ssl);
-    LOG(INFO) << "Storing SSL session."
-              << " ssl_ctx=" << ctx
-              << " session_info=" << GetHumanReadableSessionInfo(sess)
-              << " secure_renegotiation_support="
-              << SSL_get_secure_renegotiation_support(ssl);
-    if (!cache_->RecordSessionInternal(ctx, sess)) {
-      LOG(INFO) << "Tried to store already stored session.";
-      // Since SSL_get1_session increases a reference count of |sess|,
-      // we need to decrease the reference count here.
-      // Note that we do not decrease the reference count if
-      // RecordSessionInternal returned true because we need to keep
-      // the session valid while we have it in our session cache store.
-      SSL_SESSION_free(sess);
-    }
   }
 
  private:
@@ -204,6 +184,17 @@ class OpenSSLSessionCache {
     if (cache_)
       delete cache_;
     cache_ = nullptr;
+  }
+
+  static int NewSessionCallBack(SSL* ssl, SSL_SESSION* sess) {
+    DCHECK(cache_);
+
+    SSL_CTX* ctx = SSL_get_SSL_CTX(ssl);
+    if (!cache_->RecordSessionInternal(ctx, sess)) {
+      LOG(INFO) << "Tried to store already stored session.";
+      return 0;
+    }
+    return 1;
   }
 
   static void RemoveSessionCallBack(SSL_CTX* ctx, SSL_SESSION* sess) {
@@ -566,7 +557,7 @@ OpenSSLCRLCache* OpenSSLCRLCache::cache_ = nullptr;
 // Goma client also uses BoringSSL.
 // Let's follow chromium's net/socket/ssl_client_socket_impl.cc.
 // It uses BoringSSL default but avoid to select CBC ciphers.
-const char* kCipherList = "ALL:!SHA256:!SHA384:!aPSK:!ECDSA+SHA1";
+const char* kCipherList = "ALL::!aPSK:!ECDSA+SHA1";
 constexpr absl::Duration kCrlIoTimeout = absl::Seconds(1);
 constexpr size_t kMaxDownloadCrlRetry = 5;  // times.
 
@@ -1287,8 +1278,7 @@ void OpenSSLContext::Invalidate() {
   }
 }
 
-SSL* OpenSSLContext::NewSSL(bool* session_reused) {
-  CHECK(session_reused);
+SSL* OpenSSLContext::NewSSL() {
   SSL* ssl = SSL_new(ctx_);
   CHECK(ssl) << "Failed on SSL_new.";
 
@@ -1296,13 +1286,11 @@ SSL* OpenSSLContext::NewSSL(bool* session_reused) {
   DCHECK(!hostname_.empty());
   CHECK(SSL_set_tlsext_host_name(ssl, hostname_.c_str()))
       << "TLS Server Name Indication (SNI) failed:" << hostname_;
-  *session_reused = true;
   if (!OpenSSLSessionCache::SetCachedSession(ctx_, ssl)) {
     LOG(INFO) << "ctx:" << this
               << ": No session is cached. We need to start from handshake."
               << " key=" << ctx_
               << " hostname=" << hostname_;
-    *session_reused = false;
   }
 
   ++ref_cnt_;
@@ -1316,18 +1304,17 @@ void OpenSSLContext::DeleteSSL(SSL* ssl) {
   SSL_free(ssl);
 }
 
-void OpenSSLContext::RecordSession(SSL* ssl) {
-  OpenSSLSessionCache::RecordSession(ssl);
-}
-
 //
 // TLS Engine
 //
 OpenSSLEngine::OpenSSLEngine()
-  : ssl_(nullptr), network_bio_(nullptr),
-    want_read_(false), want_write_(false),
-    recycled_(false), need_self_verify_(false),
-    need_to_store_session_(false), state_(BEFORE_INIT) {}
+    : ssl_(nullptr),
+      network_bio_(nullptr),
+      want_read_(false),
+      want_write_(false),
+      recycled_(false),
+      need_self_verify_(false),
+      state_(BEFORE_INIT) {}
 
 OpenSSLEngine::~OpenSSLEngine() {
   if (ssl_ != nullptr) {
@@ -1349,15 +1336,7 @@ void OpenSSLEngine::Init(OpenSSLContext* ctx) {
   // even if it should do.  Since loaded CRLs are cached in OpenSSLContext,
   // penalty to check it should be little.
   need_self_verify_ = !ctx->IsCrlReady();
-  bool session_reused = false;
-  ssl_ = ctx->NewSSL(&session_reused);
-  DCHECK(ssl_);
-  if (!session_reused) {
-    LOG(INFO) << "ctx:" << ctx
-              << ": Need to register session by myself."
-              << " hostname=" << ctx->hostname();
-    need_to_store_session_ = true;
-  }
+  ssl_ = ctx->NewSSL();
   DCHECK(ssl_);
 
   // Since internal_bio is free'd by SSL_free, we do not need to keep this
@@ -1366,7 +1345,13 @@ void OpenSSLEngine::Init(OpenSSLContext* ctx) {
   CHECK(BIO_new_bio_pair(&internal_bio, kNetworkBufSize, &network_bio_,
                          kNetworkBufSize))
       << "BIO_new_bio_pair failed.";
-  SSL_set_bio(ssl_, internal_bio, internal_bio);
+  // Both SSL_set0_rbio and SSL_set0_wbio take ownership.
+  // |internal_bio|'s reference count become one after BIO_new_bio_pair,
+  // and we need to make reference count +1 to set two owners
+  // (i.e. rbio and wbio).
+  CHECK(BIO_up_ref(internal_bio));
+  SSL_set0_rbio(ssl_, internal_bio);
+  SSL_set0_wbio(ssl_, internal_bio);
 
   ctx_ = ctx;
   Connect();  // Do not check anything since nothing has started here.
@@ -1512,9 +1497,6 @@ int OpenSSLEngine::Connect() {
       if (ctx_->IsRevoked(x509s)) {
         return TLSEngine::TLS_VERIFY_ERROR;
       }
-    }
-    if (need_to_store_session_) {
-      ctx_->RecordSession(ssl_);
     }
   }
   return UpdateStatus(ret);

@@ -30,6 +30,8 @@ static_library("lib") {
     "execreq_normalizer.h",
     "execreq_verifier.cc",
     "execreq_verifier.h",
+    "file_data_output.cc",
+    "file_data_output.h",
     "file_helper.cc",
     "file_helper.h",
     "file_reader.cc",
@@ -38,8 +40,6 @@ static_library("lib") {
     "fileflag.h",
     "flag_parser.cc",
     "flag_parser.h",
-    "goma_data_util.cc",
-    "goma_data_util.h",
     "known_warning_options.h",
     "path_resolver.cc",
     "path_resolver.h",
@@ -194,11 +194,23 @@ static_library("goma_file") {
     "goma_file.h",
   ]
   public_deps = [
+    ":goma_data_util",
     ":lib",
     "//base",
   ]
   deps = [
+    "//third_party:glog",
+  ]
+}
+
+static_library("goma_data_util") {
+  sources = [
+    "goma_data_util.cc",
+    "goma_data_util.h",
+  ]
+  deps = [
     ":goma_hash",
+    ":goma_proto",
     "//third_party:glog",
   ]
 }
@@ -414,7 +426,8 @@ executable("goma_data_util_unittest") {
     "goma_data_util_unittest.cc",
   ]
   deps = [
-    ":lib",
+    ":goma_data_util",
+    ":goma_proto",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
     "//third_party:gtest",
@@ -434,13 +447,13 @@ executable("goma_hash_unittest") {
   ]
 }
 
-executable("goma_file_unittest") {
+executable("file_data_output_unittest") {
   testonly = true
   sources = [
-    "goma_file_unittest.cc",
+    "file_data_output_unittest.cc",
   ]
   deps = [
-    ":goma_file",
+    ":lib",
     "//base:goma_unittest",
     "//build/config:exe_and_shlib_deps",
     "//third_party:gtest",
