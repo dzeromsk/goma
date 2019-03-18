@@ -381,7 +381,7 @@ void GCCCompilerInfoBuilder::SetTypeSpecificCompilerInfo(
   if (ChromeOSCompilerInfoBuilderHelper::IsClangInChrootEnv(
           local_compiler_path)) {
     if (!ChromeOSCompilerInfoBuilderHelper::CollectChrootClangResources(
-            local_compiler_path, data->real_compiler_path(),
+            flags.cwd(), local_compiler_path, data->real_compiler_path(),
             &resource_paths_to_collect)) {
       // HACK: we should not affect people not using ATS.
       if (FLAGS_SEND_COMPILER_BINARY_AS_INPUT) {

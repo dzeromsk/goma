@@ -38,7 +38,8 @@ class ChromeOSCompilerInfoBuilderHelper {
   // local_compiler_path indicates a system clang in the chroot env.
   static bool IsClangInChrootEnv(absl::string_view local_compiler_path);
   // Collects clang resources in chromeos chroot env.
-  static bool CollectChrootClangResources(absl::string_view local_compiler_path,
+  static bool CollectChrootClangResources(const string& cwd,
+                                          absl::string_view local_compiler_path,
                                           absl::string_view real_compiler_path,
                                           std::vector<string>* resource_paths);
 

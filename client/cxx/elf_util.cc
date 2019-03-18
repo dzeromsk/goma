@@ -4,9 +4,10 @@
 
 #include "elf_util.h"
 
-#include "absl//strings/str_replace.h"
 #include "absl/strings/match.h"
+#include "absl/strings/str_replace.h"
 #include "absl/strings/str_split.h"
+#include "absl/strings/strip.h"
 #include "glog/logging.h"
 #include "glog/stl_logging.h"
 #include "path.h"
@@ -158,6 +159,28 @@ bool ElfDepParser::ParseReadElf(absl::string_view content,
     }
   }
   return true;
+}
+
+std::vector<std::string> ParseLdSoConf(absl::string_view content) {
+  std::vector<std::string> ret;
+
+  for (absl::string_view line :
+       absl::StrSplit(content, absl::ByAnyChar("\r\n"), absl::SkipEmpty())) {
+    // Omit anything after '#'.
+    absl::string_view::size_type pos = line.find('#');
+    line = line.substr(0, pos);
+    line = absl::StripAsciiWhitespace(line);
+    if (line.empty()) {
+      continue;
+    }
+    // TODO: support include and hwcap if we need.
+    if (absl::StartsWith(line, "include") || absl::StartsWith(line, "hwcap")) {
+      LOG(WARNING) << "non supported line:" << line;
+      continue;
+    }
+    ret.push_back(string(line));
+  }
+  return ret;
 }
 
 }  // namespace devtools_goma

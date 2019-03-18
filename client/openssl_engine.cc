@@ -5,22 +5,17 @@
 
 #include "openssl_engine.h"
 
-#include <openssl/asn1.h>
-#include <openssl/crypto.h>
-#include <openssl/err.h>
-#include <openssl/ssl.h>
-#include <openssl/x509v3.h>
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
 #include <map>
 #include <memory>
 #include <sstream>
-#include <unordered_map>
 #include <vector>
 
 #include "absl/base/call_once.h"
 #include "absl/base/macros.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/match.h"
 #include "absl/time/clock.h"
@@ -38,6 +33,12 @@ MSVC_POP_WARNING()
 #include "http.h"
 #include "http_util.h"
 #include "mypath.h"
+#include "openssl/asn1.h"
+#include "openssl/base.h"
+#include "openssl/crypto.h"
+#include "openssl/err.h"
+#include "openssl/ssl.h"
+#include "openssl/x509v3.h"
 #include "openssl_engine_helper.h"
 #include "path.h"
 #include "platform_thread.h"
@@ -60,6 +61,7 @@ constexpr absl::Duration kWaitForThingsGetsBetter = absl::Seconds(1);
 
 absl::once_flag g_openssl_init_once;
 
+// TODO: use bssl::UniquePtr instead.
 class ScopedBIOFree {
  public:
   inline void operator()(BIO *x) const { if (x) CHECK(BIO_free(x)); }
@@ -168,10 +170,6 @@ class OpenSSLSessionCache {
  private:
   OpenSSLSessionCache() {}
   ~OpenSSLSessionCache() {
-    // Destructor deletes all cached sessions.
-    for (auto& it : session_map_) {
-      SSL_SESSION_free(it.second);
-    }
     session_map_.clear();
   }
 
@@ -191,7 +189,6 @@ class OpenSSLSessionCache {
 
     SSL_CTX* ctx = SSL_get_SSL_CTX(ssl);
     if (!cache_->RecordSessionInternal(ctx, sess)) {
-      LOG(INFO) << "Tried to store already stored session.";
       return 0;
     }
     return 1;
@@ -223,8 +220,9 @@ class OpenSSLSessionCache {
   bool SetCachedSessionInternal(SSL_CTX* ctx, SSL* ssl) {
     AUTO_SHARED_LOCK(lock, &mu_);
     SSL_SESSION* sess = GetInternalUnlocked(ctx);
-    if (sess == nullptr)
+    if (sess == nullptr) {
       return false;
+    }
 
     VLOG(3) << "Reused session."
             << " ssl_ctx=" << ctx
@@ -233,44 +231,34 @@ class OpenSSLSessionCache {
     return true;
   }
 
-  // Returns true if the session is added.
+  // Returns true if the session is added or updated.
   bool RecordSessionInternal(SSL_CTX* ctx, SSL_SESSION* session) {
     AUTO_EXCLUSIVE_LOCK(lock, &mu_);
-    if (GetInternalUnlocked(ctx) != nullptr)
-      return false;
-
-    CHECK(session_map_.insert(std::make_pair(ctx, session)).second);
+    if (!session_map_
+             .insert_or_assign(ctx, bssl::UniquePtr<SSL_SESSION>(session))
+             .second) {
+      LOG(INFO) << "Updated the session. ssl_ctx=" << ctx;
+    }
     return true;
   }
 
   // Returns true if the session is removed.
   bool RemoveSessionInternal(SSL_CTX* ctx) {
     AUTO_EXCLUSIVE_LOCK(lock, &mu_);
-    auto found = session_map_.find(ctx);
-    if (found == session_map_.end()) {
-      return false;
-    }
-
-    // Decrement reference count to revoke the session when nobody use it.
-    // See: https://www.openssl.org/docs/ssl/SSL_SESSION_free.html
-    SSL_SESSION_free(found->second);
-    session_map_.erase(found);
-    return true;
+    return session_map_.erase(ctx) > 0;
   }
 
   SSL_SESSION* GetInternalUnlocked(SSL_CTX* ctx) {
     auto found = session_map_.find(ctx);
     if (found != session_map_.end()) {
-      return found->second;
+      return found->second.get();
     }
     return nullptr;
   }
 
   mutable ReadWriteLock mu_;
   // Won't take ownership of SSL_CTX*.
-  // Ownership of SSL_SESSION* is kept by the OpenSSL library, but
-  // we decrement a reference count to notify it an obsolete session.
-  std::unordered_map<SSL_CTX*, SSL_SESSION*> session_map_;
+  absl::flat_hash_map<SSL_CTX*, bssl::UniquePtr<SSL_SESSION>> session_map_;
 
   static OpenSSLSessionCache* cache_;
 
@@ -316,7 +304,7 @@ class OpenSSLSocketPoolCache {
   }
 
   Lock socket_pool_mu_;
-  std::unordered_map<string, std::unique_ptr<SocketPool>> socket_pools_;
+  absl::flat_hash_map<string, std::unique_ptr<SocketPool>> socket_pools_;
 
   static std::unique_ptr<OpenSSLSocketPoolCache> cache_;
   DISALLOW_COPY_AND_ASSIGN(OpenSSLSocketPoolCache);

@@ -161,10 +161,11 @@ bool ChromeOSCompilerInfoBuilderHelper::IsClangInChrootEnv(
 
 // static
 bool ChromeOSCompilerInfoBuilderHelper::CollectChrootClangResources(
+    const string& cwd,
     absl::string_view local_compiler_path,
     absl::string_view real_compiler_path,
     std::vector<string>* resource_paths) {
-  constexpr absl::string_view lib_dir = "/usr/lib64";
+  constexpr absl::string_view kLdSoConfPath = "/etc/ld.so.conf";
 
   int version;
   if (!EstimateClangMajorVersion(real_compiler_path, &version)) {
@@ -173,16 +174,35 @@ bool ChromeOSCompilerInfoBuilderHelper::CollectChrootClangResources(
     return false;
   }
 
+  string content;
+  if (!ReadFileToString(kLdSoConfPath, &content)) {
+    LOG(ERROR) << "failed to open/read " << kLdSoConfPath;
+    return false;
+  }
+  std::vector<std::string> searchpath = ParseLdSoConf(content);
+  ElfDepParser edp(cwd, searchpath, false);
+  absl::flat_hash_set<string> deps;
+  if (!edp.GetDeps(local_compiler_path, &deps)) {
+    LOG(ERROR) << "failed to get library dependencies."
+               << " cwd=" << cwd
+               << " local_compiler_path=" << local_compiler_path
+               << " real_compiler_path=" << real_compiler_path;
+    return false;
+  }
+  constexpr absl::string_view kClang = "/usr/bin/clang";
+  if (local_compiler_path != kClang && !edp.GetDeps(kClang, &deps)) {
+    LOG(ERROR) << "failed to get library dependencies for clang."
+               << " cwd=" << cwd;
+    return false;
+  }
+  for (const auto& path : deps) {
+    resource_paths->push_back(path);
+  }
+
   // TODO: Currently support only target = x86_64.
   // for target=arm, we need to use other resources.
   // check local_compiler_path, and if compiler name looks like arm,
   // we have to use arm-like resources.
-  resource_paths->push_back(
-      file::JoinPath(lib_dir, absl::StrCat("libLLVM-", version, "svn.so")));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libc++.so.1"));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libc++abi.so.1"));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libffi.so.6"));
-  resource_paths->push_back(file::JoinPath(lib_dir, "libxml2.so.2"));
   resource_paths->push_back("/etc/env.d/gcc/.NATIVE");
   resource_paths->push_back("/etc/env.d/05gcc-x86_64-cros-linux-gnu");
 

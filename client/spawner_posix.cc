@@ -55,6 +55,7 @@ void __attribute__((__noreturn__)) SubprocExitReport(
     close(fd);
     _exit(exit_value ? exit_value : 1);
   }
+  close(fd);
   _exit(exit_value);
 }
 
@@ -347,7 +348,13 @@ Spawner::ProcessStatus SpawnerPosix::Kill() {
         PLOG(WARNING) << " kill "
                       << " prog_pid=" << prog_pid_;
       }
+    } else {
+      LOG(INFO) << "sent signal=" << sig
+                << " successuflly to gid=" << prog_pid_;
     }
+  } else {
+    LOG(INFO) << "signal is not sent: status=" << status
+              << " prog_pid=" << prog_pid_;
   }
   return status;
 }
@@ -370,7 +377,7 @@ SpawnerPosix::ProcessStatus SpawnerPosix::Wait(WaitPolicy wait_policy) {
 
     DCHECK_NE(r, -1);
     if (r == 0) {
-      // monitor still running
+      LOG(INFO) << "monitor process=" << monitor_pid_ << " is still running";
       if (!need_kill) {
         CHECK_EQ(wait_policy, NO_HANG)
             << "process is alive in not NO_HANG policy."
@@ -401,6 +408,11 @@ SpawnerPosix::ProcessStatus SpawnerPosix::Wait(WaitPolicy wait_policy) {
       CHECK(WIFEXITED(status) || WIFSIGNALED(status))
           << "unexpected state change, r=" << r << " status=" << status
           << " monitor_pid=" << monitor_pid_ << " prog_pid=" << prog_pid_;
+
+      LOG(INFO) << "monitor_pid=" << monitor_pid_
+                << " finished: WIFEXITED=" << WIFEXITED(status)
+                << " WIFSIGNALED=" << WIFSIGNALED(status)
+                << " WEXITSTATUS=" << WEXITSTATUS(status);
     } else if (r == monitor_pid_) {
       // monitor changed the status.
       CHECK(WIFEXITED(status))
@@ -413,6 +425,10 @@ SpawnerPosix::ProcessStatus SpawnerPosix::Wait(WaitPolicy wait_policy) {
                    << " exit_status=" << WEXITSTATUS(status)
                    << " status=" << status;
       }
+      LOG(INFO) << "monitor_pid=" << monitor_pid_
+                << " finished: WIFEXITED=" << WIFEXITED(status)
+                << " WIFSIGNALED=" << WIFSIGNALED(status)
+                << " WEXITSTATUS=" << WEXITSTATUS(status);
     } else {
       LOG(FATAL) << "Unexpected waitpid is returned: r=" << r
                  << " status=" << status << " wait_policy=" << wait_policy

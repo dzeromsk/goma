@@ -115,9 +115,6 @@ function taskStatus(task) {
     return 'client-error'
   }
   if (task['goma_error']) {
-    if (!('http_status' in task)) {
-      return 'conftestfailure'
-    }
     if (task['http_status'] != 200) {
       return 'http-error';
     }
@@ -903,6 +900,7 @@ GomaTaskView.prototype = {
       addLineBreak();
     }
     addArrayItem('input_files');
+    add("total_input_file_size");
     addArrayItem('system_library_paths');
     add('response_header');
 

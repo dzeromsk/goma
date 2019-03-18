@@ -712,6 +712,7 @@ void CompileTask::ProcessFileRequest() {
   std::vector<OneshotClosure*> closures;
   const absl::Time now = absl::Now();
   stats_->set_num_total_input_file(required_files_.size());
+  stats_->set_total_input_file_size(sum_of_required_file_size_);
 
   for (const string& filename : required_files_) {
     ExecReq_Input* input = req_->add_input();
@@ -2372,6 +2373,7 @@ void CompileTask::DumpToJson(bool need_detail, Json::Value* root) const {
       input_files.append(file);
     }
     (*root)["input_files"] = input_files;
+    (*root)["total_input_file_size"] = sum_of_required_file_size_;
 
     if (system_library_paths_.size() > 0) {
       Json::Value system_library_paths(Json::arrayValue);
@@ -2739,7 +2741,7 @@ void CompileTask::UpdateRequiredFilesDone(bool ok) {
   if (!ok) {
     // Failed to update required_files.
     if (requester_env_.verify_command().empty()) {
-      if (!canceled_) {
+      if (!canceled_ && !abort_) {
         LOG(INFO) << trace_id_ << " failed to update required files. ";
         service_->RecordForcedFallbackInSetup(
             CompileService::KFailToUpdateRequiredFiles);
@@ -2774,6 +2776,16 @@ void CompileTask::UpdateRequiredFilesDone(bool ok) {
     }
   }
   req_->clear_input();
+
+  for (const auto& input : required_files_) {
+    const string& path = file::JoinPathRespectAbsolute(flags_->cwd(), input);
+    const auto stat = input_file_stat_cache_->Get(path);
+    if (stat.IsValid()) {
+      sum_of_required_file_size_ += stat.size;
+    } else {
+      LOG(ERROR) << trace_id_ << " invalid file stat " << path;
+    }
+  }
 
   const absl::Duration include_preprocess_time = include_timer_.GetDuration();
   stats_->set_include_preprocess_time(DurationToIntMs(include_preprocess_time));

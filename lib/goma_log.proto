@@ -9,7 +9,7 @@ syntax = "proto2";
 
 package devtools_goma;
 
-// NEXT ID TO USE: 93
+// NEXT ID TO USE: 94
 message ExecLog {
   enum AuthenticationType {
     NONE = 0;
@@ -88,6 +88,7 @@ message ExecLog {
   repeated int32 include_fileload_pending_time = 69;
   repeated int32 include_fileload_run_time = 70;
   optional int32 num_total_input_file = 8;
+  optional int64 total_input_file_size = 93;
 
   // repeated by retry.
   repeated int32 num_uploading_input_file = 9;

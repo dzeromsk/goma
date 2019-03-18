@@ -371,6 +371,7 @@ class CompileTask {
   string orig_flag_dump_;
   string flag_dump_;
   std::set<string> required_files_;
+  int sum_of_required_file_size_ = 0;
 
   // Caches all FileStat in this compilation unit, since creating FileStat is
   // slow especially on Windows. So that FileStatCache doesn't need to have

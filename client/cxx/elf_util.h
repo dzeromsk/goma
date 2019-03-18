@@ -57,6 +57,10 @@ class ElfDepParser {
   const bool ignore_rpath_;
 };
 
+// Parse contents in ld.so.conf, and returns library search path.
+// The returned value would be used by ElfDepParser.
+std::vector<std::string> ParseLdSoConf(absl::string_view content);
+
 }  // namespace devtools_goma
 
 #endif  // DEVTOOLS_GOMA_CLIENT_CXX_ELF_UTIL_H_

@@ -53,30 +53,33 @@ def CheckChangeLintsClean(input_api, output_api):
   return result
 
 
-def CheckGNGenChecked(input_api, output_api):
-  if not input_api.AffectedFiles(
-      file_filter=lambda x: x.LocalPath().endswith('.c') or
-                            x.LocalPath().endswith('.cc') or
-                            x.LocalPath().endswith('.gn') or
-                            x.LocalPath().endswith('.gni') or
-                            x.LocalPath().endswith('.h') or
-                            x.LocalPath().endswith('.typemap')):
-    return []
-
-  warnings = []
-  with input_api.gclient_utils.temporary_directory() as tmpdir:
-    gn_path = input_api.os_path.join(
-        input_api.gclient_utils.GetBuildtoolsPlatformBinaryPath(),
-        'gn' + input_api.gclient_utils.GetExeSuffix())
-    cmd = [gn_path, 'gen', '--root=%s' % input_api.change.RepositoryRoot(),
-           '--check', tmpdir]
-    proc = input_api.subprocess.Popen(
-        cmd, stdout=input_api.subprocess.PIPE, stderr=input_api.subprocess.PIPE)
-    proc.wait()
-    if proc.returncode != 0:
-      warnings.append(output_api.PresubmitPromptWarning(
-          'Failed to run "gn gen --check".'))
-  return warnings
+# TODO: make this work after the fix of depot_tools.
+# broken by https://chromium-review.googlesource.com/c/chromium/tools/depot_tools/+/1512058
+# Please see also: crbug.com/939959
+#def CheckGNGenChecked(input_api, output_api):
+#  if not input_api.AffectedFiles(
+#      file_filter=lambda x: x.LocalPath().endswith('.c') or
+#                            x.LocalPath().endswith('.cc') or
+#                            x.LocalPath().endswith('.gn') or
+#                            x.LocalPath().endswith('.gni') or
+#                            x.LocalPath().endswith('.h') or
+#                            x.LocalPath().endswith('.typemap')):
+#    return []
+#
+#  warnings = []
+#  with input_api.gclient_utils.temporary_directory() as tmpdir:
+#    gn_path = input_api.os_path.join(
+#        input_api.gclient_utils.GetBuildtoolsPlatformBinaryPath(),
+#        'gn' + input_api.gclient_utils.GetExeSuffix())
+#    cmd = [gn_path, 'gen', '--root=%s' % input_api.change.RepositoryRoot(),
+#           '--check', tmpdir]
+#    proc = input_api.subprocess.Popen(
+#        cmd, stdout=input_api.subprocess.PIPE, stderr=input_api.subprocess.PIPE)
+#    proc.wait()
+#    if proc.returncode != 0:
+#      warnings.append(output_api.PresubmitPromptWarning(
+#          'Failed to run "gn gen --check".'))
+#  return warnings
 
 
 def CheckChangeOnUpload(input_api, output_api):
@@ -126,7 +129,11 @@ def CheckChangeOnUpload(input_api, output_api):
           r'tools[\\/].*',
       ))
   results += input_api.canned_checks.CheckGNFormatted(input_api, output_api)
-  results += CheckGNGenChecked(input_api, output_api)
+  # TODO: make this work after the fix of depot_tools.
+  # broken by https://chromium-review.googlesource.com/c/chromium/tools/depot_tools/+/1512058
+  # Please see also: crbug.com/939959
+  #
+  # results += CheckGNGenChecked(input_api, output_api)
   return results
 
 
